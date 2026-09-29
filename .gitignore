@@ -17,6 +17,7 @@ dist-ssr
 !.env.*.example
 .env.local
 .env.bootstrap
+.env.edge.local
 .env.edge.production
 supabase/functions/.env
 supabase/.branches

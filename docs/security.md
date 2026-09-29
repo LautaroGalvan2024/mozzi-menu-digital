@@ -45,6 +45,7 @@ Se cargan con `supabase secrets set` y nunca se versionan:
 ```text
 APP_BASE_URL
 APP_ALLOWED_ORIGINS
+APP_SECRET_KEY_NAME
 RATE_LIMIT_HASH_SECRET
 MAINTENANCE_SECRET
 TURNSTILE_ENABLED
@@ -53,7 +54,7 @@ TURNSTILE_SECRET_KEY
 
 `RATE_LIMIT_HASH_SECRET` y `MAINTENANCE_SECRET` requieren al menos 32 bytes aleatorios. Turnstile es opcional: `TURNSTILE_ENABLED=true` exige `TURNSTILE_SECRET_KEY` en Edge y `VITE_TURNSTILE_SITE_KEY` en el frontend. En ese modo el token del widget se verifica obligatoriamente en `create-order`; una comprobación solo en navegador no tiene valor de seguridad. Con el flag falso o ausente, Edge no verifica Turnstile aunque exista una secret residual, por lo que las tres variables deben administrarse como una configuración coherente. Supabase inyecta sus variables administrativas en el runtime; no se copian a Vercel.
 
-El contrato moderno inyectado usa `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. Los dos mapas JSON se leen por su entrada `default`; no existe fallback a `SUPABASE_ANON_KEY` ni `SUPABASE_SERVICE_ROLE_KEY`, y ninguna variable reservada `SUPABASE_*` se escribe en `.env.edge.production`.
+El contrato moderno inyectado usa `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. La publishable key se lee desde `default`; la secret key se lee exclusivamente desde la entrada nombrada por `APP_SECRET_KEY_NAME`, cuyo formato permitido es `^[a-z_][a-z0-9_]{3,63}$`. La selección falla si el nombre o la entrada no existen. No hay fallback a `SUPABASE_ANON_KEY` ni `SUPABASE_SERVICE_ROLE_KEY`, y ninguna variable reservada `SUPABASE_*` se escribe en archivos de entorno.
 
 ### Bootstrap local
 

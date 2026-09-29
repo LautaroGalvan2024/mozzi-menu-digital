@@ -25,21 +25,31 @@ No crees, copies ni edites archivos `.env` manualmente. El asistente usa estos v
 - URL de Supabase: `https://coqkgyaekenxccbxlozo.supabase.co`;
 - aplicación local: `http://localhost:5173`.
 
-Solicita el correo del Super Admin, `sb_publishable_*`, `sb_secret_*`, una URL productiva opcional y el par de Turnstile únicamente si se activa. Los secretos se ingresan de forma oculta. La URL productiva puede omitirse; en ese caso Edge usa localhost y basta volver a ejecutar el asistente cuando exista el dominio.
+Solicita el correo del Super Admin, `sb_publishable_*`, `sb_secret_*`, el nombre exacto de esa secret key cuando no puede recuperarlo, una URL productiva opcional y el par de Turnstile únicamente si se activa. Los secretos se ingresan de forma oculta. El nombre también puede pasarse con `-SupabaseSecretKeyName`. La URL productiva puede omitirse; en ese caso Edge usa localhost y basta volver a ejecutar el asistente cuando exista el dominio.
 
 Genera con UTF-8 sin BOM y verifica con Git:
 
 - `.env.local`: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_BASE_URL` y, condicionalmente, `VITE_TURNSTILE_SITE_KEY`;
 - `.env.bootstrap`: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPER_ADMIN_EMAIL`;
-- `.env.edge.production`: `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `RATE_LIMIT_HASH_SECRET`, `MAINTENANCE_SECRET`, `TURNSTILE_ENABLED` y, condicionalmente, `TURNSTILE_SECRET_KEY`.
+- `.env.edge.local`: la configuración Edge local, siempre con `APP_SECRET_KEY_NAME=default`;
+- `.env.edge.production`: `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `APP_SECRET_KEY_NAME`, `RATE_LIMIT_HASH_SECRET`, `MAINTENANCE_SECRET`, `TURNSTILE_ENABLED` y, condicionalmente, `TURNSTILE_SECRET_KEY`.
 
 No existen consumidores de `ACTION_TOKEN_HASH_SECRET` ni `CRON_SECRET`, por lo que no se generan. Las variables `E2E_*`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_URL`, `SUPABASE_TYPES_OUTPUT` y `SUPABASE_CLI` son opciones de tooling fuera de este setup.
 
-Las Edge Functions consumen el contrato moderno inyectado por Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. Los mapas de claves seleccionan `default`, no tienen fallback legacy y no deben escribirse en `.env.edge.production`. Para servir funciones localmente después de iniciar Supabase:
+Las Edge Functions consumen el contrato moderno inyectado por Supabase: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. La publishable key selecciona `default`; la secret key selecciona el nombre explícito de `APP_SECRET_KEY_NAME`. No hay fallback legacy y los mapas inyectados no deben escribirse en archivos. El asistente preserva un selector existente para no revertir una rotación y, si no puede recuperarlo, solicita el nombre exacto sin suponer `default`. Para servir funciones localmente después de iniciar Supabase:
 
 ```powershell
-supabase functions serve --env-file .env.edge.production
+supabase functions serve --env-file .env.edge.local
 ```
+
+Para rotar la secret key remota sin editar archivos a mano:
+
+1. Creá una nueva secret key nombrada en Supabase, sin borrar todavía la anterior.
+2. Ejecutá `npm run setup:project -- -SupabaseSecretKeyName nombre_nuevo` y confirmá la carga de secretos Edge.
+3. Probá una operación real que pase por una Edge Function y use el cliente administrativo.
+4. Recién entonces eliminá la clave anterior y repetí el smoke test.
+
+Cambiar el selector es una actualización de secretos inmediata; no exige redesplegar funciones salvo que también haya cambios de código pendientes.
 
 ## Reconstrucción de base
 
@@ -76,7 +86,7 @@ El asistente detecta `supabase/.temp/project-ref`; si no coincide, ejecuta `npx 
 npx supabase secrets set --env-file .env.edge.production
 ```
 
-Después ejecuta `npx supabase secrets list --output-format json`, verifica los nombres esperados y muestra únicamente nombres, nunca valores ni digests.
+Después ejecuta `npx supabase secrets list --output-format json`, verifica los nombres esperados y muestra únicamente nombres, nunca valores ni digests. Esa comprobación confirma que existe la variable selectora; la prueba funcional posterior es la que confirma que su valor coincide con una entrada real de `SUPABASE_SECRET_KEYS`.
 
 Turnstile es opcional y se configura como una unidad:
 

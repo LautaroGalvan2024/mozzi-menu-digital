@@ -1,13 +1,17 @@
 import { ApiError } from "./errors.ts";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const KEY_NAME_PATTERN = /^[a-z_][a-z0-9_]{3,63}$/;
 
 function env(name: string): string | undefined {
   const value = Deno.env.get(name)?.trim();
   return value ? value : undefined;
 }
 
-function injectedKey(name: "SUPABASE_PUBLISHABLE_KEYS" | "SUPABASE_SECRET_KEYS"): string {
+function injectedKey(
+  name: "SUPABASE_PUBLISHABLE_KEYS" | "SUPABASE_SECRET_KEYS",
+  keyName: string,
+): string {
   const raw = requireEnv(name);
   let keys: unknown;
   try {
@@ -20,12 +24,22 @@ function injectedKey(name: "SUPABASE_PUBLISHABLE_KEYS" | "SUPABASE_SECRET_KEYS")
     throw new Error(`${name} must be a JSON object`);
   }
 
-  const value = (keys as Record<string, unknown>).default;
+  const value = (keys as Record<string, unknown>)[keyName];
   const expectedPrefix = name === "SUPABASE_PUBLISHABLE_KEYS" ? "sb_publishable_" : "sb_secret_";
   if (typeof value !== "string" || !value.startsWith(expectedPrefix) || /[\r\n]/.test(value)) {
-    throw new Error(`${name} must contain a valid default key`);
+    throw new Error(`${name} must contain a valid ${keyName} key`);
   }
   return value;
+}
+
+function getSecretKeyName(): string {
+  const keyName = requireEnv("APP_SECRET_KEY_NAME");
+  if (!KEY_NAME_PATTERN.test(keyName)) {
+    throw new Error(
+      "APP_SECRET_KEY_NAME must be 4-64 characters, start with a lowercase letter or underscore, and contain only lowercase letters, digits, and underscores",
+    );
+  }
+  return keyName;
 }
 
 export function requireEnv(name: string): string {
@@ -64,12 +78,12 @@ export function getSupabaseUrl(): string {
 }
 
 export function getPublishableKey(): string {
-  return injectedKey("SUPABASE_PUBLISHABLE_KEYS");
+  return injectedKey("SUPABASE_PUBLISHABLE_KEYS", "default");
 }
 
 /** Read only after the caller has been authenticated and authorized. */
 export function getSecretKey(): string {
-  return injectedKey("SUPABASE_SECRET_KEYS");
+  return injectedKey("SUPABASE_SECRET_KEYS", getSecretKeyName());
 }
 
 export function getAppBaseUrl(): string {

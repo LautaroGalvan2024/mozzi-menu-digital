@@ -35,10 +35,11 @@ npm run setup:project
 npm run dev
 ```
 
-`setup:project` solicita el correo real del Super Admin, la publishable key y la secret key modernas de Supabase, una URL productiva opcional y, si se activa, el par de Turnstile. La entrada de secretos es oculta. El asistente genera automáticamente:
+`setup:project` solicita el correo real del Super Admin, la publishable key, la secret key y su nombre en Supabase, una URL productiva opcional y, si se activa, el par de Turnstile. La entrada de valores sensibles es oculta. El nombre puede indicarse sin editar archivos mediante `-SupabaseSecretKeyName`. El asistente genera automáticamente:
 
 - `.env.local`, únicamente con configuración pública del frontend;
 - `.env.bootstrap`, únicamente para el bootstrap local;
+- `.env.edge.local`, para servir las funciones contra Supabase local con la secret key `default`;
 - `.env.edge.production`, únicamente con variables personalizadas de Edge.
 
 El Project Ref `coqkgyaekenxccbxlozo`, su URL y `http://localhost:5173` ya están configurados como valores base. La URL productiva puede dejarse vacía y actualizarse más adelante volviendo a ejecutar el mismo comando. El asistente preserva los secretos internos aleatorios válidos al reejecutarse, comprueba `.gitignore`, detecta el vínculo de Supabase y ofrece —siempre con confirmación— cargar secretos, aplicar migraciones, desplegar funciones y ejecutar el bootstrap. Nunca coloca una secret key en una variable `VITE_*` ni imprime valores sensibles.
@@ -47,9 +48,9 @@ Contrato generado definitivo:
 
 - frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_BASE_URL` y `VITE_TURNSTILE_SITE_KEY` solo si se activa Turnstile;
 - bootstrap: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPER_ADMIN_EMAIL`;
-- Edge custom: `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `RATE_LIMIT_HASH_SECRET`, `MAINTENANCE_SECRET`, `TURNSTILE_ENABLED` y `TURNSTILE_SECRET_KEY` solo si se activa Turnstile.
+- Edge custom: `APP_BASE_URL`, `APP_ALLOWED_ORIGINS`, `APP_SECRET_KEY_NAME`, `RATE_LIMIT_HASH_SECRET`, `MAINTENANCE_SECRET`, `TURNSTILE_ENABLED` y `TURNSTILE_SECRET_KEY` solo si se activa Turnstile.
 
-Las variables de E2E (`E2E_*`) y generación de tipos (`SUPABASE_PROJECT_ID`, `SUPABASE_DB_URL`, `SUPABASE_TYPES_OUTPUT`, `SUPABASE_CLI`) son tooling opcional y no pertenecen a esos tres archivos.
+Las variables de E2E (`E2E_*`) y generación de tipos (`SUPABASE_PROJECT_ID`, `SUPABASE_DB_URL`, `SUPABASE_TYPES_OUTPUT`, `SUPABASE_CLI`) son tooling opcional y no pertenecen a esos cuatro archivos.
 
 ## Supabase local
 
@@ -60,11 +61,11 @@ supabase start
 supabase status
 supabase db reset
 supabase test db
-supabase functions serve --env-file .env.edge.production
+supabase functions serve --env-file .env.edge.local
 supabase stop
 ```
 
-El asistente crea `.env.edge.production`; no lo copies ni completes a mano. El runtime moderno de Supabase inyecta `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. Los dos últimos son mapas JSON y las funciones usan la clave `default`; no se guardan en `.env.edge.production` porque el prefijo `SUPABASE_` está reservado. El esquema `private` no debe agregarse a `api.schemas`.
+El asistente crea los archivos Edge; no los copies ni completes a mano. El runtime moderno de Supabase inyecta `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y `SUPABASE_SECRET_KEYS`. Los dos últimos son mapas JSON: la publishable key usa `default` y la secret key usa la entrada indicada por `APP_SECRET_KEY_NAME`. Los mapas no se guardan en archivos porque el prefijo `SUPABASE_` está reservado. Para rotar una secret key, creá primero la nueva clave, reejecutá `npm run setup:project -- -SupabaseSecretKeyName nombre_nuevo`, cargá los secretos y realizá una prueba funcional; eliminá la clave anterior únicamente después de que esa prueba sea satisfactoria. En una reejecución sin parámetro el asistente preserva el selector existente; si no puede recuperarlo, solicita el nombre exacto y nunca supone `default`. El esquema `private` no debe agregarse a `api.schemas`.
 
 ### Migraciones
 
@@ -192,7 +193,7 @@ supabase test db
 
 - Las 22 migraciones se aplicaron en orden al proyecto vinculado. Las 9 suites suman 217 aserciones pgTAP y se ejecutan dentro de transacciones con `ROLLBACK`; incluyen alta inicial y reemplazo seguro de horarios, aislamiento tenant, pedidos, Storage y la matriz exacta de `EXECUTE`. La verificación confirmó 19/19 tablas públicas con RLS, cero grants de tabla para `anon`, cero grants de cliente sobre `private`, ningún `SECURITY DEFINER` sin `search_path` fijo, funciones futuras sin `EXECUTE` implícito y `get_public_menu` como única RPC disponible para `anon`.
 - En este host no hay Docker ni Podman; por eso no se pudieron repetir `supabase start`, `supabase db reset`, `supabase test db` ni la generación local de tipos contra el stack oficial. `supabase db lint` tampoco estuvo disponible por falta de `plpgsql_check`.
-- Las Edge Functions sí se verificaron con Deno: formato de 33 archivos, lint de 32, typecheck y 28/28 tests del contrato moderno y la lógica compartida.
+- Las Edge Functions sí se verificaron con Deno: formato de 34 archivos, lint de 33, typecheck y 30/30 tests del contrato moderno y la lógica compartida.
 - El proyecto vinculado tiene las migraciones y Edge Functions desplegadas. El flujo live menú → carrito → checkout → creación → confirmación se verificó contra el restaurante de prueba; la prueba automatizada no abre ni envía WhatsApp.
 
 ## Deploy

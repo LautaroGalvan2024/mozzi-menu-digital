@@ -179,9 +179,9 @@ Ante corrupción, detené escrituras, preservá evidencia y restaurá a un entor
 ## Rotación e incidentes
 
 - Rotá `RATE_LIMIT_HASH_SECRET` y `MAINTENANCE_SECRET` por incidente o calendario. La rotación del primero corta continuidad con hashes anteriores.
-- Rotá claves administrativas inmediatamente si pudieron aparecer en Git, logs, Vercel o una terminal compartida.
+- Rotá claves administrativas inmediatamente si pudieron aparecer en Git, logs, Vercel o una terminal compartida. Creá primero una secret key nombrada, mantené la anterior activa, ejecutá `npm run setup:project -- -SupabaseSecretKeyName nombre_nuevo`, cargá los secretos Edge y validá una operación real antes de revocar la anterior.
 - Revocá sesiones y factores comprometidos desde Auth.
-- Volvé a desplegar funciones y verificá que el secreto anterior ya no funcione.
+- Volvé a desplegar funciones solamente si también cambió el código; un cambio de secretos se aplica sin redeploy. Después de revocar, repetí el smoke test y verificá que la clave anterior ya no figure activa.
 - Conservá auditoría y una línea temporal del incidente.
 
 Ver [seguridad](./security.md) para el procedimiento completo de respuesta y [deployment](./deployment.md) para reconstrucción.

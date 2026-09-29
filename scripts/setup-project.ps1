@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param()
+param(
+  [ValidatePattern('^[a-z_][a-z0-9_]{3,63}$')]
+  [string]$SupabaseSecretKeyName
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -16,6 +19,7 @@ $OverallFailure = $false
 $EnvironmentTargets = @(
   '.env.local',
   '.env.bootstrap',
+  '.env.edge.local',
   '.env.edge.production'
 )
 $RequiredIgnoreRules = @(
@@ -25,6 +29,7 @@ $RequiredIgnoreRules = @(
   '!.env.*.example',
   '.env.local',
   '.env.bootstrap',
+  '.env.edge.local',
   '.env.edge.production',
   'supabase/functions/.env'
 )
@@ -532,6 +537,35 @@ try {
   $existingEdgePath = Join-Path $ProjectRoot '.env.edge.production'
   $rateLimitSecret = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'RATE_LIMIT_HASH_SECRET'
   $maintenanceSecret = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'MAINTENANCE_SECRET'
+  $existingSecretKeyName = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'APP_SECRET_KEY_NAME'
+  $existingEdgeHasContent = (
+    (Test-Path -LiteralPath $existingEdgePath -PathType Leaf) -and
+    (Get-Item -LiteralPath $existingEdgePath -Force).Length -gt 0
+  )
+  if ($PSBoundParameters.ContainsKey('SupabaseSecretKeyName')) {
+    $secretKeyName = $SupabaseSecretKeyName
+    if (
+      -not [string]::IsNullOrWhiteSpace($existingSecretKeyName) -and
+      $existingSecretKeyName -ne $secretKeyName
+    ) {
+      Write-Warning "Se cambiara APP_SECRET_KEY_NAME de '$existingSecretKeyName' a '$secretKeyName'."
+      if (-not (Read-Confirmation -Prompt 'Confirma la rotacion del selector de secret key')) {
+        throw 'Se cancelo la rotacion del selector de secret key.'
+      }
+    }
+  }
+  elseif (-not [string]::IsNullOrWhiteSpace($existingSecretKeyName)) {
+    $secretKeyName = $existingSecretKeyName
+  }
+  else {
+    $secretKeyName = Read-RequiredText -Prompt 'Nombre exacto de la Supabase Secret Key (por ejemplo, default)' -Validator {
+      param($candidate)
+      $candidate -match '^[a-z_][a-z0-9_]{3,63}$'
+    } -InvalidMessage 'El nombre debe tener entre 4 y 64 caracteres, comenzar con letra minuscula o guion bajo y contener solo letras minusculas, digitos o guiones bajos.'
+  }
+  if ($secretKeyName -notmatch '^[a-z_][a-z0-9_]{3,63}$') {
+    throw 'APP_SECRET_KEY_NAME debe tener entre 4 y 64 caracteres, comenzar con letra minuscula o guion bajo y contener solo letras minusculas, digitos o guiones bajos.'
+  }
   $rateLimitSecretValid = Test-RandomSecret -Value $rateLimitSecret
   $maintenanceSecretValid = (Test-RandomSecret -Value $maintenanceSecret) -and $maintenanceSecret -ne $rateLimitSecret
   $secretsToGenerate = New-Object System.Collections.Generic.List[string]
@@ -541,10 +575,10 @@ try {
   if (-not $maintenanceSecretValid) {
     $secretsToGenerate.Add('MAINTENANCE_SECRET')
   }
-  $setupAppearsToBeARerun = Test-Path -LiteralPath (Join-Path $ProjectRoot '.env.local') -PathType Leaf
-  if (-not $setupAppearsToBeARerun -and (Test-Path -LiteralPath $existingEdgePath -PathType Leaf)) {
-    $setupAppearsToBeARerun = (Get-Item -LiteralPath $existingEdgePath -Force).Length -gt 0
-  }
+  $setupAppearsToBeARerun = (
+    (Test-Path -LiteralPath (Join-Path $ProjectRoot '.env.local') -PathType Leaf) -or
+    $existingEdgeHasContent
+  )
   if ($setupAppearsToBeARerun -and $secretsToGenerate.Count -gt 0) {
     Write-Warning ('La reejecucion necesita reemplazar estos secretos internos: ' + ($secretsToGenerate -join ', '))
     Write-Warning 'La rotacion puede cortar la continuidad del rate limit o invalidar integraciones de mantenimiento.'
@@ -584,6 +618,7 @@ try {
   $edgeValues = [ordered]@{
     APP_BASE_URL = $edgeBaseUrl
     APP_ALLOWED_ORIGINS = $allowedOrigins -join ','
+    APP_SECRET_KEY_NAME = $secretKeyName
     RATE_LIMIT_HASH_SECRET = $rateLimitSecret
     MAINTENANCE_SECRET = $maintenanceSecret
     TURNSTILE_ENABLED = $(if ($turnstileEnabled) { 'true' } else { 'false' })
@@ -591,10 +626,22 @@ try {
   if ($turnstileEnabled) {
     $edgeValues.TURNSTILE_SECRET_KEY = $TurnstileSecretSecure
   }
+  $localEdgeValues = [ordered]@{
+    APP_BASE_URL = $LocalAppUrl
+    APP_ALLOWED_ORIGINS = $LocalAppUrl
+    APP_SECRET_KEY_NAME = 'default'
+    RATE_LIMIT_HASH_SECRET = $rateLimitSecret
+    MAINTENANCE_SECRET = $maintenanceSecret
+    TURNSTILE_ENABLED = $(if ($turnstileEnabled) { 'true' } else { 'false' })
+  }
+  if ($turnstileEnabled) {
+    $localEdgeValues.TURNSTILE_SECRET_KEY = $TurnstileSecretSecure
+  }
   $expectedEdgeSecretNames = @($edgeValues.Keys)
 
   Write-EnvironmentFile -RelativePath '.env.local' -Values $frontendValues
   Write-EnvironmentFile -RelativePath '.env.bootstrap' -Values $bootstrapValues
+  Write-EnvironmentFile -RelativePath '.env.edge.local' -Values $localEdgeValues
   Write-EnvironmentFile -RelativePath '.env.edge.production' -Values $edgeValues
 
   $SupabaseSecretSecure.Dispose()
@@ -607,10 +654,11 @@ try {
   $maintenanceSecret = $null
   $frontendValues = $null
   $bootstrapValues = $null
+  $localEdgeValues = $null
   $edgeValues = $null
   [GC]::Collect()
 
-  Write-Host 'Los tres archivos de entorno se generaron y git confirmo que estan ignorados.'
+  Write-Host 'Los cuatro archivos de entorno se generaron y git confirmo que estan ignorados.'
 
   $linkedRef = Get-LinkedProjectRef
   if ($linkedRef -ne $ProjectRef) {
