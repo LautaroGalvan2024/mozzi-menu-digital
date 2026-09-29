@@ -67,26 +67,82 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
   }
 
   const imageUrl = publicAssetUrl(product.imagePath)
+  const titleId = `product-dialog-title-${product.id}`
   return (
-    <dialog ref={dialogRef} className="product-dialog" onClick={(event) => { if (event.target === dialogRef.current) dialogRef.current?.close() }}>
-      <div className="relative max-h-[92vh] overflow-y-auto rounded-t-[2rem] bg-white sm:rounded-[2rem]">
-        <button className="absolute right-4 top-4 z-10 grid h-11 w-11 place-items-center rounded-full bg-white/90 shadow" onClick={() => dialogRef.current?.close()} aria-label="Cerrar"><X aria-hidden /></button>
-        {imageUrl ? <img src={imageUrl} className="aspect-[16/10] w-full object-cover" alt={product.name} /> : <div className="grid aspect-[16/8] place-items-center bg-orange-50 text-5xl" role="img" aria-label="Sin imagen">🍽️</div>}
-        <div className="p-5 sm:p-7">
-          <h2 className="font-display text-2xl font-bold">{product.name}</h2>
-          <p className="mt-2 text-sm leading-6 text-stone-600">{product.description}</p>
-          <p className="mt-4 text-xl font-bold">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
-          <div className="mt-6 space-y-6">
-            {product.optionGroups.map((group) => (
-              <fieldset key={group.id}>
-                <legend className="font-semibold">{group.name} <span className="ml-1 text-xs font-normal text-stone-500">{group.required ? 'Obligatorio' : 'Opcional'} · {group.maxSelect === 1 ? 'Elegí una' : `Hasta ${group.maxSelect}`}</span></legend>
-                <div className="mt-2 space-y-2">{group.options.map((option) => <label key={option.id} className="flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-xl border border-stone-200 px-3 hover:bg-stone-50"><span className="flex items-center gap-3"><input type={group.maxSelect === 1 ? 'radio' : 'checkbox'} name={group.id} checked={selections[group.id]?.includes(option.id) ?? false} onChange={() => toggle(group.id, option.id, group.maxSelect)} />{option.name}</span>{option.priceDeltaCents !== 0 ? <span className="text-sm font-semibold">+ {formatMoney(option.priceDeltaCents, restaurant.currencyCode, restaurant.locale)}</span> : null}</label>)}</div>
-              </fieldset>
-            ))}
-            <label className="field"><span>Observaciones para este producto</span><textarea maxLength={300} rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ej.: sin cebolla" /></label>
-            {error ? <p className="form-error" role="alert">{error}</p> : null}
-            <div className="flex items-center justify-between gap-4"><div className="flex items-center rounded-xl border border-stone-300"><button className="quantity-button" aria-label="Restar uno" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus aria-hidden /></button><span className="w-10 text-center font-bold" aria-live="polite">{quantity}</span><button className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(20, value + 1))}><Plus aria-hidden /></button></div><button className="button-primary flex-1" onClick={add}>Agregar · {formatMoney(unitTotal * quantity, restaurant.currencyCode, restaurant.locale)}</button></div>
+    <dialog
+      ref={dialogRef}
+      className="product-dialog"
+      aria-labelledby={titleId}
+      onClick={(event) => { if (event.target === dialogRef.current) dialogRef.current?.close() }}
+    >
+      <div className="relative flex max-h-[92dvh] flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl sm:rounded-[2rem]">
+        <div className="min-h-0 overflow-y-auto overscroll-contain">
+          <div className="absolute left-1/2 top-2 z-10 h-1 w-10 -translate-x-1/2 rounded-full bg-white/80 shadow-sm sm:hidden" aria-hidden />
+          <button
+            type="button"
+            className="absolute right-4 top-4 z-10 grid h-11 w-11 place-items-center rounded-full bg-stone-950/80 text-white shadow-lg backdrop-blur transition hover:bg-stone-950"
+            onClick={() => dialogRef.current?.close()}
+            aria-label="Cerrar"
+          >
+            <X className="h-5 w-5" aria-hidden />
+          </button>
+          {imageUrl ? (
+            <img src={imageUrl} className="h-52 w-full object-cover sm:h-64" alt={product.name} />
+          ) : (
+            <div className="grid h-44 place-items-center bg-orange-50 text-5xl sm:h-56" role="img" aria-label="Sin imagen">🍽️</div>
+          )}
+          <div className="p-5 pb-6 sm:p-7 sm:pb-8">
+            <div className="pr-10">
+              <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.name}</h2>
+              <p className="mt-2 text-sm leading-6 text-stone-600">{product.description}</p>
+              <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
+            </div>
+            <div className="mt-6 space-y-6">
+              {product.optionGroups.map((group) => (
+                <fieldset key={group.id}>
+                  <legend className="font-semibold text-stone-950">
+                    {group.name}
+                    <span className="ml-1 text-xs font-normal text-stone-500">{group.required ? 'Obligatorio' : 'Opcional'} · {group.maxSelect === 1 ? 'Elegí una' : `Hasta ${group.maxSelect}`}</span>
+                  </legend>
+                  <div className="mt-2 space-y-2">
+                    {group.options.map((option) => (
+                      <label key={option.id} className="flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-xl border border-stone-200 px-3 py-2 transition hover:border-stone-300 hover:bg-stone-50 has-checked:border-[var(--brand)] has-checked:bg-orange-50/50">
+                        <span className="flex min-w-0 items-center gap-3">
+                          <input
+                            className="h-4 w-4 shrink-0 accent-[var(--brand)]"
+                            type={group.maxSelect === 1 ? 'radio' : 'checkbox'}
+                            name={group.id}
+                            checked={selections[group.id]?.includes(option.id) ?? false}
+                            onChange={() => toggle(group.id, option.id, group.maxSelect)}
+                          />
+                          <span className="text-sm font-medium text-stone-800">{option.name}</span>
+                        </span>
+                        {option.priceDeltaCents !== 0 ? <span className="shrink-0 text-sm font-semibold text-stone-700">+ {formatMoney(option.priceDeltaCents, restaurant.currencyCode, restaurant.locale)}</span> : null}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ))}
+              <label className="field">
+                <span>Observaciones para este producto</span>
+                <textarea maxLength={300} rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ej.: sin cebolla" />
+              </label>
+              {error ? <p className="form-error" role="alert">{error}</p> : null}
+            </div>
           </div>
+        </div>
+        <div
+          className="sticky bottom-0 z-10 flex shrink-0 items-center gap-3 border-t border-stone-200 bg-white/95 px-4 pb-4 pt-3 shadow-[0_-10px_28px_rgba(41,37,36,.08)] backdrop-blur sm:gap-4 sm:px-7 sm:pb-6 sm:pt-4"
+          style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+        >
+          <div className="flex shrink-0 items-center overflow-hidden rounded-xl border border-stone-300 bg-white">
+            <button type="button" className="quantity-button" aria-label="Restar uno" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus aria-hidden /></button>
+            <span className="w-8 text-center font-bold text-stone-950 sm:w-10" aria-live="polite">{quantity}</span>
+            <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(20, value + 1))}><Plus aria-hidden /></button>
+          </div>
+          <button type="button" className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
+            <span className="truncate">Agregar · {formatMoney(unitTotal * quantity, restaurant.currencyCode, restaurant.locale)}</span>
+          </button>
         </div>
       </div>
     </dialog>
