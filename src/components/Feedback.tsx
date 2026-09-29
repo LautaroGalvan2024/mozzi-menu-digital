@@ -4,8 +4,8 @@ import type { ReactNode } from 'react'
 export function LoadingScreen({ label = 'Cargando…' }: { label?: string }) {
   return (
     <div className="grid min-h-[50vh] place-items-center" role="status">
-      <div className="flex items-center gap-3 text-stone-600">
-        <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden />
+      <div className="flex items-center gap-3 rounded-full border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-stone-600 shadow-sm">
+        <LoaderCircle className="h-4 w-4 animate-spin text-orange-600" aria-hidden />
         <span>{label}</span>
       </div>
     </div>
@@ -22,7 +22,7 @@ export function ErrorPanel({
   action?: ReactNode
 }) {
   return (
-    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950" role="alert">
+    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950 shadow-sm" role="alert">
       <div className="flex gap-3">
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
         <div>
@@ -45,7 +45,7 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="rounded-3xl border border-dashed border-stone-300 bg-white p-10 text-center">
+    <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center shadow-sm sm:p-10">
       <h2 className="font-display text-xl font-semibold text-stone-900">{title}</h2>
       <p className="mx-auto mt-2 max-w-xl text-sm text-stone-600">{description}</p>
       {action ? <div className="mt-5">{action}</div> : null}
