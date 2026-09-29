@@ -1,0 +1,7 @@
+import { useQuery } from '@tanstack/react-query'
+import { Shield,User } from 'lucide-react'
+import { ErrorPanel,LoadingScreen } from '../../components/Feedback'
+import { PageHeader } from '../../components/PageHeader'
+import { listPlatformDirectoryUsers } from './platform-directory'
+
+export function PlatformUsersPage(){const query=useQuery({queryKey:['platform-users'],queryFn:listPlatformDirectoryUsers});if(query.isLoading)return <LoadingScreen/>;if(query.error)return <ErrorPanel>{query.error.message}</ErrorPanel>;return <><PageHeader eyebrow="Accesos" title="Usuarios de plataforma" description="El rol se lee desde tablas protegidas, nunca desde localStorage ni metadata editable."/><div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900"><table className="data-table data-table-dark"><thead><tr><th>Usuario</th><th>Rol plataforma</th><th>Membresías</th><th>Estado</th></tr></thead><tbody>{query.data?.map((profile)=><tr key={profile.id}><td><span className="flex items-center gap-3">{profile.platform_user_roles.length?<Shield className="h-5 w-5 text-orange-400"/>:<User className="h-5 w-5 text-slate-500"/>}<span><strong className="block">{profile.full_name}</strong><small>{profile.email}</small></span></span></td><td>{profile.platform_user_roles.map((role)=>role.role).join(', ')||'—'}</td><td>{profile.restaurant_members.map((member)=>`${member.restaurants?.name??'Restaurante'} (${member.role})`).join(' · ')||'—'}</td><td>{profile.active?'Activo':'Desactivado'}</td></tr>)}</tbody></table></div></>}

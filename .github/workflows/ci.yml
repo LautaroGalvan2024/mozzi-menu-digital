@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run static security checks
+        run: npm run security:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit and integration tests
+        run: npm run test
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke tests
+        run: npm run test:e2e
+
+      - name: Production build
+        run: npm run build
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+  database-security:
+    name: Supabase database and RLS tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v3
+
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Rebuild database from migrations
+        run: supabase db reset --local
+
+      - name: Run pgTAP tests
+        run: supabase test db
+
+      - name: Stop local Supabase
+        if: always()
+        continue-on-error: true
+        run: supabase stop --no-backup
+
+  edge-functions:
+    name: Edge Functions format, lint, types and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: supabase/functions
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check formatting
+        run: deno fmt --check
+
+      - name: Lint Edge Functions
+        run: deno lint
+
+      - name: Typecheck Edge Functions
+        run: deno task check
+
+      - name: Test Edge Functions
+        run: deno task test
+
+  secret-scan:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required by gitleaks-action only when this repository belongs to an organization.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
