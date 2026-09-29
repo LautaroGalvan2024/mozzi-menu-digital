@@ -1,7 +1,18 @@
-import { Radio } from 'lucide-react'
 import { statusLabel, type AdminOrderRow } from './orderSchemas'
 
 export function StatusPill({status}:{status:AdminOrderRow['status']}) {
-  const colors:Record<AdminOrderRow['status'],string>={generated:'bg-amber-100 text-amber-800',whatsapp_opened:'bg-purple-100 text-purple-800',accepted:'bg-blue-100 text-blue-800',completed:'bg-emerald-100 text-emerald-800',cancelled:'bg-red-100 text-red-800',expired:'bg-stone-200 text-stone-700'}
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${colors[status]}`}><Radio className="h-3 w-3" aria-hidden/>{statusLabel[status]}</span>
+  const colors: Record<AdminOrderRow['status'], { badge: string; dot: string }> = {
+    generated: { badge: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
+    whatsapp_opened: { badge: 'border-violet-200 bg-violet-50 text-violet-800', dot: 'bg-violet-500' },
+    accepted: { badge: 'border-blue-200 bg-blue-50 text-blue-800', dot: 'bg-blue-500' },
+    completed: { badge: 'border-emerald-200 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500' },
+    cancelled: { badge: 'border-red-200 bg-red-50 text-red-800', dot: 'bg-red-500' },
+    expired: { badge: 'border-stone-300 bg-stone-100 text-stone-700', dot: 'bg-stone-500' },
+  }
+  return (
+    <span className={`status-badge whitespace-nowrap ${colors[status].badge}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${colors[status].dot}`} aria-hidden />
+      {statusLabel[status]}
+    </span>
+  )
 }

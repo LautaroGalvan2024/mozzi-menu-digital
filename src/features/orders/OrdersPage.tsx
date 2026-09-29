@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
 import { EmptyState, ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { FilterBar } from '../../components/FilterBar'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { orderSearchFilter } from '../../lib/orders'
@@ -192,7 +193,7 @@ export function OrdersPage() {
             disabled={!rows.length || exporting || Boolean(dateError)}
             onClick={() => void exportCsv()}
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-4 w-4" aria-hidden />
             {exporting ? 'Exportando…' : 'Exportar resultados'}
           </button>
         }
@@ -202,11 +203,11 @@ export function OrdersPage() {
           {exportError}
         </p>
       ) : null}
-      <section className="mb-5 grid gap-3 rounded-3xl border border-stone-200 bg-white p-4 md:grid-cols-6">
-        <label className="field md:col-span-2">
+      <FilterBar className="mb-5 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <label className="field min-w-0 md:col-span-2">
           <span>Buscar</span>
           <span className="relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-stone-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
             <input
               className="!pl-9"
               value={search}
@@ -218,7 +219,7 @@ export function OrdersPage() {
             />
           </span>
         </label>
-        <label className="field">
+        <label className="field min-w-0">
           <span>Estado</span>
           <select
             value={status}
@@ -235,7 +236,7 @@ export function OrdersPage() {
             ))}
           </select>
         </label>
-        <label className="field">
+        <label className="field min-w-0">
           <span>Modalidad</span>
           <select
             value={fulfillment}
@@ -249,7 +250,7 @@ export function OrdersPage() {
             <option value="pickup">Retiro</option>
           </select>
         </label>
-        <label className="field">
+        <label className="field min-w-0">
           <span>Desde</span>
           <input
             type="date"
@@ -262,7 +263,7 @@ export function OrdersPage() {
             }}
           />
         </label>
-        <label className="field">
+        <label className="field min-w-0">
           <span>Hasta</span>
           <input
             type="date"
@@ -275,7 +276,7 @@ export function OrdersPage() {
             }}
           />
         </label>
-      </section>
+      </FilterBar>
       {dateError ? (
         <p className="form-error mb-5" role="alert">{dateError}</p>
       ) : rows.length === 0 ? (
@@ -285,15 +286,15 @@ export function OrdersPage() {
         />
       ) : (
         <>
-          <div className="hidden overflow-hidden rounded-3xl border border-stone-200 bg-white md:block">
-            <table className="data-table">
+          <div className="surface-card hidden overflow-hidden xl:block">
+            <table className="data-table orders-table">
               <thead>
                 <tr>
                   <th>Pedido</th>
                   <th>Cliente</th>
                   <th>Estado</th>
                   <th>Modalidad</th>
-                  <th>Total</th>
+                  <th className="text-right">Total</th>
                   <th>Creado</th>
                   <th><span className="sr-only">Abrir</span></th>
                 </tr>
@@ -301,30 +302,48 @@ export function OrdersPage() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td className="font-bold">{row.display_number}</td>
-                    <td><strong className="block">{row.customer_name}</strong><small>{row.customer_phone}</small></td>
+                    <td className="font-display font-bold text-stone-950">{row.display_number}</td>
+                    <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
                     <td><StatusPill status={row.status} /></td>
-                    <td>{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
-                    <td className="font-semibold">{formatMoney(row.total_cents, row.currency_code)}</td>
-                    <td>{new Date(row.created_at).toLocaleString('es-AR')}</td>
-                    <td><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" /></Link></td>
+                    <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
+                    <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
+                    <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
+                    <td><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="space-y-3 md:hidden">
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden">
             {rows.map((row) => (
-              <Link to={`/admin/pedidos/${row.id}`} className="block rounded-2xl border border-stone-200 bg-white p-4" key={row.id}>
-                <div className="flex justify-between"><strong>{row.display_number}</strong><StatusPill status={row.status} /></div>
-                <p className="mt-3 font-semibold">{row.customer_name}</p>
-                <div className="mt-2 flex justify-between text-sm text-stone-500"><span>{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</span><strong className="text-stone-900">{formatMoney(row.total_cents, row.currency_code)}</strong></div>
+              <Link
+                to={`/admin/pedidos/${row.id}`}
+                className="surface-card group block p-4 transition duration-150 hover:border-orange-300 hover:shadow-md active:translate-y-px"
+                key={row.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <strong className="font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
+                  <StatusPill status={row.status} />
+                </div>
+                <div className="mt-4 min-w-0">
+                  <p className="truncate font-semibold text-stone-900">{row.customer_name}</p>
+                  <p className="mt-0.5 truncate text-xs text-stone-500">{row.customer_phone}</p>
+                </div>
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 border-t border-stone-100 pt-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-stone-700">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</p>
+                    <p className="mt-0.5 truncate text-xs text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</p>
+                  </div>
+                  <strong className="whitespace-nowrap text-right text-sm tabular-nums text-stone-950">
+                    {formatMoney(row.total_cents, row.currency_code)}
+                  </strong>
+                </div>
               </Link>
             ))}
           </div>
-          <div className="mt-5 flex items-center justify-between">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-stone-500">{query.data?.count ?? 0} resultados</p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex">
               <button className="button-secondary" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button>
               <button className="button-secondary" disabled={(page + 1) * PAGE_SIZE >= (query.data?.count ?? 0)} onClick={() => setPage((value) => value + 1)}>Siguiente</button>
             </div>

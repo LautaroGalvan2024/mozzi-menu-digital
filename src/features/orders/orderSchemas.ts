@@ -6,4 +6,4 @@ export const itemOptionSchema=z.object({id:z.string().uuid(),order_item_id:z.str
 export const eventSchema=z.object({id:z.string().uuid(),order_id:z.string().uuid(),event_type:z.string(),from_status:z.enum(['generated','whatsapp_opened','accepted','completed','cancelled','expired']).nullable(),to_status:z.enum(['generated','whatsapp_opened','accepted','completed','cancelled','expired']).nullable(),actor_type:z.enum(['customer','authenticated_user','system']),actor_user_id:z.string().uuid().nullable(),created_at:z.string()})
 export type AdminOrderRow=z.infer<typeof adminOrderSchema>
 
-export const statusLabel:Record<AdminOrderRow['status'],string>={generated:'Generado',whatsapp_opened:'WhatsApp abierto',accepted:'Tomado',completed:'Completado',cancelled:'Cancelado',expired:'Vencido'}
+export const statusLabel:Record<AdminOrderRow['status'],string>={generated:'Generado',whatsapp_opened:'WhatsApp abierto',accepted:'Tomado',completed:'Completado',cancelled:'Cancelado',expired:'Expirado'}

@@ -1,10 +1,21 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ClipboardList, Copy, ExternalLink, ShoppingBag, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  Copy,
+  ExternalLink,
+  MessageCircle,
+  ShoppingBag,
+  XCircle,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { MetricCard } from '../../components/MetricCard'
 import { PageHeader } from '../../components/PageHeader'
+import { SectionCard } from '../../components/SectionCard'
 import { env } from '../../lib/env'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
@@ -79,26 +90,103 @@ export function AdminDashboardPage() {
   const metrics = query.data
   const publicUrl = `${env.appBaseUrl}/r/${selected.slug}`
   const stats = [
-    ['Creados', metrics.generated, ClipboardList, 'text-amber-700 bg-amber-100'],
-    ['Tomados', metrics.accepted, ShoppingBag, 'text-blue-700 bg-blue-100'],
-    ['Completados', metrics.completed, CheckCircle2, 'text-emerald-700 bg-emerald-100'],
-    ['Cancelados', metrics.cancelled, XCircle, 'text-red-700 bg-red-100'],
+    ['Creados', metrics.generated, ClipboardList, 'amber'],
+    ['WhatsApp abierto', metrics.whatsappOpened, MessageCircle, 'orange'],
+    ['Tomados', metrics.accepted, ShoppingBag, 'blue'],
+    ['Completados', metrics.completed, CheckCircle2, 'emerald'],
+    ['Cancelados', metrics.cancelled, XCircle, 'red'],
+    ['Expirados', metrics.expired, Clock3, 'orange'],
   ] as const
   const fulfillment = [
     ['Envío', metrics.byFulfillment.delivery ?? 0],
     ['Retiro', metrics.byFulfillment.pickup ?? 0],
   ] as const
 
-  return <>
-    <PageHeader eyebrow="Hoy" title={`Hola, ${selected.name}`} description="Las métricas usan el día local del restaurante. Los pedidos generados no se cuentan como ventas confirmadas." actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos</Link>} />
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label,value,Icon,color]) => <article className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm" key={label}><span className={`grid h-11 w-11 place-items-center rounded-2xl ${color}`}><Icon className="h-5 w-5" aria-hidden /></span><p className="mt-5 text-sm text-stone-500">{label}</p><p className="font-display text-3xl font-bold">{value}</p></article>)}</section>
-    <section className="mt-6 grid gap-4 md:grid-cols-2">
-      <article className="rounded-3xl bg-stone-950 p-6 text-white"><p className="text-sm text-stone-400">Importe de pedidos tomados</p><p className="mt-2 font-display text-4xl font-bold">{formatMoney(metrics.acceptedAmountCents,restaurant.currency_code,restaurant.locale)}</p><p className="mt-5 text-sm text-stone-400">Importe completado</p><p className="mt-1 font-display text-2xl font-bold">{formatMoney(metrics.completedAmountCents,restaurant.currency_code,restaurant.locale)}</p></article>
-      <article className="rounded-3xl border border-stone-200 bg-white p-6"><h2 className="font-display text-xl font-bold">Modalidad</h2><dl className="mt-4 space-y-3">{fulfillment.map(([label,value])=><div className="flex justify-between" key={label}><dt className="text-stone-600">{label}</dt><dd className="font-bold">{value}</dd></div>)}</dl><p className="mt-5 text-xs text-stone-500">WhatsApp abierto: {metrics.whatsappOpened} · Vencidos: {metrics.expired}</p></article>
-    </section>
-    <section className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-      <article className="rounded-3xl border border-stone-200 bg-white p-6"><h2 className="font-display text-xl font-bold">Medios de pago</h2>{metrics.byPaymentMethod.length?<div className="mt-4 space-y-3">{metrics.byPaymentMethod.map((method)=><div className="flex items-center justify-between gap-4 rounded-xl bg-stone-50 p-3" key={method.name}><div><strong>{method.name}</strong><p className="text-xs text-stone-500">{method.count} pedidos</p></div><strong>{formatMoney(method.amountCents,restaurant.currency_code,restaurant.locale)}</strong></div>)}</div>:<p className="mt-4 text-sm text-stone-500">Todavía no hay pedidos hoy.</p>}</article>
-      <article className="rounded-3xl border border-stone-200 bg-white p-6"><h2 className="font-display text-xl font-bold">Tu menú público</h2><p className="mt-2 break-all text-sm text-stone-600">{publicUrl}</p><div className="mt-5 flex flex-wrap gap-2"><button className="button-secondary" onClick={() => void navigator.clipboard.writeText(publicUrl).then(() => setCopied(true))}><Copy className="h-4 w-4" aria-hidden />{copied ? 'Copiado' : 'Copiar link'}</button><a className="button-secondary" target="_blank" rel="noreferrer" href={publicUrl}><ExternalLink className="h-4 w-4" aria-hidden />Abrir menú</a></div></article>
-    </section>
-  </>
+  return (
+    <>
+      <PageHeader
+        eyebrow="Hoy"
+        title={`Hola, ${selected.name}`}
+        description="Las métricas usan el día local del restaurante. Los pedidos generados no se cuentan como ventas confirmadas."
+        actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos</Link>}
+      />
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.5fr)]">
+        <article className="flex min-h-full flex-col justify-between overflow-hidden rounded-2xl bg-stone-950 p-6 text-white shadow-lg shadow-stone-950/10 sm:p-7">
+          <div>
+            <p className="text-sm font-medium text-stone-400">Importe de pedidos tomados</p>
+            <p className="mt-3 font-display text-4xl font-bold tracking-tight sm:text-5xl">
+              {formatMoney(metrics.acceptedAmountCents, restaurant.currency_code, restaurant.locale)}
+            </p>
+          </div>
+          <div className="mt-8 rounded-xl border border-white/10 bg-white/5 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[.12em] text-stone-400">Importe completado</p>
+            <p className="mt-1.5 font-display text-2xl font-bold tracking-tight">
+              {formatMoney(metrics.completedAmountCents, restaurant.currency_code, restaurant.locale)}
+            </p>
+          </div>
+        </article>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {stats.map(([label, value, Icon, tone]) => (
+            <MetricCard label={label} value={value} icon={Icon} tone={tone} key={label} />
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
+        <SectionCard title="Modalidad" description="Distribución de los pedidos creados hoy.">
+          <dl className="grid grid-cols-2 divide-x divide-stone-200 rounded-xl border border-stone-200 bg-stone-50">
+            {fulfillment.map(([label, value]) => (
+              <div className="p-4" key={label}>
+                <dt className="text-sm font-medium text-stone-500">{label}</dt>
+                <dd className="mt-1 font-display text-3xl font-bold tracking-tight text-stone-950">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </SectionCard>
+
+        <SectionCard title="Medios de pago" description="Cantidad e importe de los pedidos de hoy.">
+          {metrics.byPaymentMethod.length ? (
+            <div className="divide-y divide-stone-100">
+              {metrics.byPaymentMethod.map((method) => (
+                <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0" key={method.name}>
+                  <div className="min-w-0">
+                    <strong className="block truncate text-sm text-stone-900">{method.name}</strong>
+                    <p className="mt-0.5 text-xs text-stone-500">{method.count} pedidos</p>
+                  </div>
+                  <strong className="shrink-0 text-sm tabular-nums text-stone-950">
+                    {formatMoney(method.amountCents, restaurant.currency_code, restaurant.locale)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-stone-500">Todavía no hay pedidos hoy.</p>
+          )}
+        </SectionCard>
+      </section>
+
+      <SectionCard className="mt-4" title="Tu menú público" description="Compartilo con tus clientes o revisalo en una nueva pestaña.">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0 truncate rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600" title={publicUrl}>
+            {publicUrl}
+          </p>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              className="button-secondary"
+              onClick={() => void navigator.clipboard.writeText(publicUrl).then(() => setCopied(true))}
+            >
+              <Copy className="h-4 w-4" aria-hidden />
+              {copied ? 'Copiado' : 'Copiar link'}
+            </button>
+            <a className="button-secondary" target="_blank" rel="noreferrer" href={publicUrl}>
+              <ExternalLink className="h-4 w-4" aria-hidden />
+              Abrir menú
+            </a>
+          </div>
+        </div>
+      </SectionCard>
+    </>
+  )
 }
