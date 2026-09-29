@@ -100,7 +100,7 @@ Storage tampoco participa de las transacciones PostgreSQL. Al reemplazar o quita
 ## Dependencias operativas
 
 - Supabase CLI y Docker para reconstruir la base local y ejecutar pgTAP.
-- Configuración manual de Auth remoto: registro público desactivado, política de contraseña, Redirect URLs, TOTP y SMTP si corresponde.
+- Configuración manual de Auth remoto: registro público global desactivado, proveedor email habilitado para usuarios existentes, política de contraseña, Redirect URLs, TOTP y SMTP si corresponde.
 - Secretos de Edge Functions cargados con `supabase secrets set`.
 - Variables públicas y headers de `vercel.json` aplicados por Vercel.
 

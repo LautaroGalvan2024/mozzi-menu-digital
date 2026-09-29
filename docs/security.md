@@ -64,7 +64,7 @@ El contrato moderno inyectado usa `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` y 
 
 La configuración local versionada establece:
 
-- signup y acceso anónimo desactivados;
+- registro público global y acceso anónimo desactivados, con el proveedor email habilitado para que los usuarios existentes puedan iniciar sesión;
 - invitaciones administrativas como alta normal;
 - contraseña mínima de 12 caracteres con mayúsculas, minúsculas, números y símbolos;
 - confirmación de correo, rotación de refresh token y cambio seguro de contraseña;
@@ -179,7 +179,7 @@ Nunca se debe "corregir" una fuga limitándose a borrar el valor del último com
 ## Verificación previa a producción
 
 - Ejecutar lint, typecheck, unitarias, pgTAP, Edge tests, E2E, build, auditoría y Gitleaks.
-- Confirmar signup remoto desactivado y Redirect URLs exactas.
+- Confirmar registro público remoto desactivado, proveedor email habilitado y Redirect URLs exactas.
 - Probar Super Admin con y sin `aal2`.
 - Probar tenant A contra tenant B para lectura, escritura, RPC y Storage.
 - Verificar que un `GET` al link de toma no cambia el pedido.

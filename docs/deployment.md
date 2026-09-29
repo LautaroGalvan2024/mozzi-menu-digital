@@ -106,7 +106,7 @@ El asistente ofrece, con confirmación, `npx supabase functions deploy`, que des
 
 En **Authentication > Providers / Sign In**:
 
-- desactivá registro público y usuarios anónimos;
+- desactivá el registro público global y los usuarios anónimos, pero mantené habilitado el proveedor email para el login de usuarios existentes;
 - mantené email/invitación como mecanismo administrativo;
 - exigí 12 caracteres, mayúsculas, minúsculas, números y símbolos;
 - habilitá TOTP;

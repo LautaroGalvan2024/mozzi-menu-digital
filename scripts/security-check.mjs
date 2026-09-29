@@ -43,6 +43,16 @@ function decodeJwtRole(token) {
   }
 }
 
+function tomlSection(contents, name) {
+  const header = `[${name}]`
+  const headerIndex = contents.indexOf(header)
+  if (headerIndex === -1) return undefined
+  const bodyStart = contents.indexOf('\n', headerIndex + header.length)
+  if (bodyStart === -1) return ''
+  const nextHeader = contents.indexOf('\n[', bodyStart + 1)
+  return contents.slice(bodyStart + 1, nextHeader === -1 ? contents.length : nextHeader)
+}
+
 const trackedFiles = gitFiles(['ls-files'])
 const candidateFiles = gitFiles(['ls-files', '-co', '--exclude-standard'])
 
@@ -121,6 +131,23 @@ for (const file of candidateFiles) {
       addFinding(file, 'política RLS con USING (true)')
     }
   }
+}
+
+try {
+  const authConfig = await readFile(path.join(root, 'supabase/config.toml'), 'utf8')
+  const globalAuth = tomlSection(authConfig, 'auth')
+  const emailAuth = tomlSection(authConfig, 'auth.email')
+  if (!globalAuth || !/^enable_signup\s*=\s*false\s*$/mu.test(globalAuth)) {
+    addFinding('supabase/config.toml', 'el registro público global debe permanecer deshabilitado')
+  }
+  if (!emailAuth || !/^enable_signup\s*=\s*true\s*$/mu.test(emailAuth)) {
+    addFinding(
+      'supabase/config.toml',
+      'el proveedor email debe estar habilitado para permitir login de usuarios existentes',
+    )
+  }
+} catch {
+  addFinding('supabase/config.toml', 'no se pudo validar la configuración de Auth')
 }
 
 const uniqueFindings = [...new Map(findings.map((finding) => [`${finding.file}:${finding.rule}`, finding])).values()]

@@ -18,6 +18,13 @@ const schema = z.object({
 
 type LoginValues = z.infer<typeof schema>
 
+export function loginErrorMessage(code?: string): string {
+  if (code === 'email_provider_disabled') {
+    return 'El acceso por correo está deshabilitado en Supabase. Contactá al administrador.'
+  }
+  return 'Correo o contraseña incorrectos.'
+}
+
 export function LoginPage() {
   const auth = useAuth()
   const [params] = useSearchParams()
@@ -73,7 +80,7 @@ export function LoginPage() {
       return
     }
     const { error } = await supabase.auth.signInWithPassword(values)
-    if (error) setServerError('Correo o contraseña incorrectos.')
+    if (error) setServerError(loginErrorMessage(error.code))
   })
 
   return (
