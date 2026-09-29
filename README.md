@@ -1,6 +1,6 @@
 # Mozzi Menu
 
-Menú digital multi-restaurante con paneles administrativos, checkout por WhatsApp e historial de pedidos en Supabase. La aplicación es una SPA estática; Supabase concentra Auth, PostgreSQL, RLS, Storage, Edge Functions, RPC y Realtime.
+Menú digital multi-restaurante con paneles administrativos, checkout por WhatsApp e historial de pedidos en Supabase. La aplicación principal es una SPA estática; una Vercel Function genera únicamente la vista previa Open Graph de cada restaurante. Supabase concentra Auth, PostgreSQL, RLS, Storage, Edge Functions, RPC y Realtime.
 
 El diseño parte de tres reglas:
 
@@ -15,9 +15,9 @@ El diseño parte de tres reglas:
 - Tailwind CSS.
 - Supabase Auth, PostgreSQL/RLS, Storage, Edge Functions y Realtime.
 - Vitest, Testing Library, Playwright y pgTAP.
-- Vercel para el frontend estático.
+- Vercel para el frontend estático y la vista previa Open Graph del menú.
 
-No hay Express, Prisma, VPS ni API Node propia.
+No hay Express, Prisma, VPS ni una API Node de negocio. La Function de Vercel solo consume la RPC pública para entregar metadatos a crawlers.
 
 ## Requisitos
 
@@ -204,7 +204,7 @@ El frontend se compila con:
 npm run build
 ```
 
-Vercel sirve `dist`, reescribe rutas de SPA a `index.html`, no cachea agresivamente el shell y cachea assets con hash. Configurá las tres variables públicas base y, solo si activás Turnstile, `VITE_TURNSTILE_SITE_KEY`. El deploy de Vercel no despliega migraciones ni Edge Functions: aplicalos primero en Supabase y realizá un smoke test de staging.
+Vercel sirve `dist`, reescribe rutas de SPA a `index.html`, genera Open Graph dinámico para crawlers de WhatsApp/Meta, no cachea agresivamente el shell y cachea assets con hash. Configurá las tres variables públicas base y, solo si activás Turnstile, `VITE_TURNSTILE_SITE_KEY`. El deploy de Vercel no despliega migraciones ni Edge Functions: aplicalos primero en Supabase y realizá un smoke test de staging.
 
 Este repositorio no contiene evidencia de un despliegue real. Seguir [instalación y despliegue](docs/deployment.md).
 

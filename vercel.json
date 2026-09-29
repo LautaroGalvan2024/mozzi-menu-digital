@@ -2,6 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/r/:restaurantSlug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|whatsapp|facebookexternalhit|FacebookExternalHit|Facebot|facebot|meta-externalagent|Meta-ExternalAgent).*"
+        }
+      ],
+      "destination": "/api/menu-preview?slug=:restaurantSlug"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

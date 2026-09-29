@@ -1,10 +1,11 @@
-import { Search, ShoppingBag, Store, Clock3, MapPin } from 'lucide-react'
+import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { useCart } from '../cart/CartProvider'
 import { env } from '../../lib/env'
 import { formatMoney, currentProductPrice } from '../../lib/money'
+import { whatsappShareUrl } from '../../lib/phone'
 import { publicAssetUrl } from '../../lib/supabase/client'
 import type { PublicProduct } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
@@ -37,6 +38,10 @@ export function PublicMenuPage() {
   const { restaurant } = menuQuery.data
   const coverUrl = publicAssetUrl(restaurant.coverPath)
   const logoUrl = publicAssetUrl(restaurant.logoPath)
+  const menuUrl = new URL(`/r/${restaurant.slug}`, `${env.appBaseUrl}/`)
+  const previewAssetVersion = (restaurant.coverPath ?? restaurant.logoPath)?.split('/').at(-1)
+  if (previewAssetVersion) menuUrl.searchParams.set('v', previewAssetVersion)
+  const shareUrl = whatsappShareUrl(`Mirá el menú digital de ${restaurant.tradeName}:\n${menuUrl.toString()}`)
   return (
     <div
       className="min-h-screen bg-[#f7f4ef]"
@@ -47,6 +52,16 @@ export function PublicMenuPage() {
         {coverUrl ? <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" fetchPriority="high" /> : null}
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(12,10,9,.58)_0%,rgba(12,10,9,.76)_48%,rgba(12,10,9,.96)_100%)]" />
         <div className="page-shell relative flex min-h-[260px] flex-col justify-end py-5 sm:min-h-[310px] sm:py-7">
+          <a
+            href={shareUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Compartir el menú de ${restaurant.tradeName} por WhatsApp`}
+            className="absolute right-4 top-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/30 bg-[#25d366] px-3.5 py-2 text-sm font-bold text-[#063b1d] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#20bd5a] focus-visible:outline-white sm:right-6 sm:top-6 sm:px-4"
+          >
+            <MessageCircle className="h-5 w-5" aria-hidden />
+            Compartir por WhatsApp
+          </a>
           <div className="flex items-end gap-3 sm:gap-4">
             {logoUrl ? (
               <img

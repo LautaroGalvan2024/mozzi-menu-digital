@@ -159,7 +159,16 @@ VITE_TURNSTILE_SITE_KEY=
 
 No agregues claves administrativas, `TURNSTILE_SECRET_KEY`, secretos de rate limit, SMTP, tokens de CLI ni connection strings. Una variable `VITE_*` siempre es pública; la site key de Turnstile no es secreta.
 
-`vercel.json` incluye rewrite de SPA, caché inmutable para `/assets/*`, revalidación de `index.html` y headers. Antes del primer deploy productivo, reemplazá `*.supabase.co` en la CSP por `coqkgyaekenxccbxlozo.supabase.co` si el entorno ya es estable. Un cambio de CSP requiere probar login, callbacks, Realtime, Storage, imágenes y funciones.
+`vercel.json` incluye rewrite de SPA, caché inmutable para `/assets/*`, revalidación de `index.html`, headers y un rewrite anterior al fallback para crawlers de WhatsApp/Meta. Ese rewrite ejecuta `api/menu-preview.ts`, que reutiliza las tres variables públicas anteriores para obtener únicamente el menú publicado y servir Open Graph dinámico; no agregues una clave administrativa para esta función. Antes del primer deploy productivo, reemplazá `*.supabase.co` en la CSP por `coqkgyaekenxccbxlozo.supabase.co` si el entorno ya es estable. Un cambio de CSP requiere probar login, callbacks, Realtime, Storage, imágenes y funciones.
+
+Después del deploy, verificá que el crawler reciba los metadatos del restaurante y que un navegador normal siga recibiendo la SPA:
+
+```powershell
+curl.exe -A "facebookexternalhit/1.1" https://menu.example.com/r/slug-del-restaurante
+curl.exe -A "Mozilla/5.0" -I https://menu.example.com/r/slug-del-restaurante
+```
+
+La primera respuesta debe contener `og:title`, `og:url` y `og:image` absolutos. WhatsApp puede conservar en caché una vista previa ya consultada; probá primero con un enlace nuevo después de publicar.
 
 ### Dominio y orígenes
 

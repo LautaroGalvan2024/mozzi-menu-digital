@@ -139,6 +139,8 @@ La importación de metadata y la subida de imágenes son fases distintas. Una im
 - `X-Frame-Options: DENY`;
 - aislamiento de opener compatible con el salto a WhatsApp.
 
+El preview Open Graph de `/r/:slug` se genera únicamente para crawlers conocidos. La Vercel Function valida el slug, escapa todo texto antes de producir HTML y consulta `get_public_menu` con la publishable key; nunca recibe una secret key ni acceso directo a tablas privadas.
+
 La CSP incluida permite `https://*.supabase.co` y `wss://*.supabase.co` para que el mismo artefacto funcione en preview. Para producción estable, reemplazar esos comodines por el host exacto del proyecto y verificar login, Realtime, Storage y Edge Functions antes de publicar.
 
 No se usa `dangerouslySetInnerHTML`. Los `returnTo` aceptan únicamente rutas relativas conocidas. El carrito no otorga autoridad sobre precios ni disponibilidad.

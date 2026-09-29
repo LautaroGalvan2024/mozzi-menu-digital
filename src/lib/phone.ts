@@ -10,6 +10,12 @@ export function whatsappUrl(phone: string, message: string) {
   return `https://wa.me/${normalizePhone(phone).slice(1)}?text=${encodeURIComponent(message)}`
 }
 
+export function whatsappShareUrl(message: string) {
+  const destination = new URL('https://wa.me/')
+  destination.searchParams.set('text', message)
+  return destination.toString()
+}
+
 export function whatsappWebUrl(validatedWhatsappUrl: string, message: string) {
   const source = new URL(validatedWhatsappUrl)
   if (source.origin !== 'https://wa.me' || !/^\/\d+$/.test(source.pathname)) {

@@ -2,13 +2,15 @@
 
 ## Contexto
 
-Mozzi Menu es una SPA multi-restaurante. Vercel entrega archivos estáticos; toda persistencia, identidad y operación privilegiada viven en Supabase. No existe un servidor Node/Express intermedio.
+Mozzi Menu es una SPA multi-restaurante. Vercel entrega la aplicación estática y una Function mínima que genera metadatos Open Graph para crawlers; toda persistencia, identidad y operación privilegiada viven en Supabase. No existe un servidor Node/Express de negocio intermedio.
 
 ```mermaid
 flowchart TB
   Customer[Cliente sin sesión]
+  Crawler[Crawler de WhatsApp/Meta]
   Staff[Personal autenticado]
   SPA[React + Vite en Vercel]
+  Preview[Vercel Function de preview]
   Auth[Supabase Auth + MFA]
   Data[PostgreSQL + RLS]
   Private[Esquema private]
@@ -18,6 +20,9 @@ flowchart TB
   WhatsApp[WhatsApp]
 
   Customer --> SPA
+  Crawler --> Preview
+  Preview -->|RPC pública acotada| Data
+  Preview -->|portada o logo público| Storage
   Staff --> SPA
   SPA --> Auth
   SPA -->|RPC pública acotada| Data
@@ -42,7 +47,7 @@ flowchart TB
 | Edge Functions | Operaciones públicas endurecidas y acciones administrativas que necesitan APIs admin | Secretos inyectados por Supabase, nunca variables `VITE_*` |
 | Storage | Imágenes públicas ya procesadas | WebP/JPEG/PNG bajo una ruta con `restaurant_id`; no documentos privados |
 | Realtime | Avisos de pedidos y cambios de estado | Filas que la sesión ya puede leer por RLS |
-| Vercel | Distribución de la SPA, rewrite y headers | Solo variables públicas del frontend |
+| Vercel | Distribución de la SPA, headers y metadatos Open Graph del menú | Solo variables públicas `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` y `VITE_APP_BASE_URL` |
 
 ## Límites de confianza
 
@@ -57,6 +62,8 @@ flowchart TB
 ### Lectura pública
 
 La SPA llama `get_public_menu(slug)`. La RPC proyecta únicamente la configuración publicada, categorías, productos, opciones, horarios, medios de pago y zonas activas. No abre lectura anónima sobre tablas base.
+
+Cuando el User-Agent corresponde a WhatsApp o Meta, Vercel reescribe únicamente `/r/:slug` hacia `api/menu-preview.ts`. Esa Function consulta la misma RPC con la publishable key y entrega título, descripción y portada —o logo como fallback— en etiquetas Open Graph. Los navegadores normales siguen recibiendo la SPA y la Function no participa de pedidos, Auth ni operaciones administrativas.
 
 ### Creación de pedidos
 

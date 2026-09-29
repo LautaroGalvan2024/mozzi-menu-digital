@@ -115,6 +115,13 @@ test('a successful checkout keeps the confirmation visible while clearing the ca
   })
 
   await page.goto('/r/checkout-test')
+  const shareMenu = page.getByRole('link', { name: /Compartir el menú de Checkout Test por WhatsApp/ })
+  await expect(shareMenu).toBeVisible()
+  const shareDestination = new URL((await shareMenu.getAttribute('href')) ?? '')
+  expect(shareDestination.origin).toBe('https://wa.me')
+  expect(shareDestination.searchParams.get('text')).toContain('Checkout Test')
+  expect(shareDestination.searchParams.get('text')).toContain('/r/checkout-test')
+  await expect(shareMenu).toHaveAttribute('target', '_blank')
   await page.getByRole('button', { name: /Producto de prueba/ }).click()
   await page.getByRole('button', { name: /Agregar ·/ }).click()
   await page.getByRole('link', { name: /Ver carrito/ }).click()
