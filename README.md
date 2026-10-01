@@ -69,7 +69,7 @@ El asistente crea los archivos Edge; no los copies ni completes a mano. El runti
 
 ### Migraciones
 
-Las 22 migraciones versionadas crean enums, identidad, tenants, catálogo, horarios, pagos, entrega, pedidos y snapshots; también helpers, triggers, RPC, RLS, Storage, Realtime, rate limiting, auditoría, autorización por campo para los datos sensibles de `restaurants`, aislamiento de perfiles desactivados, escrituras administrativas transaccionales, inventario de assets huérfanos, una allowlist explícita de `EXECUTE` por RPC y reemplazos de horarios sin colisiones intermedias.
+Las 23 migraciones versionadas crean enums, identidad, tenants, catálogo, horarios, pagos, entrega, pedidos y snapshots; también helpers, triggers, RPC, RLS, Storage, Realtime, rate limiting, auditoría, autorización por campo para los datos sensibles de `restaurants`, aislamiento de perfiles desactivados, escrituras administrativas transaccionales, inventario de assets huérfanos, una allowlist explícita de `EXECUTE` por RPC, reemplazos de horarios sin colisiones intermedias y precios reutilizables por cantidad.
 
 Para probar que el entorno se reconstruye solo desde Git:
 
@@ -80,7 +80,7 @@ supabase test db
 
 No hagas cambios de esquema manuales que no terminen en una migración incremental.
 
-`save_restaurant_hours` guarda altas, cambios y bajas de horarios regulares y excepciones en una sola transacción. Valida todos los IDs antes de mutar, permite mover/intercambiar turnos sin chocar con índices únicos y no permite mezclar un cierre de día completo con turnos abiertos de la misma fecha. `save_product_catalog` hace lo mismo con el producto, sus grupos, opciones y bajas lógicas. Ambas RPC vuelven a verificar actor, tenant y referencias, y un error revierte el conjunto completo de cambios de base. Los archivos de Storage quedan fuera de esa transacción PostgreSQL.
+`save_restaurant_hours` guarda altas, cambios y bajas de horarios regulares y excepciones en una sola transacción. Valida todos los IDs antes de mutar, permite mover/intercambiar turnos sin chocar con índices únicos y no permite mezclar un cierre de día completo con turnos abiertos de la misma fecha. `save_product_catalog` hace lo mismo con el producto, sus grupos, opciones, precios por cantidad opcionales y bajas lógicas. Ambas RPC vuelven a verificar actor, tenant y referencias, y un error revierte el conjunto completo de cambios de base. Los archivos de Storage quedan fuera de esa transacción PostgreSQL.
 
 ### Tipos generados
 
@@ -191,10 +191,10 @@ supabase test db
 
 ### Verificación disponible en este checkout
 
-- Las 22 migraciones se aplicaron en orden al proyecto vinculado. Las 9 suites suman 217 aserciones pgTAP y se ejecutan dentro de transacciones con `ROLLBACK`; incluyen alta inicial y reemplazo seguro de horarios, aislamiento tenant, pedidos, Storage y la matriz exacta de `EXECUTE`. La verificación confirmó 19/19 tablas públicas con RLS, cero grants de tabla para `anon`, cero grants de cliente sobre `private`, ningún `SECURITY DEFINER` sin `search_path` fijo, funciones futuras sin `EXECUTE` implícito y `get_public_menu` como única RPC disponible para `anon`.
+- El proyecto vinculado conserva las 22 migraciones anteriores aplicadas. La migración 23 de precios por cantidad está solamente en esta rama: `db push --dry-run` la detecta como única pendiente y no la aplicó. El repositorio contiene 10 suites y 276 aserciones pgTAP; la nueva suite de 59 aserciones queda pendiente de ejecución local. Después de aplicarla existirán 20 tablas públicas, todas con RLS.
 - En este host no hay Docker ni Podman; por eso no se pudieron repetir `supabase start`, `supabase db reset`, `supabase test db` ni la generación local de tipos contra el stack oficial. `supabase db lint` tampoco estuvo disponible por falta de `plpgsql_check`.
-- Las Edge Functions sí se verificaron con Deno: formato de 34 archivos, lint de 33, typecheck y 30/30 tests del contrato moderno y la lógica compartida.
-- El proyecto vinculado tiene las migraciones y Edge Functions desplegadas. El flujo live menú → carrito → checkout → creación → confirmación se verificó contra el restaurante de prueba; la prueba automatizada no abre ni envía WhatsApp.
+- El baseline de Edge Functions se verificó previamente con Deno: formato de 34 archivos, lint de 33, typecheck y 30/30 tests. Esta rama agrega una prueba de cantidad canónica; Deno no está disponible en este host para repetir esa suite.
+- El proyecto vinculado tiene desplegado el baseline anterior. Esta rama no desplegó la migración, la actualización de `create-order` ni el frontend; el flujo productivo y los datos de El Nieto permanecen sin cambios.
 
 ## Deploy
 

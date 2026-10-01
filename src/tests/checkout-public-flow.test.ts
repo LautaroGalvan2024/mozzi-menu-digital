@@ -15,6 +15,7 @@ const line: CartLine = {
   quantity: 2,
   notes: 'Sin sal',
   unitPriceCents: 1_000,
+  quantityPrices: [],
   selectedOptions: [
     {
       id: '10000000-0000-4000-8000-000000000002',
@@ -95,6 +96,42 @@ describe('public checkout validation', () => {
     }).success).toBe(false)
   })
 
+  it('defaults legacy public products to no quantity prices and rejects duplicate rules', async () => {
+    const { publicMenuSchema } = await import('../lib/validation/schemas')
+    const product = {
+      id: '10000000-0000-4000-8000-000000000020',
+      categoryId: '10000000-0000-4000-8000-000000000021',
+      code: 'EMP-1', name: 'Empanada', description: '', basePriceCents: 1000,
+      promotionalPriceCents: null, promotionStartsAt: null, promotionEndsAt: null,
+      imagePath: null, available: true, featured: false, sortOrder: 0, optionGroups: [],
+    }
+    const menu = {
+      restaurant: {
+        id: '10000000-0000-4000-8000-000000000022', name: 'Mozzi', tradeName: 'Mozzi', slug: 'mozzi', description: '',
+        whatsappPhone: '+5493492123456', address: 'Calle 1', city: 'Rafaela', timezone: 'America/Argentina/Cordoba',
+        currencyCode: 'ARS', locale: 'es-AR', logoPath: null, coverPath: null, primaryColor: '#000000', secondaryColor: '#FFFFFF',
+        deliveryEnabled: true, pickupEnabled: true, minimumOrderCents: 0, defaultPreparationMinutes: 30, isOpen: true, nextOpeningAt: null,
+      },
+      categories: [{
+        id: product.categoryId, name: 'Empanadas', slug: 'empanadas', description: '', imagePath: null, sortOrder: 0, products: [product],
+      }],
+      businessHours: [], specialHours: [], paymentMethods: [], deliveryZones: [],
+    }
+
+    const parsed = publicMenuSchema.parse(menu)
+    expect(parsed.categories[0]?.products[0]?.quantityPrices).toEqual([])
+    expect(publicMenuSchema.safeParse({
+      ...menu,
+      categories: [{ ...menu.categories[0], products: [{
+        ...product,
+        quantityPrices: [
+          { quantity: 2, totalPriceCents: 1800 },
+          { quantity: 2, totalPriceCents: 1700 },
+        ],
+      }] }],
+    }).success).toBe(false)
+  })
+
   it('reuses an attempt across reloads and rotates it when the cart changes or expires', () => {
     const fingerprint = checkoutCartFingerprint([line])
     const first = getCheckoutAttemptKey(
@@ -136,6 +173,7 @@ describe('public checkout validation', () => {
         ...line,
         productName: 'Nombre cambiado',
         unitPriceCents: 999_999,
+        quantityPrices: [{ quantity: 2, totalPriceCents: 1 }],
         selectedOptions: [{ ...line.selectedOptions[0]!, name: 'Otro nombre', priceDeltaCents: 900 }],
       }]),
     )

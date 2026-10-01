@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -73,6 +73,7 @@ describe('new product route', () => {
   beforeEach(() => {
     mocks.from.mockReset()
     mocks.rpc.mockReset()
+    mocks.rpc.mockResolvedValue({ data: null, error: null })
     mocks.categories = [{
       id: '20000000-0000-4000-8000-000000000001',
       name: 'Hamburguesas',
@@ -161,6 +162,61 @@ describe('new product route', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
+  it('sends active quantity prices inside the transactional product payload', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+
+    await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
+    await user.type(screen.getByLabelText('Código único'), 'EMP-1')
+    await user.clear(screen.getByLabelText('Precio base'))
+    await user.type(screen.getByLabelText('Precio base'), '100')
+    await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
+    await user.clear(screen.getByLabelText('Precio total para 2 unidades'))
+    await user.type(screen.getByLabelText('Precio total para 2 unidades'), '180')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+
+    await waitFor(() => expect(mocks.rpc).toHaveBeenCalledWith(
+      'save_product_catalog',
+      expect.objectContaining({
+        p_product: expect.objectContaining({
+          quantityPrices: [{ quantity: 2, totalPriceCents: 18_000 }],
+        }),
+      }),
+    ))
+  })
+
+  it('rejects duplicate quantity rules before calling the RPC', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+
+    await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
+    await user.type(screen.getByLabelText('Código único'), 'EMP-2')
+    await user.clear(screen.getByLabelText('Precio base'))
+    await user.type(screen.getByLabelText('Precio base'), '100')
+    await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
+    await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
+    const duplicateQuantity = screen.getByLabelText('Cantidad del precio especial 3')
+    await user.clear(duplicateQuantity)
+    await user.type(duplicateQuantity, '2')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('cada cantidad entre 2 y 20')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('resets the minimum to zero when a group stops being required', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+
+    await screen.findByRole('heading', { name: 'Nuevo producto' })
+    await user.click(screen.getByRole('button', { name: 'Grupo' }))
+    const required = screen.getByRole('checkbox', { name: 'Obligatorio' })
+    await user.click(required)
+    expect(screen.getByLabelText('Mínimo')).toHaveValue(1)
+    await user.click(required)
+    expect(screen.getByLabelText('Mínimo')).toHaveValue(0)
+  })
+
   it('loads options only from the current product groups', async () => {
     const productId = '30000000-0000-4000-8000-000000000001'
     const groupId = '40000000-0000-4000-8000-000000000001'
@@ -191,6 +247,9 @@ describe('new product route', () => {
       if (table === 'product_option_groups') return {
         select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: [{ id: groupId, name: 'Queso', required: false, min_select: 0, max_select: 1, sort_order: 0, active: true }], error: null }) }) }) }) }),
       }
+      if (table === 'product_quantity_prices') return {
+        select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: [{ id: '60000000-0000-4000-8000-000000000001', quantity: 2, total_price_cents: 18000 }], error: null }) }) }) }) }),
+      }
       if (table === 'product_options') return {
         select: () => ({ eq: () => ({ in: optionIn }) }),
       }
@@ -201,5 +260,6 @@ describe('new product route', () => {
 
     expect(await screen.findByRole('heading', { name: 'Editar Burger' })).toBeVisible()
     expect(optionIn).toHaveBeenCalledWith('option_group_id', [groupId])
+    expect(screen.getByLabelText('Precio total para 2 unidades')).toHaveValue(180)
   })
 })

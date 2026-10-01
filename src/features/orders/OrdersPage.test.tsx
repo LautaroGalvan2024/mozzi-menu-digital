@@ -70,8 +70,10 @@ describe('order date range', () => {
 
     const from = await screen.findByLabelText('Desde')
     const to = screen.getByLabelText('Hasta')
-    fireEvent.change(from, { target: { value: '2026-09-30' } })
-    fireEvent.change(to, { target: { value: '2026-09-29' } })
+    // Keep the first change invalid against any realistic current date so the
+    // query does not briefly remount the filters between both events.
+    fireEvent.change(from, { target: { value: '2099-09-30' } })
+    fireEvent.change(to, { target: { value: '2099-09-29' } })
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'La fecha Desde no puede ser posterior a la fecha Hasta.',

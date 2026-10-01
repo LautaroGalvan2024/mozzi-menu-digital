@@ -59,7 +59,7 @@ export function CheckoutPage() {
   const { restaurantSlug } = useParams()
   const menu = usePublicMenu(restaurantSlug)
   const cart = useCart()
-  const { activateRestaurant } = cart
+  const { activateRestaurant, reconcileProducts } = cart
   const navigate = useNavigate()
   const mountedAttempt = useRef<{ fingerprint: string; key: string } | null>(null)
   const formStartedAt = useRef(new Date().toISOString())
@@ -76,6 +76,10 @@ export function CheckoutPage() {
   const deliveryZoneId = form.watch('deliveryZoneId')
 
   useEffect(() => { if (restaurantSlug) activateRestaurant(restaurantSlug) }, [activateRestaurant, restaurantSlug])
+  useEffect(() => {
+    if (!menu.data || cart.restaurantSlug !== menu.data.restaurant.slug) return
+    reconcileProducts(menu.data.categories.flatMap((category) => category.products))
+  }, [cart.restaurantSlug, menu.data, reconcileProducts])
   useEffect(() => {
     if (!menu.data) return
     const restaurant = menu.data.restaurant

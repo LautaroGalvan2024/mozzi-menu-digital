@@ -49,6 +49,25 @@ const optionGroupSchema = z.object({
   options: z.array(optionSchema),
 })
 
+const quantityPriceSchema = z.object({
+  quantity: z.number().int().min(2).max(20),
+  totalPriceCents: money,
+})
+
+const quantityPricesSchema = z.array(quantityPriceSchema).max(19).superRefine((rules, context) => {
+  const seen = new Set<number>()
+  rules.forEach((rule, index) => {
+    if (seen.has(rule.quantity)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [index, 'quantity'],
+        message: 'La cantidad promocional está repetida.',
+      })
+    }
+    seen.add(rule.quantity)
+  })
+})
+
 const productSchema = z.object({
   id: z.string().uuid(),
   categoryId: z.string().uuid(),
@@ -63,6 +82,7 @@ const productSchema = z.object({
   available: z.boolean(),
   featured: z.boolean(),
   sortOrder: z.number().int(),
+  quantityPrices: quantityPricesSchema.default([]),
   optionGroups: z.array(optionGroupSchema),
 })
 

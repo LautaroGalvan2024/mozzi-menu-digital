@@ -38,6 +38,22 @@ Deno.test("order validation normalizes public input and rejects unknown fields",
   );
 });
 
+Deno.test("order validation accepts a canonical 100-unit line and rejects totals above 100", async () => {
+  const parsed = parseInput(createOrderSchema, {
+    ...validOrder,
+    items: [{ ...validOrder.items[0], quantity: 100 }],
+  });
+  assertEquals(parsed.items[0]?.quantity, 100);
+
+  await assertRejects(
+    () => parseInput(createOrderSchema, {
+      ...validOrder,
+      items: [{ ...validOrder.items[0], quantity: 101 }],
+    }),
+    (error) => error instanceof ApiError && error.code === "VALIDATION_ERROR",
+  );
+});
+
 Deno.test("delivery validation requires server-resolvable address and zone IDs", async () => {
   await assertRejects(
     () =>

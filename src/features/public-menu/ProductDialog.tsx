@@ -1,6 +1,7 @@
 import { Minus, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatMoney, currentProductPrice } from '../../lib/money'
+import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import { publicAssetUrl } from '../../lib/supabase/client'
 import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/domain'
 
@@ -11,6 +12,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
   const [selections, setSelections] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
   const basePrice = currentProductPrice(product)
+  const advertisedQuantityPrices = effectiveQuantityPrices(basePrice, product.quantityPrices)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -30,7 +32,13 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
       ),
     [product.optionGroups, selections],
   )
-  const unitTotal = basePrice + selectedOptions.reduce((sum, option) => sum + option.priceDeltaCents, 0)
+  const optionUnitCents = selectedOptions.reduce((sum, option) => sum + option.priceDeltaCents, 0)
+  const pricing = calculateQuantityPricing({
+    quantity,
+    unitPriceCents: basePrice,
+    quantityPrices: product.quantityPrices,
+    optionUnitCents,
+  })
 
   function toggle(groupId: string, optionId: string, maxSelect: number) {
     setSelections((current) => {
@@ -61,6 +69,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
       quantity,
       notes: notes.trim(),
       unitPriceCents: basePrice,
+      quantityPrices: product.quantityPrices,
       selectedOptions,
     })
     dialogRef.current?.close()
@@ -96,6 +105,15 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
               <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.name}</h2>
               <p className="mt-2 text-sm leading-6 text-stone-600">{product.description}</p>
               <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
+              {advertisedQuantityPrices.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2" aria-label="Promociones por cantidad">
+                  {advertisedQuantityPrices.map((rule) => (
+                    <span key={rule.quantity} className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800">
+                      {rule.quantity} por {formatMoney(rule.totalPriceCents, restaurant.currencyCode, restaurant.locale)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <div className="mt-6 space-y-6">
               {product.optionGroups.map((group) => (
@@ -141,7 +159,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
             <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(20, value + 1))}><Plus aria-hidden /></button>
           </div>
           <button type="button" className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
-            <span className="truncate">Agregar · {formatMoney(unitTotal * quantity, restaurant.currencyCode, restaurant.locale)}</span>
+            <span className="truncate">Agregar · {formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</span>
           </button>
         </div>
       </div>

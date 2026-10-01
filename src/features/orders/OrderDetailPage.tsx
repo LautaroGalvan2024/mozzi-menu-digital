@@ -103,6 +103,7 @@ export function OrderDetailPage() {
                 <strong>{formatMoney(item.line_total_cents, order.currency_code)}</strong>
               </div>
               {options.filter((option) => option.order_item_id === item.id).map((option) => <p key={option.id} className="mt-1 pl-4 text-sm text-stone-600">· {option.group_name_snapshot}: {option.option_name_snapshot}{Number(option.price_delta_cents) ? ` (+${formatMoney(option.price_delta_cents, order.currency_code)})` : ''}</p>)}
+              {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">Promo por cantidad aplicada · base {formatMoney(item.base_subtotal_cents, order.currency_code)}</p> : null}
               {item.notes ? <p className="mt-2 text-sm italic text-stone-500">“{item.notes}”</p> : null}
             </article>)}
           </div>

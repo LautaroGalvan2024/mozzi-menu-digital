@@ -1,7 +1,19 @@
 import { z } from 'zod'
 
 export const adminOrderSchema=z.object({id:z.string().uuid(),restaurant_id:z.string().uuid(),action_id:z.string().uuid(),display_number:z.string(),status:z.enum(['generated','whatsapp_opened','accepted','completed','cancelled','expired']),customer_name:z.string(),customer_phone:z.string(),fulfillment_type:z.enum(['delivery','pickup']),delivery_address:z.string().nullable(),delivery_city:z.string().nullable(),delivery_neighborhood:z.string().nullable(),delivery_floor:z.string().nullable(),delivery_apartment:z.string().nullable(),delivery_reference:z.string().nullable(),customer_notes:z.string().nullable(),payment_method_id:z.string().uuid(),payment_method_name_snapshot:z.string(),payment_transfer_alias_snapshot:z.string().nullable(),payment_account_holder_snapshot:z.string().nullable(),payment_bank_name_snapshot:z.string().nullable(),payment_instructions_snapshot:z.string().nullable(),subtotal_cents:z.union([z.number(),z.string()]),discount_cents:z.union([z.number(),z.string()]),surcharge_cents:z.union([z.number(),z.string()]),delivery_fee_cents:z.union([z.number(),z.string()]),total_cents:z.union([z.number(),z.string()]),currency_code:z.string(),whatsapp_opened_at:z.string().nullable(),accepted_by:z.string().uuid().nullable(),accepted_at:z.string().nullable(),completed_by:z.string().uuid().nullable().optional(),completed_at:z.string().nullable(),cancelled_by:z.string().uuid().nullable().optional(),cancelled_at:z.string().nullable(),cancel_reason:z.string().nullable(),created_at:z.string(),updated_at:z.string()})
-export const itemSchema=z.object({id:z.string().uuid(),order_id:z.string().uuid(),product_name_snapshot:z.string(),product_code_snapshot:z.string(),quantity:z.number().int(),unit_price_cents:z.union([z.number(),z.string()]),options_total_unit_cents:z.union([z.number(),z.string()]),line_total_cents:z.union([z.number(),z.string()]),notes:z.string().nullable()})
+const moneySnapshot=z.union([z.number(),z.string()])
+const pricingBreakdownSchema=z.object({
+  mode:z.enum(['unit','quantity']),
+  unitPriceCents:moneySnapshot,
+  baseSubtotalCents:moneySnapshot,
+  components:z.array(z.object({
+    quantity:z.number().int().positive(),
+    count:z.number().int().positive(),
+    totalPriceCents:moneySnapshot,
+    subtotalCents:moneySnapshot,
+  })),
+})
+export const itemSchema=z.object({id:z.string().uuid(),order_id:z.string().uuid(),product_name_snapshot:z.string(),product_code_snapshot:z.string(),quantity:z.number().int(),unit_price_cents:moneySnapshot,base_subtotal_cents:moneySnapshot,pricing_mode_snapshot:z.enum(['unit','quantity']),pricing_breakdown_snapshot:pricingBreakdownSchema,options_total_unit_cents:moneySnapshot,line_total_cents:moneySnapshot,notes:z.string().nullable()})
 export const itemOptionSchema=z.object({id:z.string().uuid(),order_item_id:z.string().uuid(),group_name_snapshot:z.string(),option_name_snapshot:z.string(),price_delta_cents:z.union([z.number(),z.string()])})
 export const eventSchema=z.object({id:z.string().uuid(),order_id:z.string().uuid(),event_type:z.string(),from_status:z.enum(['generated','whatsapp_opened','accepted','completed','cancelled','expired']).nullable(),to_status:z.enum(['generated','whatsapp_opened','accepted','completed','cancelled','expired']).nullable(),actor_type:z.enum(['customer','authenticated_user','system']),actor_user_id:z.string().uuid().nullable(),created_at:z.string()})
 export type AdminOrderRow=z.infer<typeof adminOrderSchema>

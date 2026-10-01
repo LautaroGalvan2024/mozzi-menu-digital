@@ -84,6 +84,19 @@ button:disabled { cursor: not-allowed; }
     background: transparent;
   }
   .product-dialog::backdrop { background: rgb(12 10 9 / .72); }
+  .hours-dialog {
+    position: fixed;
+    inset: auto 0 0;
+    width: 100%;
+    max-width: 38rem;
+    max-height: 92dvh;
+    margin: 0 auto;
+    overflow: visible;
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+  .hours-dialog::backdrop { background: rgb(12 10 9 / .72); }
   .modal-backdrop { @apply fixed inset-0 z-50 grid place-items-end bg-stone-950/70 p-0 sm:place-items-center sm:p-4; }
   .modal-card { @apply max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 sm:rounded-3xl sm:p-7; box-shadow: var(--shadow-raised); }
   .data-table { @apply w-full border-collapse text-left text-sm; }
@@ -105,7 +118,7 @@ button:disabled { cursor: not-allowed; }
 }
 
 @media (min-width: 640px) {
-  .product-dialog {
+  .product-dialog, .hours-dialog {
     inset: 0;
     width: calc(100% - 2rem);
     margin: auto;

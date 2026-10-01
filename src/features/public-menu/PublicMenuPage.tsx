@@ -4,24 +4,33 @@ import { Link, useParams } from 'react-router'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { useCart } from '../cart/CartProvider'
 import { env } from '../../lib/env'
+import { formatNextOpeningAt } from '../../lib/hours'
 import { formatMoney, currentProductPrice } from '../../lib/money'
 import { whatsappShareUrl } from '../../lib/phone'
+import { effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import { publicAssetUrl } from '../../lib/supabase/client'
 import type { PublicProduct } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
+import { RestaurantHoursDialog } from './RestaurantHoursDialog'
 import { usePublicMenu } from './usePublicMenu'
 
 export function PublicMenuPage() {
   const { restaurantSlug } = useParams()
   const menuQuery = usePublicMenu(restaurantSlug)
   const cart = useCart()
-  const { activateRestaurant } = cart
+  const { activateRestaurant, reconcileProducts } = cart
   const [search, setSearch] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<PublicProduct | null>(null)
+  const [showHours, setShowHours] = useState(false)
 
   useEffect(() => {
     if (restaurantSlug) activateRestaurant(restaurantSlug)
   }, [activateRestaurant, restaurantSlug])
+
+  useEffect(() => {
+    if (!menuQuery.data || cart.restaurantSlug !== menuQuery.data.restaurant.slug) return
+    reconcileProducts(menuQuery.data.categories.flatMap((category) => category.products))
+  }, [cart.restaurantSlug, menuQuery.data, reconcileProducts])
 
   const categories = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase('es')
@@ -42,6 +51,7 @@ export function PublicMenuPage() {
   const previewAssetVersion = (restaurant.coverPath ?? restaurant.logoPath)?.split('/').at(-1)
   if (previewAssetVersion) menuUrl.searchParams.set('v', previewAssetVersion)
   const shareUrl = whatsappShareUrl(`Mirá el menú digital de ${restaurant.tradeName}:\n${menuUrl.toString()}`)
+  const nextOpeningLabel = formatNextOpeningAt(restaurant.nextOpeningAt, restaurant.timezone)
   return (
     <div
       className="min-h-screen bg-[#f7f4ef]"
@@ -87,7 +97,22 @@ export function PublicMenuPage() {
           {restaurant.description ? <p className="mt-3 line-clamp-2 max-w-2xl text-sm leading-5 text-stone-200 sm:mt-4 sm:leading-6">{restaurant.description}</p> : null}
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs font-medium text-stone-200 sm:gap-y-2">
             <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-white" aria-hidden />{restaurant.address}, {restaurant.city}</span>
-            <span className="flex items-center gap-1.5"><Clock3 className="h-4 w-4 text-white" aria-hidden />{restaurant.isOpen ? `Demora estimada: ${restaurant.defaultPreparationMinutes} min` : restaurant.nextOpeningAt ? `Próxima apertura: ${new Date(restaurant.nextOpeningAt).toLocaleString(restaurant.locale, { timeZone: restaurant.timezone })}` : 'Consultá los horarios'}</span>
+            <button
+              type="button"
+              className="flex min-h-8 items-center gap-1.5 rounded-lg text-left transition hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              onClick={() => setShowHours(true)}
+              aria-haspopup="dialog"
+            >
+              <Clock3 className="h-4 w-4 shrink-0 text-white" aria-hidden />
+              <span>
+                {restaurant.isOpen
+                  ? `Demora estimada: ${restaurant.defaultPreparationMinutes} min`
+                  : nextOpeningLabel
+                    ? `Próxima apertura: ${nextOpeningLabel}`
+                    : 'Consultá los horarios'}
+                <span className="ml-1.5 font-bold text-white underline decoration-white/50 underline-offset-2">Ver horarios</span>
+              </span>
+            </button>
           </div>
         </div>
       </header>
@@ -129,6 +154,7 @@ export function PublicMenuPage() {
               {category.products.map((product) => {
                 const imageUrl = publicAssetUrl(product.imagePath)
                 const price = currentProductPrice(product)
+                const hasQuantityPromotion = effectiveQuantityPrices(price, product.quantityPrices).length > 0
                 return (
                   <article
                     key={product.id}
@@ -148,6 +174,7 @@ export function PublicMenuPage() {
                         <div className="mt-auto pt-3">
                           <p className="font-display text-base font-bold text-stone-950">{formatMoney(price, restaurant.currencyCode, restaurant.locale)}</p>
                           {price !== product.basePriceCents ? <p className="mt-0.5 text-xs text-stone-400 line-through">{formatMoney(product.basePriceCents, restaurant.currencyCode, restaurant.locale)}</p> : null}
+                          {hasQuantityPromotion ? <span className="mt-1.5 inline-flex rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800">Promos por cantidad</span> : null}
                           {!product.available ? <span className="mt-2 inline-flex rounded-full bg-stone-200 px-2 py-1 text-xs font-bold text-stone-700">Agotado</span> : null}
                         </div>
                       </div>
@@ -179,6 +206,16 @@ export function PublicMenuPage() {
         </div>
       ) : null}
       {selectedProduct ? <ProductDialog product={selectedProduct} restaurant={restaurant} onClose={() => setSelectedProduct(null)} onAdd={(line) => { cart.addLine(line); setSelectedProduct(null) }} /> : null}
+      {showHours ? (
+        <RestaurantHoursDialog
+          restaurantName={restaurant.tradeName}
+          timeZone={restaurant.timezone}
+          locale={restaurant.locale}
+          businessHours={menuQuery.data.businessHours}
+          specialHours={menuQuery.data.specialHours}
+          onClose={() => setShowHours(false)}
+        />
+      ) : null}
     </div>
   )
 }

@@ -157,13 +157,13 @@ isOneToOne: false
                   ]
                 },"order_items": {
                   Row: {
-                    "created_at": string,"id": string,"line_total_cents": number,"notes": string | null,"options_total_unit_cents": number,"order_id": string,"product_code_snapshot": string,"product_id": string | null,"product_name_snapshot": string,"quantity": number,"restaurant_id": string,"unit_price_cents": number
+                    "base_subtotal_cents": number,"created_at": string,"id": string,"line_total_cents": number,"notes": string | null,"options_total_unit_cents": number,"order_id": string,"pricing_breakdown_snapshot": Json,"pricing_mode_snapshot": string,"product_code_snapshot": string,"product_id": string | null,"product_name_snapshot": string,"quantity": number,"restaurant_id": string,"unit_price_cents": number
                   }
                   Insert: {
-                    "created_at"?: string,"id"?: string,"line_total_cents": number,"notes"?: string | null,"options_total_unit_cents"?: number,"order_id": string,"product_code_snapshot": string,"product_id"?: string | null,"product_name_snapshot": string,"quantity": number,"restaurant_id": string,"unit_price_cents": number
+                    "base_subtotal_cents": number,"created_at"?: string,"id"?: string,"line_total_cents": number,"notes"?: string | null,"options_total_unit_cents"?: number,"order_id": string,"pricing_breakdown_snapshot": Json,"pricing_mode_snapshot": string,"product_code_snapshot": string,"product_id"?: string | null,"product_name_snapshot": string,"quantity": number,"restaurant_id": string,"unit_price_cents": number
                   }
                   Update: {
-                    "created_at"?: string,"id"?: string,"line_total_cents"?: number,"notes"?: string | null,"options_total_unit_cents"?: number,"order_id"?: string,"product_code_snapshot"?: string,"product_id"?: string | null,"product_name_snapshot"?: string,"quantity"?: number,"restaurant_id"?: string,"unit_price_cents"?: number
+                    "base_subtotal_cents"?: number,"created_at"?: string,"id"?: string,"line_total_cents"?: number,"notes"?: string | null,"options_total_unit_cents"?: number,"order_id"?: string,"pricing_breakdown_snapshot"?: Json,"pricing_mode_snapshot"?: string,"product_code_snapshot"?: string,"product_id"?: string | null,"product_name_snapshot"?: string,"quantity"?: number,"restaurant_id"?: string,"unit_price_cents"?: number
                   }
                   Relationships: [
                     {
@@ -293,6 +293,31 @@ isOneToOne: false
       referencedColumns: ["id","restaurant_id"]
     },{
       foreignKeyName: "product_options_restaurant_id_fkey"
+      columns: ["restaurant_id"]
+isOneToOne: false
+      referencedRelation: "restaurants"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"product_quantity_prices": {
+                  Row: {
+                    "active": boolean,"created_at": string,"id": string,"product_id": string,"quantity": number,"restaurant_id": string,"total_price_cents": number,"updated_at": string
+                  }
+                  Insert: {
+                    "active"?: boolean,"created_at"?: string,"id"?: string,"product_id": string,"quantity": number,"restaurant_id": string,"total_price_cents": number,"updated_at"?: string
+                  }
+                  Update: {
+                    "active"?: boolean,"created_at"?: string,"id"?: string,"product_id"?: string,"quantity"?: number,"restaurant_id"?: string,"total_price_cents"?: number,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "product_quantity_prices_product_id_restaurant_id_fkey"
+      columns: ["product_id","restaurant_id"]
+isOneToOne: false
+      referencedRelation: "products"
+      referencedColumns: ["id","restaurant_id"]
+    },{
+      foreignKeyName: "product_quantity_prices_restaurant_id_fkey"
       columns: ["restaurant_id"]
 isOneToOne: false
       referencedRelation: "restaurants"

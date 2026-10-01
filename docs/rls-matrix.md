@@ -47,7 +47,7 @@ Las migraciones generan policies equivalentes por tabla:
 
 | Familia | Tablas | SELECT | INSERT/UPDATE |
 |---|---|---|---|
-| Catálogo | `categories`, `products`, `product_option_groups`, `product_options` | `*_select_member`: miembro activo o Super Admin | `*_insert_admin`, `*_update_admin`: `private.can_manage_catalog` |
+| Catálogo | `categories`, `products`, `product_quantity_prices`, `product_option_groups`, `product_options` | `*_select_member`: miembro activo o Super Admin | `*_insert_admin`, `*_update_admin`: `private.can_manage_catalog` |
 | Configuración | `business_hours`, `special_hours`, `payment_methods`, `delivery_zones` | `*_select_member`: miembro activo o Super Admin | `*_insert_admin`, `*_update_admin`: `private.can_manage_restaurant` |
 
 `order_manager` obtiene lectura para operar pedidos, pero no escritura. `DELETE` se concede únicamente a `business_hours` y `special_hours`, sujeto a `private.can_manage_restaurant`; catálogo, pagos y zonas no reciben borrado directo. El cliente público no usa estas tablas: consume una proyección RPC.
@@ -68,7 +68,7 @@ Las transiciones usan `claim_order`, `complete_order` y `cancel_order`; reciben 
 
 | RPC | `anon` | `authenticated` | Server/Edge | Seguridad adicional |
 |---|---|---|---|---|
-| `get_public_menu(text)` | Ejecutar | Ejecutar | — | Solo restaurante activo/publicado y proyección sin PII |
+| `get_public_menu(text)` | Ejecutar | Ejecutar | — | Solo restaurante activo/publicado, reglas de cantidad activas y proyección sin PII |
 | `get_actor_authorization()` | — | Ejecutar | — | Devuelve la autorización del usuario actual |
 | `get_order_by_action(uuid)` | — | Ejecutar | — | Verifica `can_manage_orders` del tenant |
 | `claim_order(uuid)` | — | Ejecutar | — | Actor real, membresía y update atómico |
@@ -78,7 +78,7 @@ Las transiciones usan `claim_order`, `complete_order` y `cancel_order`; reciben 
 | `get_order_metrics(uuid,timestamptz,timestamptz)` | — | Ejecutar | — | `can_manage_orders`; rango válido de hasta 366 días |
 | `import_products_batch(uuid,jsonb,text)` | — | Ejecutar | — | `can_manage_catalog`, límites y transacción; `skip` omite el grafo completo del producto existente |
 | `save_restaurant_hours(uuid,jsonb,jsonb,uuid[],uuid[])` | — | Ejecutar | — | `can_manage_restaurant`; reemplazo atómico, swaps sin colisión, cierres exclusivos e IDs confinados al tenant |
-| `save_product_catalog(uuid,jsonb,jsonb,uuid[],uuid[])` | — | Ejecutar | — | `can_manage_catalog`; producto, grupos, opciones y bajas lógicas atómicos |
+| `save_product_catalog(uuid,jsonb,jsonb,uuid[],uuid[])` | — | Ejecutar | — | `can_manage_catalog`; producto, grupos, opciones, precios por cantidad opcionales y bajas lógicas atómicos |
 | `list_orphan_image_assets(uuid)` | — | Ejecutar | — | `can_manage_catalog`; inventario read-only del tenant, sin borrado automático |
 | `create_restaurant_transaction(...)` | — | — | `service_role` | Edge verifica JWT, Super Admin AAL2 e idempotencia antes de invocar |
 | `upsert_restaurant_membership(...)` | — | — | `service_role` | Edge autoriza; la RPC vuelve a verificar actor/rol |

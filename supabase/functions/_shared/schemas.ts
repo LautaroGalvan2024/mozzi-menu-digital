@@ -99,7 +99,7 @@ export const inviteRestaurantUserSchema = z.object({
 
 const orderItemSchema = z.object({
   productId: uuid,
-  quantity: z.number().int().min(1).max(20),
+  quantity: z.number().int().min(1).max(100),
   notes: optionalMultiline(500),
   optionIds: z.array(uuid).max(30).refine(
     (values) => new Set(values).size === values.length,

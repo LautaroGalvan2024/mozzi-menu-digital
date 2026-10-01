@@ -21,6 +21,7 @@ erDiagram
   RESTAURANTS ||--o{ RESTAURANT_MEMBERS : autoriza
   RESTAURANTS ||--o{ CATEGORIES : contiene
   CATEGORIES ||--o{ PRODUCTS : agrupa
+  PRODUCTS ||--o{ PRODUCT_QUANTITY_PRICES : ofrece
   PRODUCTS ||--o{ PRODUCT_OPTION_GROUPS : configura
   PRODUCT_OPTION_GROUPS ||--o{ PRODUCT_OPTIONS : ofrece
   RESTAURANTS ||--o{ BUSINESS_HOURS : abre
@@ -57,12 +58,13 @@ Un usuario siempre puede leer su propio perfil. Para que un Restaurant Admin lea
 |---|---|---|
 | `categories` | Nombre, slug, imagen, orden, activo y baja lógica | slug único parcial por restaurante; índice de orden público |
 | `products` | Código, precios, promoción, disponibilidad, imagen y orden | código único parcial case-insensitive por restaurante; FK compuesta a categoría |
+| `product_quantity_prices` | Precio total reutilizable para una cantidad exacta de 2 a 20 unidades | FK compuesta a producto; cantidad única por producto/tenant; las reglas inactivas no se publican |
 | `product_option_groups` | Código de importación, grupo, obligatoriedad, mínimo/máximo y orden | FK compuesta a producto; código único por producto cuando existe; `0 <= min <= max <= 20` |
 | `product_options` | Código de importación, opción y delta de precio | FK compuesta a grupo; código único por grupo cuando existe; delta no negativo |
 
 `created_by` y `updated_by` de categorías/productos se establecen desde `auth.uid()` mediante trigger. Un producto agotado usa `available = false`; no se borra.
 
-`save_product_catalog` guarda el producto, sus grupos, opciones y desactivaciones solicitadas como una sola unidad. Valida que categoría, imagen y nodos anidados pertenezcan al tenant/producto; un error revierte todas las mutaciones de base. Subir o borrar el archivo físico de la imagen es una fase separada de Storage.
+`save_product_catalog` guarda el producto, sus grupos, opciones, desactivaciones y, cuando el payload incluye `quantityPrices`, sincroniza esas reglas como una sola unidad. Si la propiedad no está presente —por ejemplo en importaciones existentes— conserva las reglas actuales. Valida que categoría, imagen y nodos anidados pertenezcan al tenant/producto; un error revierte todas las mutaciones de base. Subir o borrar el archivo físico de la imagen es una fase separada de Storage.
 
 ## Horarios, pagos y entrega
 
@@ -104,10 +106,12 @@ El trigger `orders_controlled_mutations` rechaza `UPDATE` fuera de una operació
 | Tabla/campos | Snapshot |
 |---|---|
 | `orders.payment_*_snapshot` | Nombre, tipo, alcance, basis points, fijo e instrucciones del medio de pago |
-| `order_items` | Código/nombre de producto, precio unitario, total de opciones, cantidad y total de línea |
+| `order_items` | Código/nombre de producto, precio unitario, subtotal base canónico, modo/desglose de precio por cantidad, total de opciones, cantidad y total de línea |
 | `order_item_options` | Nombre de grupo/opción y delta aplicado |
 
 Los IDs originales se conservan cuando existen, pero editar o dar de baja el catálogo no altera la representación histórica. `order_items` y `order_item_options` son append-only.
+
+Antes de calcular, `create_order_transaction` canonicaliza líneas con el mismo producto, conjunto de opciones y observaciones recortadas. La cantidad resultante admite hasta 100 unidades —el mismo máximo global del pedido— para que el precio no dependa de cómo el cliente haya fragmentado el carrito; variedades u observaciones distintas conservan líneas separadas.
 
 ### Timeline y auditoría
 
@@ -134,7 +138,7 @@ En una creación nueva, PostgreSQL bloquea/actualiza `restaurant_order_counters`
 
 ## Cálculo monetario
 
-La transacción selecciona el precio promocional solo dentro de su vigencia, suma opciones y multiplica por cantidad. Para el porcentaje positivo usa redondeo half-up a centavos:
+La transacción selecciona el precio promocional solo dentro de su vigencia y lo usa como oferta unitaria. Para cada línea calcula mediante programación dinámica la combinación exacta más barata entre unidades y reglas activas de precio por cantidad; cada regla puede reutilizarse. Los adicionales se cobran por unidad y fuera del descuento por cantidad. El cliente nunca envía el precio autorizado. Para el porcentaje positivo usa redondeo half-up a centavos:
 
 ```text
 ajuste_porcentual = (base_cents * adjustment_bps + 5000) / 10000
@@ -166,4 +170,4 @@ Las RPC de estado hacen la verificación real; el diagrama no habilita mutacione
 
 ## Migraciones
 
-Las 22 migraciones están ordenadas por timestamp y separan: cimientos/enums, identidad, catálogo, configuración, pedidos/privado, helpers/triggers, lectura pública, operaciones administrativas, creación de pedidos, RLS/Storage/Realtime, RPC administrativas de Edge, métricas, gestión endurecida de membresías/horarios, autorización de campos sensibles del restaurante, aislamiento de perfiles desactivados, guardados administrativos transaccionales, inventario read-only de assets inconsistentes, privilegios exactos de funciones y reemplazo seguro de coordenadas de horarios. Ejecutá siempre `supabase db reset` en local y `supabase db push` en remoto; no mantengas cambios invisibles hechos solo desde Studio.
+Las migraciones están ordenadas por timestamp y separan: cimientos/enums, identidad, catálogo, configuración, pedidos/privado, helpers/triggers, lectura pública, operaciones administrativas, creación de pedidos, RLS/Storage/Realtime, RPC administrativas de Edge, métricas, gestión endurecida de membresías/horarios, autorización de campos sensibles del restaurante, aislamiento de perfiles desactivados, guardados administrativos transaccionales, inventario read-only de assets inconsistentes, privilegios exactos de funciones, reemplazo seguro de coordenadas de horarios y precios por cantidad. Ejecutá siempre `supabase db reset` en local y `supabase db push` en remoto; no mantengas cambios invisibles hechos solo desde Studio.

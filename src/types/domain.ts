@@ -42,6 +42,11 @@ export interface PublicOptionGroup {
   options: PublicOption[]
 }
 
+export interface QuantityPrice {
+  quantity: number
+  totalPriceCents: number
+}
+
 export interface PublicProduct {
   id: string
   categoryId: string
@@ -56,6 +61,7 @@ export interface PublicProduct {
   available: boolean
   featured: boolean
   sortOrder: number
+  quantityPrices: QuantityPrice[]
   optionGroups: PublicOptionGroup[]
 }
 
@@ -156,6 +162,7 @@ export interface CartLine {
   quantity: number
   notes: string
   unitPriceCents: number
+  quantityPrices: QuantityPrice[]
   selectedOptions: Array<{
     id: string
     groupName: string
@@ -220,6 +227,19 @@ export interface OrderItemSnapshot {
   product_code_snapshot: string
   quantity: number
   unit_price_cents: number | string
+  base_subtotal_cents: number | string
+  pricing_mode_snapshot: 'unit' | 'quantity'
+  pricing_breakdown_snapshot: {
+    mode: 'unit' | 'quantity'
+    unitPriceCents: number | string
+    baseSubtotalCents: number | string
+    components: Array<{
+      quantity: number
+      count: number
+      totalPriceCents: number | string
+      subtotalCents: number | string
+    }>
+  }
   options_total_unit_cents: number | string
   line_total_cents: number | string
   notes: string | null
