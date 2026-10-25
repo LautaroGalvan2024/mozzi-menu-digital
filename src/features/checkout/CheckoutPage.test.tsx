@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkoutBusinessRequest, checkoutRequestFingerprint, getCheckoutAttemptKey, recordCheckoutAttempt } from '../../lib/checkout-attempt'
 import type { CartLine } from '../../types/domain'
 import { CheckoutPage } from './CheckoutPage'
 
 const PAYMENT = '10000000-0000-4000-8000-000000000001'
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), activate: vi.fn(), reconcile: vi.fn(), open: true }))
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), activate: vi.fn(), reconcile: vi.fn(), open: true, available: true }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke: mocks.invoke } } }))
 vi.mock('../../lib/env', () => ({ env: { isTurnstileConfigured: false } }))
 const line: CartLine = { key: 'one', productId: '10000000-0000-4000-8000-000000000002', productName: 'Uno', productImagePath: null, quantity: 2, notes: '', unitPriceCents: 1000, quantityPrices: [], selectedOptions: [] }
@@ -15,13 +15,14 @@ const payment = { id: PAYMENT, name: 'Efectivo', description: '', adjustmentType
 vi.mock('../cart/CartProvider', () => ({ useCart: () => ({ restaurantSlug: 'mozzi', lines: [line], subtotalCents: 2000, itemCount: 2, activateRestaurant: mocks.activate, reconcileProducts: mocks.reconcile }) }))
 vi.mock('../public-menu/usePublicMenu', () => ({ usePublicMenu: () => ({ isLoading: false, data: {
   restaurant: { id: '10000000-0000-4000-8000-000000000003', slug: 'mozzi', name: 'Mozzi', address: 'Calle Uno', pickupEnabled: true, deliveryEnabled: false, isOpen: mocks.open, minimumOrderCents: 0, whatsappPhone: '+5493492123456', currencyCode: 'ARS', locale: 'es-AR' },
-  categories: [], paymentMethods: [payment], deliveryZones: [],
+  categories: [{ products: [{ id: line.productId, available: mocks.available, optionGroups: [] }] }], paymentMethods: [payment], deliveryZones: [],
 } }) }))
 
 const values = { customerName: 'Ana Pérez', customerPhone: '+5493492123456', fulfillmentType: 'pickup' as const, paymentMethodId: PAYMENT, notes: '', website: '' }
 const generated = { order: { actionId: '10000000-0000-4000-8000-000000000004', displayNumber: 'PED-1', status: 'generated', totalCents: 2000, currencyCode: 'ARS', createdAt: '2026-10-24T12:00:00Z' }, whatsapp: { phone: '+5493492123456', message: 'Pedido', url: 'https://wa.me/5493492123456?text=Pedido' }, clientEventToken: null }
+function Confirmation() { const location = useLocation(); return <p data-estimate={location.state?.estimatedTotalCents}>Pedido recuperado</p> }
 function page() {
-  return render(<MemoryRouter initialEntries={['/r/mozzi/checkout']}><Routes><Route path="/r/:restaurantSlug/checkout" element={<CheckoutPage />} /><Route path="/r/:restaurantSlug/pedido-generado" element={<p>Pedido recuperado</p>} /></Routes></MemoryRouter>)
+  return render(<MemoryRouter initialEntries={['/r/mozzi/checkout']}><Routes><Route path="/r/:restaurantSlug/checkout" element={<CheckoutPage />} /><Route path="/r/:restaurantSlug/pedido-generado" element={<Confirmation />} /></Routes></MemoryRouter>)
 }
 async function fill(name = values.customerName) {
   await userEvent.type(screen.getByLabelText('Nombre y apellido'), name)
@@ -29,7 +30,7 @@ async function fill(name = values.customerName) {
 }
 
 describe('checkout recovery after an ambiguous response', () => {
-  beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); mocks.open = true })
+  beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); mocks.open = true; mocks.available = true })
   afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
   it('freezes the original business request and reuses its key on retry, including after closing time', async () => {
@@ -44,6 +45,7 @@ describe('checkout recovery after an ambiguous response', () => {
     expect(stored).not.toContain('Ana')
     expect(stored).not.toContain('5493492123456')
     mocks.open = false
+    mocks.available = false
     view.rerender(<MemoryRouter initialEntries={['/r/mozzi/checkout']}><Routes><Route path="/r/:restaurantSlug/checkout" element={<CheckoutPage />} /><Route path="/r/:restaurantSlug/pedido-generado" element={<p>Pedido recuperado</p>} /></Routes></MemoryRouter>)
     await userEvent.click(screen.getByRole('button', { name: 'Recuperar mismo pedido' }))
     await screen.findByText('Pedido recuperado')
@@ -55,7 +57,7 @@ describe('checkout recovery after an ambiguous response', () => {
   it('blocks changed customer details after reload and never rotates an expired attempt', async () => {
     const hash = await checkoutRequestFingerprint(checkoutBusinessRequest('mozzi', values, [line]))
     const key = getCheckoutAttemptKey('mozzi', hash, Date.now() - 3 * 60 * 60 * 1000)
-    recordCheckoutAttempt('mozzi', key, hash, 'uncertain')
+    recordCheckoutAttempt('mozzi', key, hash, 'uncertain', 1500)
     page()
     await fill('Otra persona')
     await userEvent.click(screen.getByRole('button', { name: 'Recuperar mismo pedido' }))
@@ -68,7 +70,7 @@ describe('checkout recovery after an ambiguous response', () => {
   it('recovers identical data after reload with an old key and prevents concurrent submits', async () => {
     const hash = await checkoutRequestFingerprint(checkoutBusinessRequest('mozzi', values, [line]))
     const key = getCheckoutAttemptKey('mozzi', hash, 1000)
-    recordCheckoutAttempt('mozzi', key, hash, 'uncertain')
+    recordCheckoutAttempt('mozzi', key, hash, 'uncertain', 1500)
     let resolve!: (result: unknown) => void
     mocks.invoke.mockImplementation(() => new Promise((done) => { resolve = done }))
     page()
@@ -78,7 +80,7 @@ describe('checkout recovery after an ambiguous response', () => {
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1))
     expect(mocks.invoke.mock.calls[0]![1].body.idempotencyKey).toBe(key)
     resolve({ data: generated, error: null })
-    await screen.findByText('Pedido recuperado')
+    expect(await screen.findByText('Pedido recuperado')).toHaveAttribute('data-estimate', '1500')
   })
 
   it('unlocks a definitive first rejection while keeping its key, but not a rejected ambiguous retry', async () => {
@@ -114,5 +116,18 @@ describe('checkout recovery after an ambiguous response', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Generar pedido' }))
     await screen.findByText('Pedido recuperado')
     expect(mocks.invoke.mock.calls[1]![1].body.idempotencyKey).not.toBe(previousKey)
+  })
+
+  it('shows the line summary and blocks a new request with an unavailable product', async () => {
+    mocks.available = false
+    page(); await fill()
+    expect(screen.getByRole('heading', { name: 'Productos y opciones' })).toBeVisible()
+    expect(screen.getByText('2 × Uno')).toBeVisible()
+    expect(screen.getByText(/Este producto no está disponible/)).toBeVisible()
+    const button = screen.getByRole('button', { name: 'Generar pedido' })
+    expect(button).toBeDisabled()
+    fireEvent.submit(button.closest('form')!)
+    await screen.findByText(/El carrito tiene productos u opciones/)
+    expect(mocks.invoke).not.toHaveBeenCalled()
   })
 })

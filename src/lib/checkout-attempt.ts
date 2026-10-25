@@ -7,6 +7,7 @@ export type StoredCheckoutAttempt = {
   idempotencyKey: string
   createdAt: number
   status?: 'uncertain' | 'rejected'
+  estimatedTotalCents?: number
 }
 const storageKey = (restaurantSlug: string) => `mozzi:checkout-attempt:${restaurantSlug}`
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -21,6 +22,7 @@ export function readCheckoutAttempt(restaurantSlug: string): StoredCheckoutAttem
     const attempt = value as Partial<StoredCheckoutAttempt>
     if (typeof attempt.fingerprint !== 'string' || typeof attempt.idempotencyKey !== 'string' || !uuid.test(attempt.idempotencyKey) || typeof attempt.createdAt !== 'number' || !Number.isFinite(attempt.createdAt)) throw new Error()
     if (attempt.version !== undefined && (attempt.version !== 2 || !['uncertain', 'rejected'].includes(attempt.status ?? '') || !/^[a-f0-9]{64}$/.test(attempt.fingerprint))) throw new Error()
+    if (attempt.estimatedTotalCents !== undefined && (!Number.isSafeInteger(attempt.estimatedTotalCents) || attempt.estimatedTotalCents < 0)) throw new Error()
     return attempt as StoredCheckoutAttempt
   } catch { throw new Error('No pudimos recuperar el intento anterior. Consultá al comercio antes de iniciar otro pedido.') }
 }
@@ -87,10 +89,12 @@ export function getCheckoutAttemptKey(restaurantSlug: string, fingerprint: strin
   return idempotencyKey
 }
 
-export function recordCheckoutAttempt(restaurantSlug: string, key: string, fingerprint: string, status: 'uncertain' | 'rejected'): void {
+export function recordCheckoutAttempt(restaurantSlug: string, key: string, fingerprint: string, status: 'uncertain' | 'rejected', estimatedTotalCents?: number): void {
   const existing = readCheckoutAttempt(restaurantSlug)
   if (existing && existing.idempotencyKey !== key) throw new Error('Otro intento reemplazó este pedido. Consultá al comercio antes de continuar.')
-  const attempt: StoredCheckoutAttempt = { version: 2, fingerprint, idempotencyKey: key, createdAt: existing?.createdAt ?? Date.now(), status }
+  const quote = estimatedTotalCents ?? existing?.estimatedTotalCents
+  if (quote !== undefined && (!Number.isSafeInteger(quote) || quote < 0)) throw new Error('El total estimado no es válido. Revisá el carrito antes de enviar.')
+  const attempt: StoredCheckoutAttempt = { version: 2, fingerprint, idempotencyKey: key, createdAt: existing?.createdAt ?? Date.now(), status, ...(quote !== undefined ? { estimatedTotalCents: quote } : {}) }
   try { sessionStorage.setItem(storageKey(restaurantSlug), JSON.stringify(attempt)) }
   catch { throw new Error('No pudimos guardar el reintento. El pedido no se envió; habilitá el almacenamiento y volvé a intentar.') }
 }

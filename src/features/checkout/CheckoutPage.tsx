@@ -10,10 +10,13 @@ import { checkoutBusinessRequest, checkoutRequestFingerprint, clearCheckoutAttem
 import { env } from '../../lib/env'
 import { formatMoney } from '../../lib/money'
 import { estimateAdjustment } from '../../lib/orders'
+import { saveOrderRecovery } from '../../lib/order-recovery'
+import { calculateCartLineTotal } from '../../lib/quantity-pricing'
 import { supabase } from '../../lib/supabase/client'
 import { checkoutSchema, generatedOrderSchema, type CheckoutValues } from '../../lib/validation/schemas'
-import type { GeneratedOrder } from '../../types/domain'
+import type { CartLine, GeneratedOrder } from '../../types/domain'
 import { useCart } from '../cart/CartProvider'
+import { validateCartLines } from '../cart/cartValidation'
 import { usePublicMenu } from '../public-menu/usePublicMenu'
 
 const zodErrorResponse = z.object({
@@ -66,7 +69,7 @@ export function CheckoutPage() {
   const cart = useCart()
   const { activateRestaurant, reconcileProducts } = cart
   const navigate = useNavigate()
-  const mountedAttempt = useRef<{ fingerprint: string; key: string; business: CheckoutBusinessRequest } | null>(null)
+  const mountedAttempt = useRef<{ fingerprint: string; key: string; business: CheckoutBusinessRequest; estimatedTotalCents: number; summary: CartLine[] } | null>(null)
   const busy = useRef(false)
   const [sending, setSending] = useState(false)
   const [pending, setPending] = useState(() => {
@@ -91,7 +94,7 @@ export function CheckoutPage() {
   useEffect(() => {
     if (!menu.data || pending || cart.restaurantSlug !== menu.data.restaurant.slug) return
     reconcileProducts(menu.data.categories.flatMap((category) => category.products))
-  }, [cart.restaurantSlug, menu.data, pending, reconcileProducts])
+  }, [cart.restaurantSlug, menu.data, menu.dataUpdatedAt, pending, reconcileProducts])
   useEffect(() => {
     if (!menu.data) return
     const restaurant = menu.data.restaurant
@@ -137,8 +140,10 @@ export function CheckoutPage() {
   const deliveryFee = fulfillmentType === 'delivery' && selectedZone ? (selectedZone.freeShippingFromCents !== null && cart.subtotalCents >= selectedZone.freeShippingFromCents ? 0 : selectedZone.deliveryFeeCents) : 0
   const adjustment = selectedPayment ? estimateAdjustment(selectedPayment, cart.subtotalCents, deliveryFee) : 0
   const estimatedTotal = Math.max(0, cart.subtotalCents + deliveryFee + adjustment)
+  const lineIssues = useMemo(() => validateCartLines(cart.lines, menu.data?.categories.flatMap(category => category.products) ?? []), [cart.lines, menu.data])
+  const invalidCart = [...lineIssues.values()].some(issues => issues.length > 0)
   const eligible = useMemo(() => {
-    if (!menu.data) return false
+    if (!menu.data || menu.isFetching || menu.error || invalidCart) return false
     const zoneMinimum = fulfillmentType === 'delivery' ? selectedZone?.minimumOrderCents ?? 0 : 0
     const minimum = Math.max(menu.data.restaurant.minimumOrderCents, zoneMinimum)
     const antiSpamReady = !env.isTurnstileConfigured || Boolean(turnstileToken)
@@ -146,7 +151,7 @@ export function CheckoutPage() {
       ? menu.data.restaurant.pickupEnabled
       : menu.data.restaurant.deliveryEnabled && Boolean(selectedZone)
     return menu.data.restaurant.isOpen && Boolean(selectedPayment) && fulfillmentReady && cart.subtotalCents >= minimum && cart.itemCount <= 100 && cart.lines.length <= 25 && antiSpamReady
-  }, [cart.itemCount, cart.lines.length, cart.subtotalCents, fulfillmentType, menu.data, selectedPayment, selectedZone, turnstileToken])
+  }, [cart.itemCount, cart.lines.length, cart.subtotalCents, fulfillmentType, invalidCart, menu.data, menu.error, menu.isFetching, selectedPayment, selectedZone, turnstileToken])
 
   if (menu.isLoading) return <LoadingScreen label="Revalidando el menú…" />
   if (!menu.data) return <main className="page-shell py-16"><ErrorPanel>No pudimos cargar los datos necesarios para confirmar.</ErrorPanel></main>
@@ -161,6 +166,7 @@ export function CheckoutPage() {
     setServerError(null)
     let requestSent = false
     try {
+      if (!pending && invalidCart) { setServerError('El carrito tiene productos u opciones que requieren revisión. Volvé al carrito para reconfigurarlos.'); return }
       if (!pending && !eligible) { setServerError('El comercio está cerrado o el pedido no alcanza el mínimo.'); return }
       if (env.isTurnstileConfigured && !turnstileToken) { setServerError(publicOrderErrors.CAPTCHA_REQUIRED!); return }
       const saved = readCheckoutAttempt(restaurant.slug)
@@ -172,8 +178,9 @@ export function CheckoutPage() {
         return
       }
       const key = getCheckoutAttemptKey(restaurant.slug, fingerprint)
-      recordCheckoutAttempt(restaurant.slug, key, fingerprint, 'uncertain')
-      mountedAttempt.current = { business, fingerprint, key }
+      const originalEstimate = mountedAttempt.current?.estimatedTotalCents ?? (previouslyUncertain ? saved?.estimatedTotalCents : undefined) ?? estimatedTotal
+      recordCheckoutAttempt(restaurant.slug, key, fingerprint, 'uncertain', originalEstimate)
+      mountedAttempt.current = { business, fingerprint, key, estimatedTotalCents: originalEstimate, summary: mountedAttempt.current?.summary ?? structuredClone(cart.lines) }
       setLocked(true)
       setPending(true)
       requestSent = true
@@ -206,7 +213,8 @@ export function CheckoutPage() {
       }
       const parsed = generatedOrderSchema.safeParse(data)
       if (!parsed.success) { setServerError('No pudimos confirmar la respuesta. Recuperá el mismo pedido: conservamos su clave para evitar duplicarlo.'); return }
-      const generated: GeneratedOrder = parsed.data
+      const generated: GeneratedOrder = { ...parsed.data, estimatedTotalCents: originalEstimate }
+      saveOrderRecovery(restaurant.slug, generated)
       try { clearCheckoutAttempt(restaurant.slug) } catch { /* Confirmed response is still safe to show. */ }
       navigate(`/r/${restaurant.slug}/pedido-generado`, { state: generated, replace: true })
     } catch (error) {
@@ -237,7 +245,9 @@ export function CheckoutPage() {
   return (
     <main className="min-h-screen bg-stone-100 py-6 sm:py-10"><div className="page-shell max-w-5xl"><Link to={`/r/${restaurant.slug}/carrito`} className="inline-flex items-center gap-2 text-sm font-semibold text-stone-600"><ArrowLeft className="h-4 w-4" aria-hidden />Volver al carrito</Link><div className="mt-5"><h1 className="font-display text-4xl font-bold">Finalizar pedido</h1><p className="mt-2 text-stone-600">El comercio debe aceptar el pedido desde el enlace seguro que recibirá por WhatsApp.</p></div>
       {pending ? <section className="form-card mt-5 border border-amber-300" aria-label="Pedido pendiente de recuperar"><h2 className="font-semibold">Hay un intento pendiente de confirmar</h2><p className="mt-2 text-sm">{locked ? 'Conservamos los datos enviados. Recuperá el mismo pedido aunque haya pasado tiempo; el reintento no genera otro.' : 'Volvé a ingresar exactamente los datos originales. Por privacidad, este intento sólo conserva una huella y su clave; no guarda tus datos personales.'}</p><p className="mt-2 text-sm">Si ya no recordás los datos o querés cambiarlos, <a className="underline" href={`https://wa.me/${restaurant.whatsappPhone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer">consultá al comercio</a> antes de comenzar otro pedido.</p><label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" checked={absenceConfirmed} disabled={sending} onChange={(event) => setAbsenceConfirmed(event.target.checked)} />Ya confirmé con el comercio que el pedido anterior no existe.</label><button type="button" className="button-secondary mt-3" disabled={!absenceConfirmed || sending} onClick={startAnother}>Iniciar otro intento</button></section> : null}
-      <form className="mt-8 grid gap-6 lg:grid-cols-[1fr_350px]" onSubmit={(event) => { if (locked) { event.preventDefault(); void send(form.getValues()) } else void submit(event) }} noValidate><div className="space-y-5"><fieldset disabled={locked || sending} className="space-y-5"><section className="form-card"><h2 className="form-card-title">Tus datos</h2><div className="grid gap-4 sm:grid-cols-2"><label className="field"><span>Nombre y apellido</span><input autoComplete="name" {...form.register('customerName')} />{form.formState.errors.customerName ? <small>{form.formState.errors.customerName.message}</small> : null}</label><label className="field"><span>Teléfono</span><input type="tel" autoComplete="tel" {...form.register('customerPhone')} />{form.formState.errors.customerPhone ? <small>{form.formState.errors.customerPhone.message}</small> : null}</label></div></section>
+      {!pending && menu.isFetching ? <p className="mt-4 text-sm" role="status">Actualizando precios y disponibilidad…</p> : null}
+      {!pending && menu.error ? <p className="form-error mt-4" role="alert">No pudimos actualizar el menú. <button className="underline" onClick={() => void menu.refetch()}>Volver a intentar</button></p> : null}
+      <form className="mt-8 grid gap-6 lg:grid-cols-[1fr_350px]" onSubmit={(event) => { if (locked) { event.preventDefault(); void send(form.getValues()) } else void submit(event) }} noValidate><div className="space-y-5"><fieldset disabled={locked || sending} className="space-y-5"><section className="form-card"><h2 className="form-card-title">Productos y opciones</h2><ul className="space-y-3">{(mountedAttempt.current?.summary ?? cart.lines).map(line => <li key={line.key}><div className="flex justify-between gap-3"><strong>{line.quantity} × {line.productName}</strong><span>{formatMoney(calculateCartLineTotal(line), restaurant.currencyCode, restaurant.locale)}</span></div>{line.selectedOptions.length ? <p className="text-sm text-stone-600">{line.selectedOptions.map(option => option.name).join(' · ')}</p> : null}{line.notes ? <p className="text-sm italic text-stone-600">{line.notes}</p> : null}{!pending ? (lineIssues.get(line.key) ?? []).map((issue, index) => <p className="mt-1 text-sm text-amber-800" key={index}>{issue.message}</p>) : null}</li>)}</ul>{invalidCart && !pending ? <Link className="mt-3 inline-block font-semibold underline" to={`/r/${restaurant.slug}/carrito`}>Revisar productos del carrito</Link> : null}</section><section className="form-card"><h2 className="form-card-title">Tus datos</h2><div className="grid gap-4 sm:grid-cols-2"><label className="field"><span>Nombre y apellido</span><input autoComplete="name" {...form.register('customerName')} />{form.formState.errors.customerName ? <small>{form.formState.errors.customerName.message}</small> : null}</label><label className="field"><span>Teléfono</span><input type="tel" autoComplete="tel" {...form.register('customerPhone')} />{form.formState.errors.customerPhone ? <small>{form.formState.errors.customerPhone.message}</small> : null}</label></div></section>
         <section className="form-card"><h2 className="form-card-title">¿Cómo lo recibís?</h2><div className="grid gap-3 sm:grid-cols-2">{restaurant.pickupEnabled ? <label className={`choice-card ${fulfillmentType === 'pickup' ? 'choice-card-selected' : ''}`}><input className="sr-only" type="radio" value="pickup" {...form.register('fulfillmentType')} /><Store aria-hidden /><span><strong>Retiro</strong><small>{restaurant.address}</small></span>{fulfillmentType === 'pickup' ? <Check className="ml-auto" aria-hidden /> : null}</label> : null}{restaurant.deliveryEnabled ? <label className={`choice-card ${fulfillmentType === 'delivery' ? 'choice-card-selected' : ''}`}><input className="sr-only" type="radio" value="delivery" {...form.register('fulfillmentType')} /><Bike aria-hidden /><span><strong>Envío</strong><small>Elegí tu zona</small></span>{fulfillmentType === 'delivery' ? <Check className="ml-auto" aria-hidden /> : null}</label> : null}</div>
         {fulfillmentType === 'delivery' ? <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="field sm:col-span-2"><span>Zona</span><select {...form.register('deliveryZoneId')}><option value="">Seleccionar</option>{menu.data.deliveryZones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name} · {formatMoney(zone.deliveryFeeCents, restaurant.currencyCode, restaurant.locale)}</option>)}</select>{form.formState.errors.deliveryZoneId ? <small>{form.formState.errors.deliveryZoneId.message}</small> : null}</label><label className="field sm:col-span-2"><span>Dirección</span><input autoComplete="street-address" {...form.register('address')} />{form.formState.errors.address ? <small>{form.formState.errors.address.message}</small> : null}</label><label className="field"><span>Ciudad</span><input autoComplete="address-level2" {...form.register('city')} />{form.formState.errors.city ? <small>{form.formState.errors.city.message}</small> : null}</label><label className="field"><span>Barrio</span><input {...form.register('neighborhood')} /></label><label className="field"><span>Piso</span><input {...form.register('floor')} /></label><label className="field"><span>Departamento</span><input {...form.register('apartment')} /></label><label className="field sm:col-span-2"><span>Referencia</span><input {...form.register('reference')} /></label></div> : null}</section>
         <section className="form-card"><h2 className="form-card-title">Medio de pago</h2><div className="space-y-2">{menu.data.paymentMethods.map((method) => <label key={method.id} className={`choice-card ${paymentMethodId === method.id ? 'choice-card-selected' : ''}`}><input className="sr-only" type="radio" value={method.id} {...form.register('paymentMethodId')} /><ShoppingBag aria-hidden /><span><strong>{method.name}</strong><small>{method.description}{method.adjustmentType !== 'none' ? ` · ${method.adjustmentBps / 100}% ${method.adjustmentType === 'discount' ? 'de descuento' : 'de recargo'}` : ''}</small></span>{paymentMethodId === method.id ? <Check className="ml-auto" aria-hidden /> : null}</label>)}</div>{form.formState.errors.paymentMethodId ? <p className="form-error">{form.formState.errors.paymentMethodId.message}</p> : null}</section>

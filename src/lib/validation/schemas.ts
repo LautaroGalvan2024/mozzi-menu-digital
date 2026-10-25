@@ -192,6 +192,9 @@ export const generatedOrderSchema = z.object({
   }),
   clientEventToken: z.string().min(22).max(256).regex(/^[A-Za-z0-9_-]+$/).nullable(),
   clientEventExpiresAt: z.string().optional(),
+  recoveryToken: z.string().min(22).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
+  recoveryExpiresAt: z.string().datetime({ offset: true }).optional(),
+  estimatedTotalCents: z.number().int().nonnegative().safe().optional(),
   idempotentReplay: z.boolean().optional().default(false),
 })
 
