@@ -2,6 +2,21 @@ import { describe,expect,it } from 'vitest'
 import { parseImportSheets } from '../lib/import-products'
 
 describe('catalog import validation',()=>{
+  it('rejects excessive decimal precision in numeric Excel cells instead of rounding it', () => {
+    const result = parseImportSheets({ Productos: [['nombre', 'categoria', 'precio'], ['Uno', 'Cat', 1.234], ['Dos', 'Cat', '1,234.56']] })
+    expect(result.products).toHaveLength(0)
+    expect(result.errors.join(' ')).toMatch(/precio no negativo/)
+  })
+  it('checks active option counts for known new products without rejecting partial patches to existing products', () => {
+    const children = {
+      GruposOpciones: [['producto_fila', 'grupo_codigo', 'nombre', 'minimo', 'maximo'], ['2', 'G', 'Extras', 2, 2]],
+      Opciones: [['grupo_codigo', 'opcion_codigo', 'nombre', 'precio_adicional', 'activo'], ['G', 'A', 'Uno', 0, 'sí'], ['G', 'B', 'Dos', 0, 'no']],
+    }
+    const invalid = parseImportSheets({ Productos: [['nombre', 'categoria', 'precio'], ['Nuevo', 'Cat', 100]], ...children })
+    expect(invalid.errors.join(' ')).toMatch(/producto nuevo sólo tiene 1 opción activa/)
+    const patch = parseImportSheets({ Productos: [['codigo', 'nombre', 'categoria', 'precio'], ['EXISTING', 'Actualizado', 'Cat', 100]], ...children })
+    expect(patch.errors).toEqual([])
+  })
   it('accepts omitted codes and keeps absent optional fields absent for patches', () => {
     const result = parseImportSheets({ Productos: [['nombre', 'categoria', 'precio'], ['Uno', 'Cat', '100'], ['Dos', 'Cat', '200']] })
     expect(result.errors).toEqual([])

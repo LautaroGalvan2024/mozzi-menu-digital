@@ -1,4 +1,5 @@
 import type { CellValue, SheetData } from 'read-excel-file/browser'
+import { parsePriceCents } from './money'
 
 export interface ImportProduct {
   rowRef: string
@@ -47,7 +48,6 @@ export interface ImportData {
 }
 
 type SheetRecord = Record<string, CellValue | null>
-const MAX_CENTS = 1_000_000_000_000
 const MIN_SORT_ORDER = -100_000
 const MAX_SORT_ORDER = 100_000
 
@@ -71,8 +71,7 @@ function numberValue(value: CellValue | null | undefined) {
 }
 
 function centsValue(value: CellValue | null | undefined) {
-  const cents = Math.round(numberValue(value) * 100)
-  return Number.isSafeInteger(cents) && cents >= 0 && cents <= MAX_CENTS ? cents : null
+  return parsePriceCents(value)
 }
 
 function sortOrderValue(value: CellValue | null | undefined) {
@@ -318,6 +317,14 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
   })
 
   if (products.length === 0) errors.push('Productos: agregá al menos una fila válida.')
+  for (const group of groups) {
+    const product = products.find((candidate) => candidate.rowRef === group.productRowRef)
+    // Existing groups may retain options omitted by a patch. Only a row without
+    // either identity is certainly new; the RPC validates the complete final graph.
+    if (!group.active || !product || product.id || product.code) continue
+    const activeOptions = options.filter((option) => option.groupCode.toLocaleLowerCase('en') === group.groupCode.toLocaleLowerCase('en') && option.active).length
+    if (group.minSelect > activeOptions) errors.push(`GruposOpciones: ${group.groupCode} requiere ${group.minSelect} opciones, pero el producto nuevo sólo tiene ${activeOptions} ${activeOptions === 1 ? 'opción activa' : 'opciones activas'}.`)
+  }
   if (products.length > 500) errors.push('La importación supera el límite de 500 productos.')
   if (groups.length > 2_500) errors.push('La importación supera el límite de 2.500 grupos.')
   if (options.length > 10_000) errors.push('La importación supera el límite de 10.000 opciones.')

@@ -196,6 +196,30 @@ describe('new product route', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
+  it('rejects a zero maximum before saving the catalogue', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await user.click(screen.getByRole('button', { name: 'Grupo' }))
+    await user.type(screen.getByLabelText('Nombre del grupo'), 'Extras')
+    await user.clear(screen.getByLabelText('Máximo'))
+    await user.type(screen.getByLabelText('Máximo'), '0')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('máximo debe estar entre 1 y 20')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects fractional cents instead of silently rounding a manual price', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await user.clear(screen.getByLabelText('Precio base'))
+    await user.type(screen.getByLabelText('Precio base'), '1.234')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('hasta dos decimales')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('sends active quantity prices inside the transactional product payload', async () => {
     const user = userEvent.setup()
     renderNewProductRoute()

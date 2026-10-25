@@ -7,6 +7,7 @@ import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
 import { uploadRestaurantImage } from '../../lib/images/upload'
+import { parsePriceCents } from '../../lib/money'
 import { publicAssetUrl, supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { clearProductAttempt, recoverProductDraft, saveProductAttempt } from './product-draft'
@@ -359,15 +360,15 @@ export function ProductEditorPage() {
     const restaurantId = scope.selected.id
     const currentDraft = draft!
     const maxCents = 1_000_000_000_000
-    const base = Math.round(Number(currentDraft.basePrice.replace(',', '.')) * 100)
-    const promo = currentDraft.promotionalPrice.trim() === '' ? null : Math.round(Number(currentDraft.promotionalPrice.replace(',', '.')) * 100)
+    const base = parsePriceCents(currentDraft.basePrice) ?? Number.NaN
+    const promo = currentDraft.promotionalPrice.trim() === '' ? null : parsePriceCents(currentDraft.promotionalPrice) ?? Number.NaN
     const startsAt = currentDraft.promotionStartsAt ? new Date(currentDraft.promotionStartsAt) : null
     const endsAt = currentDraft.promotionEndsAt ? new Date(currentDraft.promotionEndsAt) : null
     const moneyIsValid = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= maxCents
     setSaving(true)
     setError(null)
     if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code) || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
-      setError('Revisá el nombre, los precios y la vigencia. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
+      setError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
       setSaving(false)
       return
     }
@@ -375,12 +376,12 @@ export function ProductEditorPage() {
       ...group,
       options: group.options.map((option) => ({
         ...option,
-        priceDeltaCents: Math.round(Number(option.price.replace(',', '.')) * 100),
+        priceDeltaCents: parsePriceCents(option.price) ?? Number.NaN,
       })),
     }))
     const quantityPrices = currentDraft.quantityPrices.map((rule) => ({
       quantity: rule.quantity,
-      totalPriceCents: Math.round(Number(rule.totalPrice.replace(',', '.')) * 100),
+      totalPriceCents: parsePriceCents(rule.totalPrice) ?? Number.NaN,
     }))
     const quantityValues = new Set(quantityPrices.map((rule) => rule.quantity))
     if (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents))) {
@@ -390,8 +391,8 @@ export function ProductEditorPage() {
     }
     for (const group of groups) {
       const activeOptionCount = group.options.filter((option) => option.active).length
-      if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < group.minSelect || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
-        setError('Revisá nombres, precios y límites de los grupos de opciones.')
+      if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < Math.max(1, group.minSelect) || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
+        setError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.')
         setSaving(false)
         return
       }
