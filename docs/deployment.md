@@ -219,9 +219,9 @@ Estos comandos son el criterio de release, no una afirmación de que se haya des
 
 ## Rollback y recuperación
 
-- **Frontend:** promover el deployment anterior de Vercel. Verificá que siga siendo compatible con el esquema actual.
+- **Frontend:** después de publicar el checkout nuevo, no promover literalmente `bf18376` ni un deployment anterior. El formato nuevo de intentos en `sessionStorage` usa `version: 2` y huellas SHA256; el frontend antiguo puede reemplazar una clave de idempotencia incierta y duplicar un pedido cuya respuesta se perdió. Preparar un build compatible que conserve el checkout, la idempotencia y la lectura de intentos de la versión nueva, o corregir hacia adelante. Verificar también compatibilidad con el esquema y las funciones actuales. El snapshot del deployment previo sirve para trazabilidad y comparación; no garantiza un rollback compatible del checkout.
 - **Edge Functions:** redesplegar el commit anterior compatible. Rotar secretos si el incidente los afecta.
 - **Base:** no ejecutar SQL inverso improvisado. Crear una migración correctiva o restaurar a un proyecto aislado y seguir el procedimiento de recuperación.
 - **Datos:** validar backup y Point-in-Time Recovery del plan antes de necesitarlo. Una copia no probada no es un plan de recuperación.
 
-No borres pedidos ni auditoría para forzar un rollback.
+No borres pedidos, auditoría ni intentos inciertos del navegador para forzar un rollback o habilitar otro envío. Conservá las funciones y triggers que protegen pedidos con inventario; nunca devolver un comercio activado a `never_enabled`.
