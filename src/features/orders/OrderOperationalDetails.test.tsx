@@ -230,6 +230,26 @@ describe('operational order details', () => {
     expect(await screen.findByText(/Su importe no se suma como venta vigente/)).toBeVisible()
   })
 
+  it.each(['2', 2])('opens the returned order and its history when the RPC preserves quantity %j', async quantity => {
+    const order = setupInventoryOrder('completed')
+    order.inventory_outcome = 'returned'
+    mocks.rpc.mockResolvedValue({ data: {
+      replacementOrderId: null,
+      inventoryOperations: [{
+        id: '70000000-0000-4000-8000-000000000001', kind: 'return', reason: 'Devolución total, una unidad dañada',
+        createdAt: '2026-10-24T12:00:00Z', actorUserId: RESTAURANT_ID,
+        result: { restocked: true, restockQuantities: [{ productId: PRODUCT_ID, quantity }] },
+      }],
+    }, error: null })
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    expect(await screen.findByRole('heading', { name: 'PED-0001' })).toBeVisible()
+    expect(screen.getByText('Producto de prueba: 2 unidades repuestas como vendibles.')).toBeVisible()
+    expect(screen.getByText('Devolución total, una unidad dañada')).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(mocks.rpc).toHaveBeenCalledWith('get_order_by_action', { p_action_id: ACTION_ID })
+    expect(mocks.rpc.mock.calls.every(([name]) => name === 'get_order_by_action')).toBe(true)
+  })
+
   it('does not expose administrator reversals to an order manager', async () => {
     mocks.role = 'order_manager'
     setupInventoryOrder('completed')

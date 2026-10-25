@@ -2,9 +2,15 @@ import { z } from 'zod'
 import type { AdminOrderRow } from './orderSchemas'
 
 export const inventoryOutcomeSchema = z.enum(['none', 'delivered', 'corrected', 'returned'])
+// The RPC preserves either JSON integers or digit strings. Orders contain at
+// most 100 units; validate the text before conversion so malformed values fail.
+const restockQuantitySchema = z.union([
+  z.number(),
+  z.string().regex(/^\d{1,13}$/).transform(Number),
+]).pipe(z.number().int().min(0).max(100))
 export const inventoryDetailSchema = z.object({
   replacementOrderId: z.string().uuid().nullable(),
-  inventoryOperations: z.array(z.object({ id: z.string().uuid(), kind: z.string(), reason: z.string().nullable(), createdAt: z.string(), actorUserId: z.string().uuid().nullable(), result: z.object({ restocked: z.boolean().optional(), restockQuantities: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().nonnegative() })).nullable().optional() }).passthrough() })),
+  inventoryOperations: z.array(z.object({ id: z.string().uuid(), kind: z.string(), reason: z.string().nullable(), createdAt: z.string(), actorUserId: z.string().uuid().nullable(), result: z.object({ restocked: z.boolean().optional(), restockQuantities: z.array(z.object({ productId: z.string().uuid(), quantity: restockQuantitySchema })).nullable().optional() }).passthrough() })),
 })
 export const inventoryOutcomeLabel = { none: 'Sin entrega registrada', delivered: 'Entrega vigente', corrected: 'Entrega corregida', returned: 'Devuelta' } as const
 export function isReversed(order: Pick<AdminOrderRow, 'inventory_outcome'>): boolean {
