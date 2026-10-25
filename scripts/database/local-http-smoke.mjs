@@ -73,6 +73,10 @@ function denied(result, label, statuses = [401, 403]) {
   check(statuses.includes(result.status), `${label}: expected access denial, received HTTP ${result.status}`)
 }
 
+function rejectedWith(result, code, label) {
+  check(!result.ok && (result.data?.message === code || result.data?.error?.code === code), `${label}: expected ${code}, received HTTP ${result.status}`)
+}
+
 async function rpc(name, body, token, service = false) {
   return http(`/rest/v1/rpc/${name}`, { body, token, service })
 }
@@ -276,7 +280,7 @@ async function main() {
 
   stage = 'stock activation in synthetic tenant'
   accepted(await rpc('confirm_inventory_business_policy', { p_restaurant_id: a, p_policy: {
-    unitModel: 'whole_product', sourceOfTruth: 'app', otherChannels: 'none', returns: 'full_only', partialDeliveries: 'none',
+    unitModel: 'whole_product', sourceOfTruth: 'app', otherChannels: 'record_before_handoff', returns: 'full_only', partialDeliveries: 'none',
     physicalScope: 'until_handoff_including_transit', acceptance: 'reserve', delivery: 'physical_handoff', acceptedReservationsExpire: false,
   } }, admin.token), 'synthetic policy confirmation')
   const countId = randomUUID()
@@ -290,8 +294,15 @@ async function main() {
   pass('authenticated inventory policy/count contracts activate only the synthetic tenant')
 
   stage = 'order creation, recovery and inventory transitions'
+  const secondProduct = imported.products[0].id
+  const readInventory = async () => accepted(await rpc('get_inventory', { p_restaurant_id: a }, admin.token), 'inventory state')
+  const balanceState = snapshot => JSON.stringify(snapshot.items.map(({ productId, onHand, reserved, available, version }) => ({ productId, onHand, reserved, available, version })))
+  const createOrder = business => withEdge
+    ? http('/functions/v1/create-order', { body: { ...business, antiSpam: { formStartedAt: new Date(Date.now() - 5_000).toISOString() } }, headers: { Origin: origin } })
+    : rpc('create_order_transaction', { p_request: business, p_ip_hash: 'a'.repeat(64), p_phone_hash: 'b'.repeat(64), p_client_event_token_hash: 'c'.repeat(64) }, undefined, true)
   const request = { restaurantSlug: slug, idempotencyKey: randomUUID(), customer: { name: 'Synthetic HTTP customer', phone: '+5492222222222' },
-    fulfillment: { type: 'pickup' }, paymentMethodId: payment, items: [{ productId: product, quantity: 2, optionIds: [] }] }
+    fulfillment: { type: 'pickup' }, paymentMethodId: payment,
+    items: [{ productId: product, quantity: 2, optionIds: [] }, { productId: secondProduct, quantity: 1, optionIds: [] }] }
   let created
   if (withEdge) {
     const body = { ...request, antiSpam: { formStartedAt: new Date(Date.now() - 5_000).toISOString() } }
@@ -314,11 +325,134 @@ async function main() {
   const reserved = accepted(await rpc('get_inventory', { p_restaurant_id: a }, admin.token), 'reserved stock')
   const item = reserved.items.find(value => value.productId === product)
   check(item.onHand === '5' && item.reserved === '2' && item.available === '3', 'Reservation balance contract mismatch')
+
+  stage = 'external multi-SKU sale atomicity and permission boundaries'
+  const externalSale = { p_restaurant_id: a, p_operation_id: randomUUID(), p_kind: 'external_sale',
+    p_rows: reserved.items.map(value => ({ productId: value.productId, quantity: '1', expectedVersion: value.version })),
+    p_reason: 'Synthetic manual external sale', p_external_reference: `http-smoke-${suffix}-sale`,
+  }
+  denied(await rpc('inventory_adjust', externalSale, manager.token), 'manager external sale')
+  denied(await rpc('inventory_adjust', externalSale, other.token), 'foreign external sale')
+  // The last UUID is processed last by inventory_apply: force failure after an earlier SKU could be changed.
+  const orderedBalances = [...reserved.items].sort((left, right) => left.productId.localeCompare(right.productId))
+  const insufficientSale = { ...externalSale, p_operation_id: randomUUID(), p_external_reference: `${externalSale.p_external_reference}-rejected`,
+    p_rows: orderedBalances.map((value, index) => ({ productId: value.productId,
+      quantity: index === orderedBalances.length - 1 ? String(Number(value.available) + 1) : '1', expectedVersion: value.version })),
+  }
+  rejectedWith(await rpc('inventory_adjust', insufficientSale, admin.token), 'INSUFFICIENT_STOCK', 'external sale cannot consume reserved units')
+  const afterRejectedSale = await readInventory()
+  check(balanceState(afterRejectedSale) === balanceState(reserved) && !afterRejectedSale.operations.some(value => value.id === insufficientSale.p_operation_id),
+    'Rejected multi-SKU sale changed a balance/version or left an operation')
+  const sold = accepted(await rpc('inventory_adjust', externalSale, admin.token), 'external multi-SKU sale')
+  check(sold.replayed === false && sold.items?.length === 2, 'External multi-SKU operation response mismatch')
+  const afterSale = await readInventory()
+  for (const before of reserved.items) {
+    const after = afterSale.items.find(value => value.productId === before.productId)
+    check(Number(after.onHand) === Number(before.onHand) - 1 && after.reserved === before.reserved && Number(after.available) === Number(before.available) - 1,
+      'External sale did not preserve reserved stock')
+  }
+  const saleReplay = accepted(await rpc('inventory_adjust', externalSale, admin.token), 'external sale replay with original versions')
+  check(saleReplay.replayed === true && saleReplay.operationId === sold.operationId, 'External sale replay lost operation identity')
+  rejectedWith(await rpc('inventory_adjust', { ...externalSale, p_operation_id: randomUUID() }, admin.token),
+    'INVENTORY_EXTERNAL_REFERENCE_DUPLICATE', 'duplicate external reference under new UUID')
+  rejectedWith(await rpc('inventory_adjust', { ...externalSale, p_reason: 'Changed external sale intent' }, admin.token),
+    'IDEMPOTENCY_CONFLICT', 'changed external sale intent under same UUID')
+  const afterSaleRetries = await readInventory()
+  const saleOperations = afterSaleRetries.operations.filter(value => value.id === sold.operationId)
+  check(balanceState(afterSaleRetries) === balanceState(afterSale) && saleOperations.length === 1 && saleOperations[0].movements.length === 2,
+    'External sale retry/reference conflict duplicated stock movement')
+  const externalReferenceRoute = `/rest/v1/inventory_operations?select=id,external_reference&restaurant_id=eq.${a}&id=eq.${sold.operationId}`
+  for (const token of [admin.token, manager.token]) {
+    const visible = accepted(await http(externalReferenceRoute, { method: 'GET', token }), 'own tenant external reference history')
+    check(visible.length === 1 && visible[0].id === sold.operationId && visible[0].external_reference === externalSale.p_external_reference,
+      'Own tenant administrator/operator cannot read the recorded external reference')
+  }
+  const hiddenReference = accepted(await http(externalReferenceRoute, { method: 'GET', token: other.token }), 'foreign tenant external reference history')
+  check(hiddenReference.length === 0, 'External sale reference leaked across tenant RLS')
+  pass('admin-only external multi-SKU sale is atomic, protects reservations and replays without duplicates')
+
+  stage = 'full delivery contract'
+  const partialDelivery = await rpc('complete_order', { p_order_id: found[0].id, p_rows: [{ productId: product, quantity: 1 }] }, manager.token)
+  check(partialDelivery.status === 404 && partialDelivery.data?.code === 'PGRST202', 'Partial-delivery argument unexpectedly matched a public RPC')
+  check(balanceState(await readInventory()) === balanceState(afterSale), 'Unsupported partial delivery changed stock')
   accepted(await rpc('complete_order', { p_order_id: found[0].id }, manager.token), 'manager handoff')
   const completed = accepted(await rpc('get_inventory', { p_restaurant_id: a }, admin.token), 'delivered stock')
   const finalItem = completed.items.find(value => value.productId === product)
-  check(finalItem.onHand === '3' && finalItem.reserved === '0' && finalItem.available === '3', 'Handoff stock balance contract mismatch')
+  const secondDelivered = completed.items.find(value => value.productId === secondProduct)
+  check(finalItem.onHand === '2' && finalItem.reserved === '0' && finalItem.available === '2'
+    && secondDelivered.onHand === '3' && secondDelivered.reserved === '0', 'Full handoff stock balance contract mismatch')
   pass('order managers reserve and hand off over HTTP; foreign tenant cannot claim')
+
+  stage = 'full return with explicit sellable quantities'
+  const fullReturn = { p_order_id: found[0].id, p_operation_id: randomUUID(), p_kind: 'return', p_restock: true,
+    p_reason: 'Synthetic full return; second SKU received but not sellable',
+    p_restock_quantities: [{ productId: product, quantity: '2' }, { productId: secondProduct, quantity: '0' }],
+  }
+  denied(await rpc('reverse_order_inventory', fullReturn, manager.token), 'manager full return')
+  denied(await rpc('reverse_order_inventory', fullReturn, other.token), 'foreign full return')
+  const partialReturn = await rpc('reverse_order_inventory', { ...fullReturn, p_return_quantities: [{ productId: product, quantity: 1 }] }, admin.token)
+  check(partialReturn.status === 404 && partialReturn.data?.code === 'PGRST202', 'Partial-commercial-return argument unexpectedly matched a public RPC')
+  rejectedWith(await rpc('reverse_order_inventory', { ...fullReturn, p_restock_quantities: fullReturn.p_restock_quantities.slice(0, 1) }, admin.token),
+    'INVENTORY_RETURN_QUANTITIES_INVALID', 'sellable destination must explicitly cover every delivered SKU')
+  check(balanceState(await readInventory()) === balanceState(completed), 'Rejected return intent changed stock')
+  const returned = accepted(await rpc('reverse_order_inventory', fullReturn, admin.token), 'full return with explicit sellable destinations')
+  const returnedReplay = accepted(await rpc('reverse_order_inventory', fullReturn, admin.token), 'full return replay')
+  check(returned.replayed === false && returnedReplay.replayed === true && returnedReplay.operationId === returned.operationId, 'Return replay identity mismatch')
+  denied(await rpc('reverse_order_inventory', fullReturn, manager.token), 'manager return replay')
+  rejectedWith(await rpc('reverse_order_inventory', { ...fullReturn, p_operation_id: randomUUID() }, admin.token), 'INVENTORY_ALREADY_REVERSED', 'second full return under different UUID')
+  const afterReturn = await readInventory()
+  const returnOperation = afterReturn.operations.find(value => value.id === returned.operationId)
+  check(afterReturn.items.find(value => value.productId === product).onHand === '4'
+    && afterReturn.items.find(value => value.productId === secondProduct).onHand === '3'
+    && returnOperation?.movements.length === 2, 'Explicit sellable return stock mismatch')
+  const returnedFirst = returnOperation.movements.find(value => value.productId === product)
+  const returnedSecond = returnOperation.movements.find(value => value.productId === secondProduct)
+  check(returnedFirst.returnedQuantity === '2' && returnedFirst.deltaOnHand === '2'
+    && returnedSecond.returnedQuantity === '1' && returnedSecond.deltaOnHand === '0', 'Total received quantities were confused with sellable restock')
+  const returnedOrder = accepted(await http(`/rest/v1/orders?select=status,inventory_outcome&id=eq.${found[0].id}`, { method: 'GET', token: admin.token }), 'returned order state')
+  check(returnedOrder.length === 1 && returnedOrder[0].status === 'completed' && returnedOrder[0].inventory_outcome === 'returned', 'Full-return order state mismatch')
+  pass('full return requires admin, records every received SKU, restocks only explicit sellable units and replays once')
+
+  stage = 'pause blocks new sales and deliveries while preserving committed retries'
+  const pendingRequest = { ...request, idempotencyKey: randomUUID(), customer: { ...request.customer, phone: '+5493333333333' },
+    items: request.items.map(value => ({ ...value, quantity: 1 })),
+  }
+  const pending = accepted(await createOrder(pendingRequest), 'synthetic order before pause')
+  accepted(await rpc('claim_order', { p_action_id: pending.order.actionId }, manager.token), 'reservation before pause')
+  const pendingOrder = accepted(await http(`/rest/v1/orders?select=id&action_id=eq.${pending.order.actionId}`, { method: 'GET', token: admin.token }), 'pending delivery identity')
+  check(pendingOrder.length === 1, 'Pending delivery identity mismatch')
+  const unaccepted = accepted(await createOrder({ ...pendingRequest, idempotencyKey: randomUUID(), customer: { ...request.customer, phone: '+5494444444444' } }), 'generated order before pause')
+  const beforePause = await readInventory()
+  const pauseRequest = { p_restaurant_id: a, p_mode: 'paused', p_reason: 'Synthetic pause for reconciliation', p_expected_policy_version: beforePause.policy.version }
+  denied(await rpc('change_inventory_policy', pauseRequest, manager.token), 'manager policy pause')
+  denied(await rpc('change_inventory_policy', pauseRequest, other.token), 'foreign policy pause')
+  const paused = accepted(await rpc('change_inventory_policy', pauseRequest, admin.token), 'admin policy pause')
+  check(paused.mode === 'paused', 'Policy did not pause')
+  rejectedWith(await createOrder({ ...pendingRequest, idempotencyKey: randomUUID(), customer: { ...request.customer, phone: '+5495555555555' } }), 'INVENTORY_PAUSED', 'new order while paused')
+  rejectedWith(await rpc('claim_order', { p_action_id: unaccepted.order.actionId }, manager.token), 'INVENTORY_PAUSED', 'new acceptance while paused')
+  rejectedWith(await rpc('complete_order', { p_order_id: pendingOrder[0].id }, manager.token), 'INVENTORY_PAUSED', 'new handoff while paused')
+  const pausedExternal = { ...externalSale, p_operation_id: randomUUID(), p_external_reference: `${externalSale.p_external_reference}-paused`,
+    p_rows: beforePause.items.map(value => ({ productId: value.productId, quantity: '1', expectedVersion: value.version })),
+  }
+  rejectedWith(await rpc('inventory_adjust', pausedExternal, admin.token), 'INVENTORY_PAUSED', 'new external sale while paused')
+  const pausedOrderReplay = accepted(await createOrder(request), 'committed order creation replay while paused')
+  check(pausedOrderReplay.idempotentReplay === true && pausedOrderReplay.order.actionId === actionId, 'Pause broke committed order replay')
+  check(accepted(await rpc('inventory_adjust', externalSale, admin.token), 'committed external sale replay while paused').replayed === true, 'Pause broke external sale replay')
+  check(accepted(await rpc('reverse_order_inventory', fullReturn, admin.token), 'committed return replay while paused').replayed === true, 'Pause broke full return replay')
+  check(accepted(await rpc('complete_order', { p_order_id: found[0].id }, manager.token), 'committed delivery replay while paused').alreadyDelivered === true, 'Pause broke delivery replay')
+  denied(await rpc('inventory_adjust', externalSale, manager.token), 'manager cannot replay an admin external sale')
+  rejectedWith(await rpc('change_inventory_policy', { ...pauseRequest, p_mode: 'enforced', p_expected_policy_version: paused.version }, admin.token),
+    'INVENTORY_RECONCILIATION_REQUIRED', 'resume without physical reconciliation')
+  const afterPause = await readInventory()
+  check(afterPause.policy.mode === 'paused' && balanceState(afterPause) === balanceState(beforePause)
+    && afterPause.operations.length === beforePause.operations.length, 'Paused failures or retries mutated inventory')
+  const ledger = accepted(await http(`/rest/v1/inventory_movements?select=product_id,delta_on_hand,delta_reserved&restaurant_id=eq.${a}`, { method: 'GET', token: admin.token }), 'synthetic ledger reconciliation')
+  for (const balance of afterPause.items) {
+    const movements = ledger.filter(value => value.product_id === balance.productId)
+    check(movements.reduce((sum, value) => sum + BigInt(value.delta_on_hand), 0n) === BigInt(balance.onHand)
+      && movements.reduce((sum, value) => sum + BigInt(value.delta_reserved), 0n) === BigInt(balance.reserved), 'Final ledger does not reconcile with balances')
+  }
+  pass('pause blocks new orders, acceptance, handoff and external sales; committed retries preserve stock and ledger')
   console.log(JSON.stringify({ passed: true, assertions, edge: withEdgeHost ? 'original handlers on host Deno; hosted container not covered' : withEdge ? 'local CLI runtime' : 'not run',
     services: ['Auth', 'PostgREST', 'Storage', ...(withEdge ? ['Edge handlers'] : [])], fixtures: 'synthetic; discarded with local stack' }))
 }
