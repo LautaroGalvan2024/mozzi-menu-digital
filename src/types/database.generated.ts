@@ -438,6 +438,14 @@ isOneToOne: false
             [_ in never]: never
           }
           Functions: {
+"get_inventory": { Args: { "p_restaurant_id": string,"p_after"?: string,"p_limit"?: number }; Returns: Json },
+"confirm_inventory_business_policy": { Args: { "p_restaurant_id": string,"p_policy": Json }; Returns: Json },
+"begin_inventory_count": { Args: { "p_restaurant_id": string,"p_operation_id": string,"p_reason": string }; Returns: Json },
+"finish_inventory_count": { Args: { "p_count_id": string,"p_rows": Json,"p_pending_order_ids": string[],"p_no_movements_confirmed": boolean,"p_note": string,"p_activate"?: boolean }; Returns: Json },
+"change_inventory_policy": { Args: { "p_restaurant_id": string,"p_mode": string,"p_reason": string,"p_expected_policy_version": number }; Returns: Json },
+"inventory_adjust": { Args: { "p_restaurant_id": string,"p_operation_id": string,"p_kind": string,"p_rows": Json,"p_reason": string,"p_external_reference"?: string }; Returns: Json },
+"reverse_order_inventory": { Args: { "p_order_id": string,"p_operation_id": string,"p_kind": string,"p_restock": boolean,"p_reason": string,"p_restock_quantities"?: Json }; Returns: Json },
+"link_order_replacement": { Args: { "p_original_order_id": string,"p_replacement_order_id": string,"p_reason": string }; Returns: Json },
             "cancel_order":
 { Args: { "p_order_id": string,"p_reason": string }; Returns: Json
                            },
@@ -467,6 +475,9 @@ isOneToOne: false
                            },
 "get_actor_authorization":
 { Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"get_catalog_import_result":
+{ Args: { "p_restaurant_id": string,"p_batch_id": string }; Returns: Json
                            },
 "get_order_by_action":
 { Args: { "p_action_id": string }; Returns: Json
