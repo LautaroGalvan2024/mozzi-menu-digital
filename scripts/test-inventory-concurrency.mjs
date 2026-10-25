@@ -9,6 +9,9 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { localDatabaseEnvironment } from './database/connection.mjs'
 
 const env = localDatabaseEnvironment()
+const databaseArgument = process.argv.find(value => value.startsWith('--database='))
+if (databaseArgument) env.PGDATABASE = databaseArgument.slice('--database='.length)
+if (!/^mozzi_[a-z0-9_]+$/.test(env.PGDATABASE) || env.PGDATABASE.startsWith('mozzi_restore_')) throw new Error('Synthetic test database required; never seed a recovery database')
 if (env.PGSERVICE || env.PGSERVICEFILE || env.PGHOSTADDR && !['127.0.0.1', '::1'].includes(env.PGHOSTADDR)) throw new Error('libpq service and non-loopback address overrides are forbidden')
 const sessions = new Set()
 class Session {
