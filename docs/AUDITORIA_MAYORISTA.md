@@ -2,7 +2,7 @@
 
 Fecha de auditoría original: **24/10/2026**, America/Buenos_Aires. Los hallazgos y mediciones siguientes describen la base original auditada.
 
-La primera versión sigue limitada a **un mayorista**, con **RF-SKU automático y facilidad de uso confirmado**. El usuario autorizó después la implementación y las migraciones productivas con respaldo y pruebas aisladas. Confirmó **reserva al aceptar** y **descuento al recibir el cliente o retirar**. Continúan pendientes las demás decisiones comerciales; no se activa inventario por inferencia. La implementación, migraciones, pruebas y límites actuales están en [IMPLEMENTACION_MAYORISTA_STOCK.md](IMPLEMENTACION_MAYORISTA_STOCK.md). Este registro nuevo no convierte las mediciones sintéticas históricas en capacidad productiva comprobada.
+La primera versión sigue limitada a **un mayorista**, con **RF-SKU automático y facilidad de uso confirmado**. El usuario autorizó después la implementación y las migraciones productivas con respaldo y pruebas aisladas. Confirmó **reserva al aceptar**, **descuento al recibir el cliente o retirar** y, el 24/10/2026, **comenzar vendiendo por unidades enteras**. Cajas, fracciones y conversiones quedan fuera de la primera versión; D03/AC25 del plan registran esta decisión. Continúan pendientes las demás decisiones comerciales; no se activa inventario por inferencia. La implementación, migraciones, pruebas y límites actuales están en [IMPLEMENTACION_MAYORISTA_STOCK.md](IMPLEMENTACION_MAYORISTA_STOCK.md). Este registro nuevo no convierte las mediciones sintéticas históricas en capacidad productiva comprobada.
 
 ## 1. Veredicto ejecutivo de la base auditada
 
