@@ -12,6 +12,11 @@ import {
 const uuid = z.string().uuid();
 const cents = z.number().int().min(0).max(1_000_000_000_000);
 const sortOrder = z.number().int().min(-100_000).max(100_000);
+const MAX_ORDER_ITEMS = 25;
+const MAX_ORDER_OPTIONS = 30;
+const MAX_IMPORT_PRODUCTS = 500;
+const MAX_IMPORT_GROUPS = 2_500;
+const MAX_IMPORT_OPTIONS = 10_000;
 
 function validTimeZone(value: string): boolean {
   try {
@@ -101,7 +106,7 @@ const orderItemSchema = z.object({
   productId: uuid,
   quantity: z.number().int().min(1).max(100),
   notes: optionalMultiline(500),
-  optionIds: z.array(uuid).max(30).refine(
+  optionIds: z.array(uuid).max(MAX_ORDER_OPTIONS).refine(
     (values) => new Set(values).size === values.length,
     "No se permiten opciones duplicadas.",
   ),
@@ -152,7 +157,7 @@ export const createOrderSchema = z.object({
   fulfillment: fulfillmentSchema,
   paymentMethodId: uuid,
   notes: optionalMultiline(1_000),
-  items: z.array(orderItemSchema).min(1).max(25),
+  items: z.array(orderItemSchema).min(1).max(MAX_ORDER_ITEMS),
   antiSpam: z.object({
     honeypot: z.string().max(200).optional(),
     formStartedAt: z.string().datetime({ offset: true }),
@@ -291,7 +296,46 @@ export const expireOrdersSchema = z.object({
   limit: z.number().int().min(1).max(5_000).default(500),
 }).strict();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function precheckArray(
+  value: unknown,
+  path: PropertyKey[],
+  maximum: number,
+  optional = false,
+): void {
+  if (optional && value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw validationError([{ path, message: "Se requiere una lista." }]);
+  }
+  if (value.length > maximum) {
+    throw validationError([{ path, message: `La lista admite hasta ${maximum} elementos.` }]);
+  }
+}
+
+function precheckCollections(schema: z.ZodTypeAny, input: unknown): void {
+  if (!isRecord(input)) return; // Zod rejects a non-object root without traversing it.
+  if (schema === createOrderSchema) {
+    precheckArray(input.items, ["items"], MAX_ORDER_ITEMS);
+    // Only inspect the bounded set of lines, never the contents of optionIds.
+    (input.items as unknown[]).forEach((item, index) => {
+      if (isRecord(item)) {
+        precheckArray(item.optionIds, ["items", index, "optionIds"], MAX_ORDER_OPTIONS);
+      }
+    });
+  } else if (schema === importProductsSchema) {
+    // Check every top-level length before Zod can allocate per-row issues or
+    // run transformations/graph validation on any of the import collections.
+    precheckArray(input.products, ["products"], MAX_IMPORT_PRODUCTS);
+    precheckArray(input.groups, ["groups"], MAX_IMPORT_GROUPS, true);
+    precheckArray(input.options, ["options"], MAX_IMPORT_OPTIONS, true);
+  }
+}
+
 export function parseInput<S extends z.ZodTypeAny>(schema: S, input: unknown): z.output<S> {
+  precheckCollections(schema, input);
   const parsed = schema.safeParse(input);
   if (!parsed.success) throw validationError(parsed.error.issues);
   return parsed.data;
