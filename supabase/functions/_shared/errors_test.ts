@@ -1,6 +1,28 @@
 import { databaseApiError, toApiError } from "./errors.ts";
 import { assertEquals } from "./test-assert.ts";
 
+Deno.test("public inventory failures preserve safe actionable codes", () => {
+  for (
+    const code of [
+      "INVENTORY_PAUSED",
+      "INVENTORY_CUTOVER",
+      "INVENTORY_NOT_INITIALIZED",
+      "INSUFFICIENT_STOCK",
+    ]
+  ) {
+    const mapped = databaseApiError({
+      code: "P0001",
+      message: code,
+      details: "private quantities and product UUID",
+      hint: "internal SQL",
+    });
+    assertEquals(mapped.status, 409);
+    assertEquals(mapped.code, code);
+    assertEquals(mapped.message.includes("private"), false);
+    assertEquals(mapped.details, undefined);
+  }
+});
+
 Deno.test("known rate-limit database failure maps to a sanitized 429", () => {
   const mapped = databaseApiError({
     code: "P0001",
@@ -40,4 +62,32 @@ Deno.test("invalid import categories map to a sanitized validation error", () =>
   assertEquals(mapped.status, 422);
   assertEquals(mapped.code, "IMPORT_CATEGORY_INVALID");
   assertEquals(mapped.message.includes("internal"), false);
+});
+
+Deno.test("membership validation failures map to safe actionable responses", () => {
+  for (
+    const [code, status, message] of [
+      [
+        "LAST_RESTAURANT_ADMIN_REQUIRED",
+        422,
+        "El comercio debe conservar al menos un administrador activo.",
+      ],
+      [
+        "MEMBERSHIP_INPUT_INVALID",
+        400,
+        "Los datos de la membresía no son válidos.",
+      ],
+    ] as const
+  ) {
+    const mapped = databaseApiError({
+      code: "P0001",
+      message: code,
+      details: "private membership identifiers",
+      hint: "internal query text",
+    });
+    assertEquals(mapped.status, status);
+    assertEquals(mapped.code, code);
+    assertEquals(mapped.message, message);
+    assertEquals(mapped.details, undefined);
+  }
 });

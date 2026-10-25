@@ -14,6 +14,7 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { adminOrderSchema, statusLabel, type AdminOrderRow } from './orderSchemas'
 import { StatusPill } from './OrderStatus'
+import { orderCommercialReport } from './inventoryOrder'
 
 const PAGE_SIZE = 25
 
@@ -77,6 +78,7 @@ export function OrdersPage() {
         .gte('created_at', range.from)
         .lt('created_at', range.to)
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
       if (status) request = request.eq('status', status)
       if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
@@ -134,6 +136,7 @@ export function OrdersPage() {
           .gte('created_at', range.from)
           .lt('created_at', range.to)
           .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
           .range(offset, offset + batchSize - 1)
         if (status) request = request.eq('status', status)
         if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
@@ -145,17 +148,8 @@ export function OrdersPage() {
         exported.push(...batch)
         if (batch.length < batchSize) break
       }
-      const columns = [
-        'display_number',
-        'created_at',
-        'status',
-        'customer_name',
-        'customer_phone',
-        'fulfillment_type',
-        'payment_method_name_snapshot',
-        'total_cents',
-        'accepted_at',
-      ]
+      const report = exported.map(orderCommercialReport)
+      const columns = Object.keys(report[0] ?? {})
       const safe = (value: unknown) => {
         const text = String(value ?? '')
         const protectedText = /^[=+\-@]/.test(text) ? `'${text}` : text
@@ -163,8 +157,8 @@ export function OrdersPage() {
       }
       const csv = [
         columns.join(','),
-        ...exported.map((row) =>
-          columns.map((column) => safe(row[column as keyof AdminOrderRow])).join(','),
+        ...report.map((row) =>
+          columns.map((column) => safe(row[column as keyof typeof row])).join(','),
         ),
       ].join('\r\n')
       const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' })
@@ -186,7 +180,7 @@ export function OrdersPage() {
       <PageHeader
         eyebrow="Tiempo real"
         title="Pedidos"
-        description="Los cambios se actualizan mediante Realtime y siempre respetan RLS."
+        description="Historial de pedidos, entregas, correcciones y devoluciones. El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
         actions={
           <button
             className="button-secondary"
@@ -304,7 +298,7 @@ export function OrdersPage() {
                   <tr key={row.id}>
                     <td className="font-display font-bold text-stone-950">{row.display_number}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
-                    <td><StatusPill status={row.status} /></td>
+                    <td><StatusPill status={row.status} outcome={row.inventory_outcome} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
@@ -323,9 +317,10 @@ export function OrdersPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <strong className="font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
-                  <StatusPill status={row.status} />
+                  <StatusPill status={row.status} outcome={row.inventory_outcome} />
                 </div>
                 <div className="mt-4 min-w-0">
+                  {row.replaces_order_id?<p className="mb-1 text-xs text-amber-800">Pedido de reemplazo · misma operación comercial</p>:null}
                   <p className="truncate font-semibold text-stone-900">{row.customer_name}</p>
                   <p className="mt-0.5 truncate text-xs text-stone-500">{row.customer_phone}</p>
                 </div>

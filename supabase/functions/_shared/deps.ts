@@ -5,4 +5,4 @@ export type {
   SupabaseClient,
   User,
 } from "npm:@supabase/supabase-js@2.117.2";
-export { z } from "npm:zod@3.25.76";
+export { z } from "npm:zod@4.6.7";

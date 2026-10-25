@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   checkoutCartFingerprint,
+  checkoutBusinessRequest,
+  checkoutRequestFingerprint,
   clearCheckoutAttempt,
   getCheckoutAttemptKey,
+  recordCheckoutAttempt,
+  readCheckoutAttempt,
 } from '../lib/checkout-attempt'
 import { checkoutSchema, generatedOrderSchema } from '../lib/validation/schemas'
 import type { CartLine } from '../types/domain'
@@ -44,6 +48,33 @@ const checkout = {
 
 describe('public checkout validation', () => {
   beforeEach(() => sessionStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('normalizes equivalent business requests and fingerprints every consequential field without storing PII', async () => {
+    const request = checkoutBusinessRequest('mozzi', checkout, [line])
+    const equivalent = checkoutBusinessRequest('mozzi', { ...checkout, customerName: '  Ana  Pérez ', customerPhone: '0054 9 3492 123456' }, [{ ...line, quantity: 1 }, { ...line, quantity: 1 }])
+    const hash = await checkoutRequestFingerprint(request)
+    expect(await checkoutRequestFingerprint(equivalent)).toBe(hash)
+    for (const changed of [
+      { ...checkout, customerName: 'Otra persona' },
+      { ...checkout, notes: 'Cambió la entrega' },
+      { ...checkout, paymentMethodId: '10000000-0000-4000-8000-000000000099' },
+      { ...checkout, fulfillmentType: 'delivery' as const, deliveryZoneId: '10000000-0000-4000-8000-000000000098', address: 'Calle Nueva 123', city: 'Rafaela' },
+    ]) expect(await checkoutRequestFingerprint(checkoutBusinessRequest('mozzi', changed, [line]))).not.toBe(hash)
+    const key = getCheckoutAttemptKey('mozzi', hash)
+    recordCheckoutAttempt('mozzi', key, hash, 'uncertain')
+    expect(readCheckoutAttempt('mozzi')?.fingerprint).toBe(hash)
+    expect(sessionStorage.getItem('mozzi:checkout-attempt:mozzi')).not.toContain('Ana')
+    expect(sessionStorage.getItem('mozzi:checkout-attempt:mozzi')).not.toContain('Sin sal')
+  })
+
+  it('fails closed instead of replacing an unreadable or unpersistable attempt', () => {
+    sessionStorage.setItem('mozzi:checkout-attempt:mozzi', '{broken')
+    expect(() => getCheckoutAttemptKey('mozzi', 'fingerprint')).toThrow(/Consultar|Consultá/)
+    sessionStorage.clear()
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota') })
+    expect(() => getCheckoutAttemptKey('mozzi', 'fingerprint')).toThrow(/no se envió/)
+  })
 
   it('aligns phone validation with the server format', () => {
     expect(checkoutSchema.safeParse(checkout).success).toBe(true)
@@ -132,7 +163,7 @@ describe('public checkout validation', () => {
     }).success).toBe(false)
   })
 
-  it('reuses an attempt across reloads and rotates it when the cart changes or expires', () => {
+  it('keeps the same attempt across reloads, cart edits and elapsed time until explicitly cleared', () => {
     const fingerprint = checkoutCartFingerprint([line])
     const first = getCheckoutAttemptKey(
       'mozzi',
@@ -160,8 +191,8 @@ describe('public checkout validation', () => {
     )
 
     expect(retry).toBe(first)
-    expect(changed).not.toBe(first)
-    expect(expired).not.toBe(changed)
+    expect(changed).toBe(first)
+    expect(expired).toBe(first)
 
     clearCheckoutAttempt('mozzi')
     expect(sessionStorage.length).toBe(0)

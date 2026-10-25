@@ -1,7 +1,7 @@
 import { useQuery,useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, CircleX, Eye, EyeOff, ImageIcon, Plus, Search, Star } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,EmptyState,LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
@@ -14,6 +14,8 @@ const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),desc
 type ToggleField='available'|'active'|'featured'
 
 export function ProductsPage(){
+  const location = useLocation()
+  const savedCode = z.object({ savedCode: z.string() }).safeParse(location.state)
   const scope=useRestaurantScope();const restaurant=useRestaurant(scope.selected?.id);const client=useQueryClient();const[search,setSearch]=useState('');const[mutationError,setMutationError]=useState<string|null>(null);const[busyProductId,setBusyProductId]=useState<string|null>(null)
   const query=useQuery({queryKey:['products',scope.selected?.id],enabled:Boolean(scope.selected),queryFn:async()=>{const{data,error}=await supabase.from('products').select('id,name,code,description,base_price_cents,promotional_price_cents,image_path,active,available,featured,sort_order,category_id,categories(name)').eq('restaurant_id',scope.selected?.id??'').is('deleted_at',null).order('sort_order');if(error)throw new Error('No se pudieron cargar los productos.');return z.array(schema).parse(data)}})
   if(query.isLoading||restaurant.isLoading)return <LoadingScreen/>;if(query.error||restaurant.error)return <ErrorPanel>{query.error?.message??restaurant.error?.message}</ErrorPanel>
@@ -40,6 +42,7 @@ export function ProductsPage(){
       description="Marcá un producto como agotado sin eliminarlo. Los pedidos guardan snapshots históricos."
       actions={<Link className="button-primary w-full sm:w-auto" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>}
     />
+    {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
     <div className="filter-bar mb-5 p-3">
       <label className="relative block">
         <span className="sr-only">Buscar productos</span>

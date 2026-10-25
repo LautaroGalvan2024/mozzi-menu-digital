@@ -26,6 +26,59 @@ const validOrder = {
   antiSpam: { formStartedAt: new Date(Date.now() - 5_000).toISOString(), honeypot: "" },
 };
 
+Deno.test("SKU imports preserve text and omitted patch fields, and resolve anonymous rows", async () => {
+  const input = {
+    restaurantId: "d26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    batchId: "e26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    mode: "create_or_update",
+    products: [
+      { rowRef: "2", name: "Uno", category: "Cat", basePriceCents: 100 },
+      { rowRef: "3", code: " 0001  A ", name: "Dos", category: "Cat", basePriceCents: 100 },
+    ],
+    groups: [{
+      productRowRef: "2",
+      groupCode: "G1",
+      name: "Extras",
+      required: false,
+      minSelect: 0,
+      maxSelect: 1,
+    }],
+  };
+  const parsed = parseInput(importProductsSchema, input);
+  assertEquals(parsed.products[1]?.code, "0001  A");
+  assertEquals(Object.hasOwn(parsed.products[0]!, "description"), false);
+  assertEquals(Object.hasOwn(parsed.products[0]!, "available"), false);
+  assertEquals(Object.hasOwn(parsed.products[0]!, "promotionalPriceCents"), false);
+  assertEquals(parsed.groups[0]?.productRowRef, "2");
+  await assertRejects(() => parseInput(importProductsSchema, { ...input, batchId: undefined }));
+  await assertRejects(() => parseInput(importProductsSchema, { ...input, mode: "update_only" }));
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      products: input.products.map((product) => ({ ...product, rowRef: "2" })),
+    })
+  );
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      groups: [{ ...input.groups[0], productCode: "0001  A" }],
+    })
+  );
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      products: [{ ...input.products[0], code: "A\nB" }],
+    })
+  );
+  const update = parseInput(importProductsSchema, {
+    ...input,
+    mode: "update_only",
+    groups: [],
+    products: [{ ...input.products[0], id: input.restaurantId, code: " " }],
+  });
+  assertEquals(update.products[0]?.code, "");
+});
+
 Deno.test("order validation normalizes public input and rejects unknown fields", async () => {
   const parsed = parseInput(createOrderSchema, validOrder);
   assertEquals(parsed.restaurantSlug, "cafe-central");
@@ -46,10 +99,11 @@ Deno.test("order validation accepts a canonical 100-unit line and rejects totals
   assertEquals(parsed.items[0]?.quantity, 100);
 
   await assertRejects(
-    () => parseInput(createOrderSchema, {
-      ...validOrder,
-      items: [{ ...validOrder.items[0], quantity: 101 }],
-    }),
+    () =>
+      parseInput(createOrderSchema, {
+        ...validOrder,
+        items: [{ ...validOrder.items[0], quantity: 101 }],
+      }),
     (error) => error instanceof ApiError && error.code === "VALIDATION_ERROR",
   );
 });
@@ -151,4 +205,115 @@ Deno.test("catalog import validates the complete frontend batch graph", async ()
       products: [{ ...batch.products[0], category: "---" }],
     })
   );
+});
+
+function uninspectableArray(length: number): unknown[] {
+  const values = new Array(length);
+  Object.defineProperty(values, 0, {
+    get() {
+      throw new Error("Collection elements must not be parsed before checking its length.");
+    },
+  });
+  return values;
+}
+
+function invalidField(error: unknown, expectedPath: string): boolean {
+  return error instanceof ApiError && error.status === 422 && error.code === "VALIDATION_ERROR" &&
+    (error.details?.fields as { path: string }[] | undefined)?.[0]?.path === expectedPath;
+}
+
+Deno.test("order collection prechecks reject oversize arrays before parsing their elements", async () => {
+  await assertRejects(
+    () => parseInput(createOrderSchema, { ...validOrder, items: uninspectableArray(26) }),
+    (error) => invalidField(error, "items"),
+  );
+  await assertRejects(
+    () =>
+      parseInput(createOrderSchema, {
+        ...validOrder,
+        items: [{ ...validOrder.items[0], optionIds: uninspectableArray(31) }],
+      }),
+    (error) => invalidField(error, "items.0.optionIds"),
+  );
+});
+
+Deno.test("import prechecks all collection lengths before validating any row", async () => {
+  for (
+    const [field, maximum] of [["products", 500], ["groups", 2_500], ["options", 10_000]] as const
+  ) {
+    await assertRejects(
+      () =>
+        parseInput(importProductsSchema, {
+          restaurantId: "d26095be-96d5-4cd5-aad4-4c8cb82d510a",
+          mode: "create_only",
+          products: uninspectableArray(1),
+          [field]: uninspectableArray(maximum + 1),
+        }),
+      (error) => invalidField(error, field),
+    );
+  }
+});
+
+Deno.test("collection prechecks preserve readable shape errors and optional import defaults", async () => {
+  for (const invalid of [null, {}, "items"]) {
+    await assertRejects(
+      () => parseInput(createOrderSchema, { ...validOrder, items: invalid }),
+      (error) => invalidField(error, "items"),
+    );
+  }
+  const batch = {
+    restaurantId: "d26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    mode: "create_only",
+    products: [{ code: "P1", name: "Producto", category: "General", basePriceCents: 100 }],
+  };
+  const parsed = parseInput(importProductsSchema, batch);
+  assertEquals(parsed.groups, []);
+  assertEquals(parsed.options, []);
+  await assertRejects(
+    () => parseInput(importProductsSchema, { ...batch, options: {} }),
+    (error) => invalidField(error, "options"),
+  );
+});
+
+Deno.test("order prechecks preserve the exact current line and option limits", () => {
+  const optionIds = Array.from(
+    { length: 30 },
+    (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+  );
+  const parsed = parseInput(createOrderSchema, {
+    ...validOrder,
+    items: Array.from({ length: 25 }, () => ({ ...validOrder.items[0], quantity: 4, optionIds })),
+  });
+  assertEquals(parsed.items.length, 25);
+  assertEquals(parsed.items[0]?.optionIds.length, 30);
+});
+
+Deno.test("import prechecks allow the exact current product, group and option limits", () => {
+  const parsed = parseInput(importProductsSchema, {
+    restaurantId: "d26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    mode: "create_only",
+    products: Array.from({ length: 500 }, (_, index) => ({
+      code: `P${index}`,
+      name: `Producto ${index}`,
+      category: "General",
+      basePriceCents: 100,
+    })),
+    groups: Array.from({ length: 2_500 }, (_, index) => ({
+      productCode: `P${Math.floor(index / 5)}`,
+      groupCode: `G${index}`,
+      name: "Grupo",
+      required: false,
+      minSelect: 0,
+      maxSelect: 4,
+    })),
+    options: Array.from({ length: 10_000 }, (_, index) => ({
+      groupCode: `G${Math.floor(index / 4)}`,
+      optionCode: `O${index}`,
+      name: "Opción",
+      priceDeltaCents: 0,
+    })),
+  });
+  assertEquals(parsed.products.length, 500);
+  assertEquals(parsed.groups.length, 2_500);
+  assertEquals(parsed.options.length, 10_000);
 });

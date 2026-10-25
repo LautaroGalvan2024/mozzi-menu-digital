@@ -55,6 +55,7 @@ interface CartContextValue {
   activateRestaurant: (slug: string) => void
   reconcileProducts: (products: readonly PublicProduct[]) => void
   addLine: (line: CartLine) => void
+  replaceLine: (key: string, line: CartLine) => void
   updateQuantity: (key: string, quantity: number) => void
   removeLine: (key: string) => void
   clear: () => void
@@ -207,6 +208,7 @@ export function CartProvider({ children }: PropsWithChildren) {
       },
       reconcileProducts,
       addLine: (line) => persist(addOrMergeCartLine(lines, line)),
+      replaceLine: (key, replacement) => persist(normalizeCartLines(lines.map(line => line.key === key ? { ...replacement, key } : line))),
       updateQuantity: (key, quantity) => {
         if (quantity < 1) persist(lines.filter((line) => line.key !== key))
         else persist(normalizeCartLines(lines.map((line) => (

@@ -172,6 +172,9 @@ export interface CartLine {
 }
 
 export interface GeneratedOrder {
+  recoveryToken?: string | undefined
+  recoveryExpiresAt?: string | undefined
+  estimatedTotalCents?: number | undefined
   order: {
     actionId: string
     displayNumber: string

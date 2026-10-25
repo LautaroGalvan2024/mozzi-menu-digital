@@ -1,0 +1,115 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { latestImportSession, persistImportSession, prepareImportSession, withImportSubmission, type ImportSession } from '../lib/import-session'
+import { parseImportSheets } from '../lib/import-products'
+
+const data = parseImportSheets({ Productos: [['nombre', 'categoria', 'precio'], ['Uno', 'Cat', '100']] })
+describe('recoverable catalog import identities', () => {
+  beforeEach(() => {
+    localStorage.clear(); vi.restoreAllMocks()
+    const tails = new Map<string, Promise<unknown>>()
+    const request = vi.fn((name: string, callback: () => unknown) => {
+      const pending = (tails.get(name) ?? Promise.resolve()).then(callback)
+      tails.set(name, pending.catch(() => undefined))
+      return pending
+    })
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } })
+  })
+  it('reuses the same persisted operation after reload, rename and mode change', async () => {
+    const first = await prepareImportSession('restaurant-a', data, 'create_only', 'catalogo.xlsx')
+    first.submitted = true
+    await persistImportSession('restaurant-a', first)
+    const retry = await prepareImportSession('restaurant-a', data, 'create_or_update', 'renombrado.csv')
+    expect(retry.batchId).toBe(first.batchId)
+    expect(retry.mode).toBe('create_only')
+    expect(latestImportSession('restaurant-a')?.batchId).toBe(first.batchId)
+    expect(latestImportSession('restaurant-b')).toBeNull()
+  })
+  it('a deliberate new import gets another identity while preserving the old operation', async () => {
+    const first = await prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx')
+    const second = await prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx', true)
+    expect(second.batchId).not.toBe(first.batchId)
+    expect(JSON.parse(localStorage.getItem('catalog-import:v1:restaurant-a') ?? '{}').sessions[first.batchId]).toBeDefined()
+  })
+  it('shares one identity for simultaneous preparations and refuses unsupported locking', async () => {
+    const [first, second] = await Promise.all([
+      prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx'),
+      prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx'),
+    ])
+    expect(second.batchId).toBe(first.batchId)
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: undefined })
+    await expect(prepareImportSession('restaurant-b', data, 'create_or_update', 'catalogo.xlsx')).rejects.toThrow(/navegador/)
+    await expect(persistImportSession('restaurant-a', first)).rejects.toThrow(/navegador/)
+  })
+  it('preserves another tab batch and replay when its persistence starts during a stale read', async () => {
+    const first = await prepareImportSession('restaurant-a', data, 'create_or_update', 'uno.xlsx')
+    const firstStore = localStorage.getItem('catalog-import:v1:restaurant-a')!
+    const otherData = { ...data, products: data.products.map((product) => ({ ...product, name: 'Dos' })) }
+    const second = await prepareImportSession('restaurant-a', otherData, 'create_or_update', 'dos.xlsx')
+    second.submitted = true
+    second.result = { batchId: second.batchId, summary: { created: 1, updated: 0, skipped: 0 }, errors: [], products: [{ rowRef: '2', id: '10000000-0000-4000-8000-000000000002', code: 'P-000002', outcome: 'created' }] }
+    localStorage.setItem('catalog-import:v1:restaurant-a', firstStore)
+
+    const getItem = Storage.prototype.getItem
+    let interleave = true
+    let concurrentWrite: Promise<ImportSession> | undefined
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, name) {
+      const snapshot = getItem.call(this, name)
+      if (name === 'catalog-import:v1:restaurant-a' && interleave) {
+        interleave = false
+        // Another tab persists while the first writer holds an old store snapshot.
+        concurrentWrite = persistImportSession('restaurant-a', second)
+      }
+      return snapshot
+    })
+    await persistImportSession('restaurant-a', first)
+    await concurrentWrite
+    const retry = await prepareImportSession('restaurant-a', otherData, 'create_or_update', 'renombrado.xlsx')
+    expect(retry.batchId).toBe(second.batchId)
+    expect(retry.result).toEqual(second.result)
+    expect(JSON.parse(localStorage.getItem('catalog-import:v1:restaurant-a')!).sessions[first.batchId]).toBeDefined()
+  })
+  it('does not roll back submission, result, or image progress from a stale snapshot of the same batch', async () => {
+    const first = await prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx')
+    const stale = structuredClone(first)
+    first.submitted = true
+    first.result = { batchId: first.batchId, summary: { created: 1, updated: 0, skipped: 0 }, errors: [], products: [{ rowRef: '2', id: '10000000-0000-4000-8000-000000000002', code: 'P-000001', outcome: 'created' }] }
+    first.images['2'] = { path: 'image-a.webp', expectedPath: null, associated: true }
+    await persistImportSession('restaurant-a', first)
+    stale.images['2'] = { path: 'image-a.webp', expectedPath: null, associated: false }
+    stale.images['3'] = { path: 'image-b.webp', expectedPath: null, associated: false }
+    await persistImportSession('restaurant-a', stale)
+    const saved = latestImportSession('restaurant-a')!
+    expect(saved.submitted).toBe(true)
+    expect(saved.result).toEqual(first.result)
+    expect(saved.images['2']?.associated).toBe(true)
+    expect(saved.images['3']?.path).toBe('image-b.webp')
+  })
+  it('serializes submissions for one batch and refreshes a waiting tab before its callback', async () => {
+    const session = await prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx')
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const first = withImportSubmission('restaurant-a', session, async (current) => {
+      current.submitted = true
+      await persistImportSession('restaurant-a', current)
+      entered()
+      await gate
+    })
+    await started
+    const callback = vi.fn(async (current: ImportSession) => current.submitted)
+    const second = withImportSubmission('restaurant-a', session, callback)
+    await Promise.resolve()
+    expect(callback).not.toHaveBeenCalled()
+    release()
+    await first
+    expect(await second).toBe(true)
+  })
+  it('fails closed when persistence is unavailable or corrupted', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Full', 'QuotaExceededError') })
+    await expect(prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx')).rejects.toThrow(/no se enviará sin recuperación/)
+    vi.restoreAllMocks()
+    localStorage.setItem('catalog-import:v1:restaurant-a', '{}')
+    await expect(prepareImportSession('restaurant-a', data, 'create_or_update', 'catalogo.xlsx')).rejects.toThrow(/registro local/)
+  })
+})

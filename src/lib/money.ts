@@ -1,3 +1,16 @@
+// Catalogue prices must be explicit: never guess a thousands separator or round
+// extra decimals from an Excel numeric cell. Build cents from decimal digits.
+export function parsePriceCents(value: unknown): number | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  if (typeof value === 'number' && !Number.isFinite(value)) return null
+  const raw = String(value).trim()
+  if (!/^(?:\d+(?:[.,]\d{1,2})?|\d{1,3}(?:\.\d{3})+,\d{1,2})$/.test(raw)) return null
+  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw
+  const [whole = '', fraction = ''] = normalized.split('.')
+  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'))
+  return Number.isSafeInteger(amount) && amount >= 0 && amount <= 1_000_000_000_000 ? amount : null
+}
+
 export function toCents(value: string | number): number {
   const normalized =
     typeof value === 'number'

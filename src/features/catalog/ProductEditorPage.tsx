@@ -1,14 +1,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ImagePlus, Plus, Save, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
 import { uploadRestaurantImage } from '../../lib/images/upload'
+import { parsePriceCents } from '../../lib/money'
 import { publicAssetUrl, supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
+import { clearProductAttempt, recoverProductDraft, saveProductAttempt } from './product-draft'
 
 interface OptionDraft {
   id: string
@@ -111,6 +113,7 @@ export function ProductEditorPage() {
   const [draft, setDraft] = useState<ProductDraft | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const saveInFlight = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const categories = useQuery({
     queryKey: ['categories-options', scope.selected?.id],
@@ -185,7 +188,7 @@ export function ProductEditorPage() {
   useEffect(() => {
     if (draft || !scope.selected) return
     if (isNew && categories.data?.[0]) {
-      setDraft({
+      setDraft(recoverProductDraft(scope.selected.id) ?? {
         id: crypto.randomUUID(),
         categoryId: categories.data[0].id,
         code: '',
@@ -353,19 +356,19 @@ export function ProductEditorPage() {
     )
   }
   async function save() {
-    if (!scope.selected) return
+    if (!scope.selected || saveInFlight.current) return
     const restaurantId = scope.selected.id
     const currentDraft = draft!
     const maxCents = 1_000_000_000_000
-    const base = Math.round(Number(currentDraft.basePrice.replace(',', '.')) * 100)
-    const promo = currentDraft.promotionalPrice.trim() === '' ? null : Math.round(Number(currentDraft.promotionalPrice.replace(',', '.')) * 100)
+    const base = parsePriceCents(currentDraft.basePrice) ?? Number.NaN
+    const promo = currentDraft.promotionalPrice.trim() === '' ? null : parsePriceCents(currentDraft.promotionalPrice) ?? Number.NaN
     const startsAt = currentDraft.promotionStartsAt ? new Date(currentDraft.promotionStartsAt) : null
     const endsAt = currentDraft.promotionEndsAt ? new Date(currentDraft.promotionEndsAt) : null
     const moneyIsValid = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= maxCents
     setSaving(true)
     setError(null)
-    if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || !currentDraft.code.trim() || currentDraft.code.trim().length > 80 || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
-      setError('Completá nombre, código, precios y vigencia con valores válidos.')
+    if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code) || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
+      setError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
       setSaving(false)
       return
     }
@@ -373,12 +376,12 @@ export function ProductEditorPage() {
       ...group,
       options: group.options.map((option) => ({
         ...option,
-        priceDeltaCents: Math.round(Number(option.price.replace(',', '.')) * 100),
+        priceDeltaCents: parsePriceCents(option.price) ?? Number.NaN,
       })),
     }))
     const quantityPrices = currentDraft.quantityPrices.map((rule) => ({
       quantity: rule.quantity,
-      totalPriceCents: Math.round(Number(rule.totalPrice.replace(',', '.')) * 100),
+      totalPriceCents: parsePriceCents(rule.totalPrice) ?? Number.NaN,
     }))
     const quantityValues = new Set(quantityPrices.map((rule) => rule.quantity))
     if (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents))) {
@@ -388,8 +391,8 @@ export function ProductEditorPage() {
     }
     for (const group of groups) {
       const activeOptionCount = group.options.filter((option) => option.active).length
-      if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < group.minSelect || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
-        setError('Revisá nombres, precios y límites de los grupos de opciones.')
+      if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < Math.max(1, group.minSelect) || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
+        setError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.')
         setSaving(false)
         return
       }
@@ -401,13 +404,14 @@ export function ProductEditorPage() {
     const previousPath = product.data?.product.image_path ?? null
     let nextPath = currentDraft.imagePath
     let uploadedPath: string | null = null
-    let cleanupPending = false
     let imageStateUncertain = false
     const cleanupAsset = async (path: string) => {
       const [storageResult, assetResult] = await Promise.all([supabase.storage.from('restaurant-assets').remove([path]), supabase.from('image_assets').update({ deleted_at: new Date().toISOString() }).eq('restaurant_id', restaurantId).eq('path', path)])
       return !storageResult.error && !assetResult.error
     }
     try {
+      saveInFlight.current = true
+      if (isNew) saveProductAttempt(restaurantId, currentDraft)
       if (imageFile) {
         const processed = await processImage(imageFile)
         uploadedPath = await uploadRestaurantImage({
@@ -417,8 +421,11 @@ export function ProductEditorPage() {
           image: processed,
         })
         nextPath = uploadedPath
+        setDraft((value) => value ? { ...value, imagePath: nextPath } : value)
+        setImageFile(null)
+        if (isNew) saveProductAttempt(restaurantId, { ...currentDraft, imagePath: nextPath })
       }
-      const { error: saveError } = await supabase.rpc('save_product_catalog', {
+      const { data: saved, error: saveError } = await supabase.rpc('save_product_catalog', {
         p_restaurant_id: restaurantId,
         p_product: {
           id: currentDraft.id,
@@ -460,10 +467,14 @@ export function ProductEditorPage() {
         if (uploadedPath) {
           const verification = await supabase.from('products').select('image_path').eq('id', currentDraft.id).eq('restaurant_id', restaurantId).maybeSingle()
           if (verification.error) imageStateUncertain = true
-          else if (verification.data?.image_path !== uploadedPath) cleanupPending = !(await cleanupAsset(uploadedPath))
+          // A successful read cannot exclude a still-running commit after a timeout.
+          // Keep the upload for a retry; orphan cleanup can reconcile it later.
+          else if (verification.data?.image_path !== uploadedPath) imageStateUncertain = true
         }
         throw saveError
       }
+      const savedCode = z.object({ code: z.string() }).safeParse(saved)
+      if (savedCode.success) setDraft((value) => value ? { ...value, code: savedCode.data.code } : value)
       await Promise.all([client.invalidateQueries({ queryKey: ['products', restaurantId] }), client.invalidateQueries({ queryKey: ['public-menu'] })])
       if (previousPath && previousPath !== nextPath) {
         const cleaned = await cleanupAsset(previousPath)
@@ -474,10 +485,12 @@ export function ProductEditorPage() {
           return
         }
       }
-      navigate('/admin/catalogo/productos')
+      if (isNew) clearProductAttempt(restaurantId)
+      navigate('/admin/catalogo/productos', { state: { savedCode: savedCode.success ? savedCode.data.code : currentDraft.code } })
     } catch {
-      setError(imageStateUncertain ? 'No se pudo confirmar el resultado del guardado. Recargá el producto antes de reintentar para no duplicar imágenes.' : cleanupPending ? 'No se pudo guardar el producto y la imagen nueva quedó pendiente de limpieza. Revisá Storage antes de reintentar.' : 'No se pudo guardar el producto completo. Revisá que el código no esté repetido y reintentá.')
+      setError(imageStateUncertain ? 'No se pudo confirmar el guardado. Podés reintentar: conservamos el producto y la imagen de este intento.' : 'No se pudo guardar el producto completo. Revisá que el código no esté repetido y reintentá.')
     } finally {
+      saveInFlight.current = false
       setSaving(false)
     }
   }
@@ -496,7 +509,7 @@ export function ProductEditorPage() {
       <PageHeader
         eyebrow="Catálogo"
         title={isNew ? 'Nuevo producto' : `Editar ${draft.name}`}
-        description="Los precios se guardan en centavos y se validan nuevamente al crear el pedido."
+        description="Completá los datos del producto. Si no tenés un código, lo generamos al guardar."
         actions={
           <Link className="button-secondary" to="/admin/catalogo/productos">
             <ArrowLeft className="h-4 w-4" />
@@ -512,10 +525,11 @@ export function ProductEditorPage() {
               <span>Nombre</span>
               <input maxLength={160} value={draft.name} onChange={(e) => patch('name', e.target.value)} />
             </label>
-            <label className="field">
-              <span>Código único</span>
-              <input maxLength={80} value={draft.code} onChange={(e) => patch('code', e.target.value)} />
-            </label>
+            <div className="field">
+              <label htmlFor="product-code">Código / SKU (opcional)</label>
+              <input id="product-code" aria-describedby="product-code-help" maxLength={80} value={draft.code} onChange={(e) => patch('code', e.target.value)} />
+              <small id="product-code-help">Si lo dejás vacío, lo generamos automáticamente{!isNew ? '. En esta edición, si lo dejás vacío, conservamos el código actual.' : ''}</small>
+            </div>
             <label className="field">
               <span>Categoría</span>
               <select value={draft.categoryId} onChange={(e) => patch('categoryId', e.target.value)}>

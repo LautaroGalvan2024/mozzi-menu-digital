@@ -6,6 +6,7 @@ import { useCart } from '../cart/CartProvider'
 import { env } from '../../lib/env'
 import { formatNextOpeningAt } from '../../lib/hours'
 import { formatMoney, currentProductPrice } from '../../lib/money'
+import { readOrderRecovery } from '../../lib/order-recovery'
 import { whatsappShareUrl } from '../../lib/phone'
 import { effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import { publicAssetUrl } from '../../lib/supabase/client'
@@ -13,6 +14,11 @@ import type { PublicProduct } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
 import { RestaurantHoursDialog } from './RestaurantHoursDialog'
 import { usePublicMenu } from './usePublicMenu'
+
+function RecentOrderLink({ slug }: { slug: string }) {
+  const [reference] = useState(() => readOrderRecovery(slug))
+  return reference ? <div className="page-shell py-3"><Link className="block rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900 underline" to={`/r/${slug}/pedido-generado`}>Recuperar mi último pedido y el mensaje de WhatsApp</Link></div> : null
+}
 
 export function PublicMenuPage() {
   const { restaurantSlug } = useParams()
@@ -30,7 +36,7 @@ export function PublicMenuPage() {
   useEffect(() => {
     if (!menuQuery.data || cart.restaurantSlug !== menuQuery.data.restaurant.slug) return
     reconcileProducts(menuQuery.data.categories.flatMap((category) => category.products))
-  }, [cart.restaurantSlug, menuQuery.data, reconcileProducts])
+  }, [cart.restaurantSlug, menuQuery.data, menuQuery.dataUpdatedAt, reconcileProducts])
 
   const categories = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase('es')
@@ -57,6 +63,7 @@ export function PublicMenuPage() {
       className="min-h-screen bg-[#f7f4ef]"
       style={{ '--brand': restaurant.primaryColor, '--brand-secondary': restaurant.secondaryColor } as React.CSSProperties}
     >
+      <RecentOrderLink key={restaurant.slug} slug={restaurant.slug} />
       <header className="relative overflow-hidden border-b-4 border-[var(--brand)] bg-stone-950 text-white">
         <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full opacity-25 blur-3xl" style={{ backgroundColor: 'var(--brand-secondary)' }} />
         {coverUrl ? <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" fetchPriority="high" /> : null}

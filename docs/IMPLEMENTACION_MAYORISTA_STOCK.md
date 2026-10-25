@@ -1,0 +1,111 @@
+# Implementación mayorista y stock
+
+Fecha: 24/10/2026 (Argentina). Rama: `feature/mayorista-stock`. Base auditada: `bf183767b8ba6012e2d33d177e473d5534669b9c`; referencias remotas actualizadas antes de comenzar. Se conservan React, PostgreSQL, Supabase y Vercel.
+
+## Alcance y decisiones
+
+Se implementan las correcciones indispensables, SKU automático y el inventario mínimo para un mayorista. Las pruebas de escalas mayores y optimizaciones sin impacto demostrado no condicionan esta entrega.
+
+El usuario confirmó (24/10/2026) que **entregado significa recepción del cliente o retiro realizado**, **aceptar reserva mercadería y entregar descuenta existencia física**, **la primera versión vende por unidades enteras**, **la app es la fuente principal del stock**, **las ventas externas se cargan manualmente** y **las entregas y devoluciones son completas**. Cajas, fracciones, conversiones y operaciones comerciales parciales quedan fuera del alcance inicial. El modelo implementado usa un SKU físico por producto; admite que sólo parte de una devolución completa vuelva a ser vendible según su condición, sin convertirla en una devolución comercial parcial. D03–D07 y AC25/AC26 del plan registran el alcance confirmado. Estas decisiones encajan en el esquema vigente y no activan por sí solas el stock.
+
+La confirmación comercial queda registrada en los documentos; no se modifica automáticamente la política de ninguno de los comercios existentes. La activación exige identificar el comercio piloto, asignar responsables, resolver el alcance físico del tránsito y realizar una ventana de conteo sin movimientos en todos los canales. Las ventas externas se registran al entregar, antes de cerrar la venta, para respetar el disponible y las reservas. Las reservas aceptadas no vencen automáticamente: requieren entrega o cancelación.
+
+## Cambios por etapa
+
+| Etapa | Resultado implementado | Comprobación |
+|---|---|---|
+| S01 | Invitaciones respetan el rol previo, conservan el último administrador y revalidan permisos después de esperar locks | SQL011 y 9 carreras reales |
+| S03/S04 | JSON leído por streaming con límite real de bytes; límites de colecciones antes de recorrer entradas | Pruebas Deno de límites, UTF-8, cancelación, fallos y cardinalidad |
+| Productos e importaciones | `code` opcional, generado en servidor; ceros preservados; identidad UUID estable; códigos históricos protegidos; lote/fila persistidos y replay sin sobrescribir; descarga XLSX textual | SQL012, 8 escenarios concurrentes/fallos, parser, XLSX e interfaz |
+| B03 | Precios exactos sin redondear decimales extra; grupos válidos; cambios de código/grupos por RPC, evitando inversión de locks; imágenes y archivo siguen compatibles | SQL015, validaciones del editor/importador y carreras SKU |
+| Stock | Reserva, entrega, cancelación, conteo, pausa, ingresos, ajustes y venta externa; ledger inmutable, cortes y versiones; los SKU archivados con saldo o pedidos pendientes también se cuentan | SQL013 y 15 escenarios concurrentes |
+| Ventas externas manuales, alcance confirmado | Varios productos en una venta con referencia común, nota opcional y una sola operación recuperable; referencia visible en historial mediante lectura RLS acotada al comercio y hasta 100 operaciones | 28 pruebas de InventoryPage; integración HTTP de atomicidad, reservas, referencias y permisos |
+| Corrección y devolución | Corrección sin salida física, devolución completa recibida con destino vendible explícito, reemplazos y reportes de vigencia | SQL013 y pruebas de interfaz/reportes |
+| O03 | Intento de pedido vinculado a contenido comercial; conflicto si se cambia; reintentos concurrentes conservan tokens válidos sin repetir eventos | SQL014 y 5 escenarios concurrentes/fallos |
+| O04/C03 | Carrito muestra qué línea debe corregirse sin borrar opciones/notas; refresco al volver a la pestaña; resumen y confirmación de diferencias de total antes de compartir | Tests de carrito, checkout y confirmación; el servidor sigue recalculando precios |
+| O08 | Recuperación temporal de confirmación con token opaco distinto del de telemetría, hash privado, máximo 30 minutos y consulta sin mutar pedidos | SQL016, Edge e interfaz; no se guardan datos personales ni el mensaje en almacenamiento del navegador |
+| G01 | Node 22 reproducible, lock completo, Zod 4 compatible y actualizaciones de dependencias vulnerables | npm ci, auditoría con 0 vulnerabilidades, tipos/lint/tests y Deno |
+
+Los cambios están separados por objetivo. Ninguna migración histórica aplicada se modifica. La corrección de tipos en SQL010 arregla una prueba preexistente: `sum(bigint)` devuelve `numeric` y necesitaba un cast para comparar con pgTAP. SQL002 deja de usar un replay inseguro con sólo UUID; envía la solicitud completa.
+
+## Base, respaldo y recuperación
+
+Antes de modificar producción se verificó PostgreSQL **17.6**, historial de **23 migraciones**, **2 comercios, 34 productos, 22 pedidos, 4 usuarios Auth y 37 objetos Storage**. Aunque el sistema no tenga usuarios operando, esos datos se preservan.
+
+El respaldo lógico y los objetos están fuera del repositorio, bajo el directorio privado de backups de Codex. La carpeta de esta ejecución termina en `Mozzi-Menu/2026-10-25T00-51-03-596Z`; su ACL admite al usuario local y SYSTEM. No se versionan credenciales, dumps ni información de clientes.
+
+- `database.dump`: 771.543 bytes, SHA256 `3c3b780940d821be59f7bf282ab887a89b8d7194896a2ccd85f24eece2a06f61`.
+- `application.dump`: 372.101 bytes, SHA256 `ca468c8bf5f9f482f0be26dcb1951857dcd83677299cc58296118200c9c5d894`.
+- `managed-schema.sql`: definiciones Auth/Storage sin datos, para preparar el entorno SQL de pruebas.
+- `storage/`: 37 archivos y manifest de tamaños y hashes. Un dump SQL por sí solo no respalda los bytes de Storage.
+- `manifest.json` y reporte de recuperación: evidencia restringida junto al respaldo.
+
+La restauración de ensayo en un **nuevo** `mozzi_restore_*` de PostgreSQL **17.11**, ligado sólo a loopback, reprodujo esos conteos y validó FKs y los hashes de todos los archivos, incluidos los 37 objetos. Se restauraron esquema y datos de `auth`, `storage`, `public`, `private` y `supabase_migrations`. Después se aplicaron las seis migraciones nuevas sobre otra copia restaurada: se compararon las **55 tablas originales, todas sus columnas previas y filas**, sin cambios en esos datos. El ensayo excluye deliberadamente ownership/ACL administrados y no certifica la recuperación de servicios HTTP/Auth/Storage hospedados. No se reinició ni limpió ninguna base existente.
+
+Procedimiento reproducible (PowerShell, con `PG_BIN` apuntando a PostgreSQL 17):
+
+```powershell
+# Lectura del proyecto vinculado. Guarda fuera del repositorio, nunca imprime claves.
+node scripts/database/backup-linked.mjs
+# Ensayo en una base local NUEVA; ruta al respaldo privado.
+node scripts/database/local-test-restore.mjs <directorio-del-respaldo>
+```
+
+La CLI genera credenciales temporales: no ejecutar otras operaciones `--linked` mientras corre el respaldo, porque pueden rotarlas. No copiar a la consola su salida `db dump --dry-run`, que contiene la contraseña temporal. El helper la procesa en memoria y entrega variables de entorno al proceso nativo.
+
+Ante un incidente: si el inventario está activado, pausar operaciones afectadas mediante la RPC de política; conservar movimientos y protecciones, verificar el respaldo y restaurar primero en un destino aislado. Preferir una migración correctiva. Para recuperación hospedada, preparar el esquema de aplicación y datos con los roles/servicios Supabase del destino; revisar ownership, ACL, Auth y Storage antes de habilitar tráfico. No usar un `pg_restore --clean` completo sobre el proyecto vinculado. Nunca volver de stock activo a `never_enabled`.
+
+Después de publicar la UI nueva, **no promover literalmente el frontend `bf18376` ni un build anterior** como rollback. La versión nueva guarda intentos de checkout con `version: 2` y una huella SHA256 en la misma clave de `sessionStorage`; el frontend antiguo interpreta esa huella como distinta del carrito y genera otra clave de idempotencia. Si la respuesta original se perdió después de confirmar el pedido, ese reenvío puede duplicarlo. Un build de recuperación debe conservar el checkout, la idempotencia y la lectura de intentos de la versión nueva, además de las funciones y triggers actuales; la alternativa es corregir hacia adelante. No borrar intentos inciertos del navegador para habilitar otro envío. Un snapshot del despliegue previo sirve para trazabilidad y comparación, pero no garantiza un rollback compatible del checkout.
+
+## Evidencia de base aislada
+
+Se usa PostgreSQL real, sin Docker, en un cluster privado con contraseña, `127.0.0.1:55432`, separado del PostgreSQL 18 ya instalado en Windows. `.env.database.local` está ignorada y restringida por ACL. pgTAP 1.3.4 proviene de la distribución oficial. Las definiciones Auth/Storage proceden del respaldo sin datos; los tests usan fixtures sintéticos y roles `anon`, `authenticated` y `service_role` con claims explícitos.
+
+La base previa de 23 migraciones pasa 276 aserciones tras corregir el cast de la prueba SQL010. La reconstrucción final desde cero con **29 migraciones** pasa **16 suites / 575 aserciones** en `mozzi_fresh_20261025_012641`. Los cuatro harnesses pasan **37 escenarios** (9 membresías, 8 SKU/importación, 15 inventario, 5 pedidos), con conexiones independientes y esperas reales observadas en `pg_stat_activity`; no toman `Promise.all` como prueba suficiente de simultaneidad.
+
+```powershell
+node scripts/database/local-test-run.mjs --database=mozzi_fresh_20261025_012641
+node scripts/database/local-test-concurrency.mjs --database=mozzi_fresh_20261025_012641
+# Sólo para una copia restaurada; compara datos previos y nunca inserta fixtures.
+node scripts/database/local-test-upgrade-restored.mjs --database=mozzi_restore_<marca-de-tiempo>
+```
+
+Los runners sólo admiten loopback y bases `mozzi_*`; el wrapper de concurrencia además prohíbe `mozzi_restore_*`. El bootstrap rechaza sustratos existentes y el restore siempre crea otro destino. No usar fixtures en producción. Las pruebas SQL acreditan transacciones, locks, restricciones, RLS y ACL comprobadas en ese entorno. Las pruebas de React con backend simulado acreditan interacción y contratos de UI. Ninguna sustituye la integración completa HTTP/Auth/Edge/Storage ni una medición de capacidad del piloto.
+
+Corte validado `e09035d`: frontend **175 pruebas / 34 archivos**, incluidas 28 de InventoryPage; tipos y lint correctos. Deno: **51 pruebas**, formato, lint y tipos correctos. Playwright: **5 aprobadas y 4 live omitidas**, tanto en desarrollo como contra build compilado aislado con endpoint ficticio; no se presentaron esas cinco como integración real. Node 22.23.4/npm 10.9.9, Deno 2.9.6; el proyecto local/CI queda configurado con PostgreSQL 17, alineado con producción. La revisión previa al merge agrega las regresiones descritas al final; el resultado y total de la CI del commit final se registran en el PR.
+
+El primer run del PR confirmó las 575 aserciones SQL, Edge, secretos y unitarios, pero falló en dos pruebas de navegador por falta de configuración Vite sintética. Se corrigió en un commit propio: los mocks usan `https://e2e.invalid`, no heredan credenciales de `.env.local` ni reutilizan un servidor iniciado con otra configuración. Se conservaron todas las aserciones; la repetición local en modo CI pasó las cinco pruebas. Ante otro fallo, CI conserva el reporte y las trazas de ese entorno simulado durante siete días.
+
+CI ejecuta también `node scripts/database/local-http-smoke.mjs --with-edge-host` después de reconstruir Supabase local. El script crea usuarios y dos comercios sintéticos; exige login y sesiones Auth reales, aislamiento por JWT/RLS, SKU estable, importación/replay/conflicto, permisos y bytes de Storage, conteo, reserva y entrega. Los handlers originales `import-products`, `create-order` y `recover-order` se ejecutan en Deno y llaman a esos servicios reales; se verifican autorización, replay y recuperación. La ampliación por D04–D07 lleva la suite a **14 grupos**: agrega venta externa con varios SKU, rollback íntegro por faltante, reservas protegidas, referencia legible sólo por miembros del comercio, deduplicación, devolución completa con reposición vendible explícita, rechazos de argumentos parciales y pausa que bloquea operaciones nuevas pero conserva reintentos confirmados. El cierre compara el ledger con los saldos físicos y reservados. No se sustituyen Auth ni las RPC por mocks. El resultado de cada grupo se publica en el job de base del PR; un fallo detiene el job, sin omisión automática. Las credenciales quedan en memoria, los handlers escuchan sólo en loopback y el script rechaza destinos remotos. Los fixtures desaparecen junto al stack desechable.
+
+Esta ampliación usa las RPC y permisos de las seis migraciones ya aplicadas; no requiere otra migración ni modifica la base productiva. La referencia de venta se lee de `inventory_operations` filtrando tenant e IDs de las operaciones mostradas, con RLS vigente. Si esa lectura falla o queda incompleta, la interfaz informa el error y permite reintentar; no presenta ventas indistinguibles como si el historial estuviera completo.
+
+Esto acredita integración de los handlers con servicios locales cuando el job pasa, **no el contenedor Edge hospedado ni los cuatro E2E live de navegador**. Supabase CLI 2.118.0 inyecta `http://kong:8000` dentro de su contenedor, que la política HTTPS/loopback de la aplicación rechaza; [la fuente de la CLI](https://github.com/supabase/cli/blob/v2.118.0/apps/cli/src/shared/functions/serve.ts#L1841) confirma esa diferencia. El lanzador de pruebas sólo asigna puertos a `Deno.serve` y conserva el código original y sus controles. No se relajó la política productiva. El modo CLI `--with-edge` queda explícito para diagnosticar esa incompatibilidad y no se cuenta como aprobado.
+
+## Despliegue y pendientes de lanzamiento
+
+Estado productivo: **seis migraciones aplicadas**, `202610240001` a `202610240006`, después de respaldo, restore, pruebas aisladas y dry-run. El historial remoto quedó en **29 migraciones**, sin pendientes locales, seeds ni ejecución de fixtures. La inspección de las 22:29 (Argentina) conserva **2 comercios, 34 productos, 22 pedidos, 4 usuarios y 37 objetos Storage**; **25/25 tablas públicas con RLS**, esquema privado sin acceso de anon/authenticated y 31 funciones públicas con permisos revisados. Los dos comercios permanecen en `never_enabled`; saldos, conteos, operaciones y movimientos siguen vacíos. No se activó inventario ni se interpretaron reglas pendientes como confirmadas.
+
+La comprobación HTTP posterior, sólo de lectura, validó los dos menús públicos con el parser actual, Auth `/health` respondió 200 y los 37 objetos Storage respondieron a HEAD. La llamada anónima a `get_inventory` fue rechazada con 401. Esa comprobación no acredita los flujos autenticados ni crea pedidos o movimientos productivos.
+
+Orden restante de publicación: Edge compatible, frontend, comprobación conectada, reglas comerciales y corte físico. El frontend anterior sigue usando las firmas existentes; los campos nuevos de resultados se mantienen compatibles donde hay parsers estrictos. La aplicación de SQL no significa que el frontend o las funciones Edge nuevos estén publicados.
+
+CI versionada se dispara con PR y push a `main`; no contiene despliegue productivo. Vercel confirma integración con este repositorio, rama productiva `main`, Node 22 y build `npm run build`; el último despliegue productivo corresponde a la base auditada. No se hizo merge a `main`. La consulta de protección clásica de la rama devuelve 403 y los rulesets visibles están vacíos: no se afirma que exista protección remota configurada; esta tarea preserva main sin escribir sobre ella. La autorización recibida cubre implementación y migraciones productivas con respaldo y pruebas; los cambios se entregan para revisión por etapas.
+
+La configuración de preview disponible apunta a la misma base productiva: **ese preview no es un entorno aislado de pruebas**. Build/CI no ejecutan migraciones ni DML remoto; la CI de SQL crea su propia base. Los orígenes permitidos de Edge productivo son exactos y no incluyen el preview revisado. No se agregaron orígenes amplios ni se hicieron pruebas mutantes de navegador contra producción. Las comprobaciones de interfaz usan destinos ficticios y fixtures locales.
+
+Pendientes reales de habilitación: identificar el comercio piloto, responsables y alcance físico del tránsito; catálogo/pico y dispositivos reales; validación del despliegue hospedado y flujos live de navegador (incluidos MFA/invitaciones); corte físico del negocio y verificación de planes/consumo. Fuente principal, carga manual externa y alcance completo de entregas/devoluciones ya están confirmados. El equipo Windows no dispone de Docker/Podman/WSL ni de los servicios HTTP completos; PostgreSQL nativo resuelve integridad y concurrencia, y el stack desechable de CI ejecuta la integración HTTP descrita arriba. Supabase figura saludable en us-east-1, pero plan/cuotas/consumo no están expuestos por los accesos consultados.
+
+Vercel confirma **Hobby** activo; las consultas de consumo devuelven HTTP404, lo que no significa consumo cero. [La documentación oficial de Hobby](https://vercel.com/docs/plans/hobby), consultada el 24/10/2026, limita el plan a uso personal no comercial. Antes del piloto comercial hay que resolver un plan compatible; no se autoriza ni ejecuta una compra por inferencia. No se asegura el mismo costo mensual y no se contrataron nuevos servicios ni upgrades.
+
+## Revisión y publicación autorizada
+
+El usuario autorizó revisar y mergear el PR, publicar funciones antes del frontend y **mantener el stock sin activar hasta elegir el comercio piloto y hacer el conteo físico**. Esta autorización sustituye la restricción previa de publicación; no autoriza activar stock ni contratar planes.
+
+La revisión encontró y corrigió la lectura de cantidades de devolución que PostgreSQL puede conservar como texto, la persistencia concurrente de importaciones entre pestañas y el bloqueo del modo tras un rechazo transaccional confirmado. Las nuevas pruebas cubren ambos formatos de cantidad, escrituras y envíos coordinados, conservación del progreso y reintentos inciertos. Los errores de red, respuestas no verificables y conflictos de idempotencia no liberan un intento pendiente. También se corrigió el procedimiento de recuperación del checkout descrito arriba.
+
+El 24/10/2026 a las 23:45 (Argentina), las siete funciones ya estaban publicadas: `create-order` v8, `create-restaurant`, `expire-orders`, `import-products`, `invite-restaurant-user` y `register-whatsapp-opened` v7, y `recover-order` v1. Sus fuentes coinciden con el árbol Edge de `e09035d`, aprobado por CI. No hubo migraciones ni cambios de secretos. Antes de publicar se descargaron por separado las seis versiones anteriores, con manifiesto SHA256, en el respaldo privado `Mozzi-Menu/release-20261025-0240`; el despliegue frontend previo se registró sólo como referencia, sujeto a la restricción de recuperación del checkout.
+
+La comprobación hospedada pasó **30 controles** de Auth, menús con el parser vigente, CORS exacto, rechazos de sesiones y orígenes inválidos, mantenimiento sin credencial, acceso de handlers a la base y tokens desconocidos. Conservó **22 pedidos, 34 productos, 55 eventos y cero saldos, conteos, operaciones o movimientos de inventario**; los dos comercios continuaron en `never_enabled`. No creó ventas ni pedidos de prueba. La consulta de recuperación sólo incrementó su contador técnico de rate limit. No certifica una operación autenticada completa, MFA/invitaciones ni el conteo físico.
+
+El frontend se publica mediante la integración de Vercel al mergear `main`, después de aprobar la CI del commit final. El SHA mergeado, el despliegue READY y las verificaciones posteriores quedan registrados en [el PR de esta entrega](https://github.com/LautaroGalvan2024/mozzi-menu-digital/pull/1). Los párrafos anteriores describen el estado anterior a esta autorización; esta sección y el registro final del PR documentan la publicación efectiva.

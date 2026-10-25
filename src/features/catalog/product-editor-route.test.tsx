@@ -71,6 +71,7 @@ describe('new product route', () => {
   afterEach(cleanup)
 
   beforeEach(() => {
+    sessionStorage.clear()
     mocks.from.mockReset()
     mocks.rpc.mockReset()
     mocks.rpc.mockResolvedValue({ data: null, error: null })
@@ -97,6 +98,39 @@ describe('new product route', () => {
     expect(await screen.findByRole('heading', { name: 'Nuevo producto' })).toBeVisible()
     expect(screen.getByLabelText('Nombre')).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Listado de productos' })).not.toBeInTheDocument()
+  })
+
+  it('creates without a code and keeps an informed code as text', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    expect(screen.getByText('Si lo dejás vacío, lo generamos automáticamente')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog', expect.objectContaining({ p_product: expect.objectContaining({ code: '' }) }))
+    await screen.findByRole('heading', { name: 'Listado de productos' })
+    cleanup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Fideos')
+    await user.type(screen.getByLabelText('Código / SKU (opcional)'), '000123')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc).toHaveBeenLastCalledWith('save_product_catalog', expect.objectContaining({ p_product: expect.objectContaining({ code: '000123' }) }))
+  })
+
+  it('reuses the same product after a lost response and a remount', async () => {
+    const user = userEvent.setup()
+    mocks.rpc.mockRejectedValueOnce(new Error('Connection lost'))
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    await screen.findByRole('alert')
+    const first = mocks.rpc.mock.calls[0]![1].p_product
+    cleanup()
+    renderNewProductRoute()
+    expect(await screen.findByLabelText('Nombre')).toHaveValue('Arroz')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc.mock.calls[1]![1].p_product.id).toBe(first.id)
+    await screen.findByRole('heading', { name: 'Listado de productos' })
+    expect(sessionStorage.getItem('mozzi:product-attempt:10000000-0000-4000-8000-000000000001')).toBeNull()
   })
 
   it('explains that an active category is required instead of loading forever', async () => {
@@ -134,7 +168,7 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Milanesa')
-    await user.type(screen.getByLabelText('Código único'), 'MIL-1')
+    await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'MIL-1')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
     await user.type(screen.getByLabelText('Precio promocional'), '150')
@@ -149,7 +183,7 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Milanesa')
-    await user.type(screen.getByLabelText('Código único'), 'MIL-2')
+    await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'MIL-2')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
     await user.click(screen.getByRole('button', { name: 'Grupo' }))
@@ -162,12 +196,36 @@ describe('new product route', () => {
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 
+  it('rejects a zero maximum before saving the catalogue', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await user.click(screen.getByRole('button', { name: 'Grupo' }))
+    await user.type(screen.getByLabelText('Nombre del grupo'), 'Extras')
+    await user.clear(screen.getByLabelText('Máximo'))
+    await user.type(screen.getByLabelText('Máximo'), '0')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('máximo debe estar entre 1 y 20')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects fractional cents instead of silently rounding a manual price', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await user.clear(screen.getByLabelText('Precio base'))
+    await user.type(screen.getByLabelText('Precio base'), '1.234')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('hasta dos decimales')
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('sends active quantity prices inside the transactional product payload', async () => {
     const user = userEvent.setup()
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
-    await user.type(screen.getByLabelText('Código único'), 'EMP-1')
+    await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'EMP-1')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
     await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
@@ -190,7 +248,7 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
-    await user.type(screen.getByLabelText('Código único'), 'EMP-2')
+    await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'EMP-2')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
     await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
@@ -261,5 +319,9 @@ describe('new product route', () => {
     expect(await screen.findByRole('heading', { name: 'Editar Burger' })).toBeVisible()
     expect(optionIn).toHaveBeenCalledWith('option_group_id', [groupId])
     expect(screen.getByLabelText('Precio total para 2 unidades')).toHaveValue(180)
+    const user = userEvent.setup()
+    await user.clear(screen.getByLabelText('Código / SKU (opcional)'))
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog', expect.objectContaining({ p_product: expect.objectContaining({ id: productId, code: '' }) }))
   })
 })

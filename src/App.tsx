@@ -32,6 +32,7 @@ const ImportProductsPage=lazy(()=>import('./features/catalog/ImportProductsPage'
 const DeliveryZonesPage=lazy(()=>import('./features/delivery/DeliveryZonesPage').then((module)=>({default:module.DeliveryZonesPage})))
 const PaymentMethodsPage=lazy(()=>import('./features/payments/PaymentMethodsPage').then((module)=>({default:module.PaymentMethodsPage})))
 const OrdersPage=lazy(()=>import('./features/orders/OrdersPage').then((module)=>({default:module.OrdersPage})))
+const InventoryPage=lazy(()=>import('./features/inventory/InventoryPage').then((module)=>({default:module.InventoryPage})))
 const OrderDetailPage=lazy(()=>import('./features/orders/OrderDetailPage').then((module)=>({default:module.OrderDetailPage})))
 const ClaimOrderPage=lazy(()=>import('./features/orders/ClaimOrderPage').then((module)=>({default:module.ClaimOrderPage})))
 const SuperAdminDashboardPage=lazy(()=>import('./features/superadmin/SuperAdminDashboardPage').then((module)=>({default:module.SuperAdminDashboardPage})))
@@ -61,6 +62,7 @@ const router=createBrowserRouter([
     {path:'/admin',element:<AdminLayout/>,children:[
       {index:true,element:<AdminDashboardPage/>},
       {path:'pedidos',element:<OrdersPage/>},
+      {path:'stock',element:<InventoryPage/>},
       {path:'pedidos/:orderId',element:<OrderDetailPage/>},
       {path:'seguridad',element:<SecurityPage/>},
       {element:<RequireRestaurantAdmin/>,children:[

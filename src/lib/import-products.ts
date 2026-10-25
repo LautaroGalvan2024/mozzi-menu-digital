@@ -1,23 +1,27 @@
 import type { CellValue, SheetData } from 'read-excel-file/browser'
+import { parsePriceCents } from './money'
 
 export interface ImportProduct {
-  code: string
+  rowRef: string
+  id?: string
+  code?: string
   name: string
-  description: string
+  description?: string
   category: string
   basePriceCents: number
-  promotionalPriceCents: number | null
-  promotionStartsAt: string | null
-  promotionEndsAt: string | null
-  active: boolean
-  available: boolean
-  featured: boolean
-  sortOrder: number
-  imageFilename: string | undefined
+  promotionalPriceCents?: number | null
+  promotionStartsAt?: string | null
+  promotionEndsAt?: string | null
+  active?: boolean
+  available?: boolean
+  featured?: boolean
+  sortOrder?: number
+  imageFilename?: string
 }
 
 export interface ImportGroup {
-  productCode: string
+  productRowRef?: string
+  productCode?: string
   groupCode: string
   name: string
   required: boolean
@@ -44,7 +48,6 @@ export interface ImportData {
 }
 
 type SheetRecord = Record<string, CellValue | null>
-const MAX_CENTS = 1_000_000_000_000
 const MIN_SORT_ORDER = -100_000
 const MAX_SORT_ORDER = 100_000
 
@@ -52,18 +55,23 @@ function stringValue(value: CellValue | null | undefined) {
   return value === null || value === undefined ? '' : String(value).trim()
 }
 
+function hasControls(value: string) {
+  return Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+}
+
 function numberValue(value: CellValue | null | undefined) {
   if (typeof value === 'number') return value
-  const raw = stringValue(value).replace(/\s/g, '')
+  const raw = stringValue(value)
   if (!raw) return Number.NaN
+  // Decimal comma or dot; a dotted thousands separator needs an explicit comma.
+  if (!/^-?(?:\d+(?:[.,]\d{1,2})?|\d{1,3}(?:\.\d{3})+,\d{1,2})$/.test(raw)) return Number.NaN
   const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : Number.NaN
 }
 
 function centsValue(value: CellValue | null | undefined) {
-  const cents = Math.round(numberValue(value) * 100)
-  return Number.isSafeInteger(cents) && cents >= 0 && cents <= MAX_CENTS ? cents : null
+  return parsePriceCents(value)
 }
 
 function sortOrderValue(value: CellValue | null | undefined) {
@@ -108,8 +116,9 @@ function rowsToRecords(data: SheetData): SheetRecord[] {
   const names = data[0].map((cell) => stringValue(cell).toLocaleLowerCase('es'))
   return data
     .slice(1)
-    .filter((row) => row.some((cell) => cell !== null && stringValue(cell) !== ''))
-    .map((row) => Object.fromEntries(names.map((name, index) => [name, row[index] ?? null])))
+    .map((row, index) => ({ row, sourceRow: index + 2 }))
+    .filter(({ row }) => row.some((cell) => cell !== null && stringValue(cell) !== ''))
+    .map(({ row, sourceRow }) => ({ ...Object.fromEntries(names.map((name, index) => [name, row[index] ?? null])), _sourceRow: sourceRow }))
 }
 
 function safeImageFilename(value: string) {
@@ -134,13 +143,18 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
   const productsSheet = sheetByName(sheets, 'Productos')
   const groupsSheet = sheetByName(sheets, 'GruposOpciones')
   const optionsSheet = sheetByName(sheets, 'Opciones')
+  if (productsSheet.length > 501 || groupsSheet.length > 2501 || optionsSheet.length > 10001) {
+    return { products, groups, options, errors: ['La importación supera el límite de 500 productos, 2.500 grupos o 10.000 opciones. Dividí la planilla en archivos más pequeños.'] }
+  }
 
-  requireColumns(productsSheet, 'Productos', ['codigo', 'nombre', 'categoria', 'precio'], errors)
-  if (groupsSheet.length) requireColumns(groupsSheet, 'GruposOpciones', ['producto_codigo', 'grupo_codigo', 'nombre', 'minimo', 'maximo'], errors)
+  requireColumns(productsSheet, 'Productos', ['nombre', 'categoria', 'precio'], errors)
+  if (groupsSheet.length) requireColumns(groupsSheet, 'GruposOpciones', ['grupo_codigo', 'nombre', 'minimo', 'maximo'], errors)
   if (optionsSheet.length) requireColumns(optionsSheet, 'Opciones', ['grupo_codigo', 'opcion_codigo', 'nombre', 'precio_adicional'], errors)
 
   rowsToRecords(productsSheet).forEach((row, index) => {
-    const rowNumber = index + 2
+    const rowNumber = Number(row._sourceRow ?? index + 2)
+    const rowRef = stringValue(row.fila) || String(rowNumber)
+    const id = stringValue(row.id) || undefined
     const code = stringValue(row.codigo)
     const name = stringValue(row.nombre)
     const category = stringValue(row.categoria)
@@ -158,8 +172,16 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
     const imageFilename = stringValue(row.imagen_archivo) || undefined
     const sortOrder = sortOrderValue(row.orden)
 
-    if (!code || !name || !category || basePriceCents === null) {
-      errors.push(`Productos fila ${rowNumber}: código, nombre, categoría y precio no negativo son obligatorios.`)
+    if (!name || !category || basePriceCents === null) {
+      errors.push(`Productos fila ${rowNumber}: nombre, categoría y precio no negativo son obligatorios.`)
+      return
+    }
+    if (row.codigo !== null && row.codigo !== undefined && typeof row.codigo !== 'string') {
+      errors.push(`Productos fila ${rowNumber}: guardá Código / SKU como texto en Excel para conservar los ceros iniciales; no se importan códigos numéricos.`)
+      return
+    }
+    if (hasControls(String(row.codigo ?? '')) || rowRef.length > 80 || hasControls(rowRef) || (id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) {
+      errors.push(`Productos fila ${rowNumber}: código, fila o identificador inválido.`)
       return
     }
     if (code.length > 80 || name.length > 160 || category.length > 100 || description.length > 2_000) {
@@ -196,33 +218,44 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
     }
 
     products.push({
-      code,
+      rowRef,
+      ...(id ? { id } : {}),
+      ...(code ? { code } : {}),
       name,
-      description,
       category,
       basePriceCents,
-      promotionalPriceCents,
-      promotionStartsAt: starts,
-      promotionEndsAt: ends,
-      active,
-      available,
-      featured,
-      sortOrder,
-      imageFilename,
+      ...('descripcion' in row ? { description } : {}),
+      ...('precio_promocional' in row ? { promotionalPriceCents } : {}),
+      ...('promocion_desde' in row ? { promotionStartsAt: starts } : {}),
+      ...('promocion_hasta' in row ? { promotionEndsAt: ends } : {}),
+      ...(stringValue(row.activo) ? { active } : {}),
+      ...(stringValue(row.disponible) ? { available } : {}),
+      ...(stringValue(row.destacado) ? { featured } : {}),
+      ...(stringValue(row.orden) ? { sortOrder } : {}),
+      ...(imageFilename ? { imageFilename } : {}),
     })
   })
 
   const productCodes = new Set<string>()
+  const productRefs = new Set<string>()
+  const productIds = new Set<string>()
   for (const product of products) {
-    const key = product.code.toLocaleLowerCase('es')
-    if (productCodes.has(key)) errors.push(`Código de producto duplicado: ${product.code}.`)
-    productCodes.add(key)
+    if (productRefs.has(product.rowRef)) errors.push(`Fila de producto duplicada: ${product.rowRef}.`)
+    productRefs.add(product.rowRef)
+    if (product.id && productIds.has(product.id.toLowerCase())) errors.push(`Identificador de producto duplicado en fila ${product.rowRef}.`)
+    if (product.id) productIds.add(product.id.toLowerCase())
+    if (product.code) {
+      const key = product.code.toLocaleLowerCase('en')
+      if (productCodes.has(key)) errors.push(`Código de producto duplicado: ${product.code}.`)
+      productCodes.add(key)
+    }
   }
 
   const groupCodes = new Set<string>()
   rowsToRecords(groupsSheet).forEach((row, index) => {
     const rowNumber = index + 2
     const productCode = stringValue(row.producto_codigo)
+    const productRowRef = stringValue(row.producto_fila)
     const groupCode = stringValue(row.grupo_codigo)
     const name = stringValue(row.nombre)
     const minimum = numberValue(row.minimo)
@@ -231,12 +264,14 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
     const active = booleanValue(row.activo, true)
     const sortOrder = sortOrderValue(row.orden)
     const key = groupCode.toLocaleLowerCase('es')
-    if (!productCode || !groupCode || !name || productCode.length > 80 || groupCode.length > 80 || name.length > 120 || !Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < 0 || maximum < Math.max(1, minimum) || maximum > 20 || sortOrder === null) {
+    if ((!productCode && !productRowRef) || !groupCode || !name || productCode.length > 80 || productRowRef.length > 80 || groupCode.length > 80 || name.length > 120 || !Number.isInteger(minimum) || !Number.isInteger(maximum) || minimum < 0 || maximum < Math.max(1, minimum) || maximum > 20 || sortOrder === null) {
       errors.push(`GruposOpciones fila ${rowNumber}: datos o límites inválidos.`)
       return
     }
-    if (!productCodes.has(productCode.toLocaleLowerCase('es'))) {
-      errors.push(`GruposOpciones fila ${rowNumber}: producto_codigo no existe en el lote.`)
+    const byCode = productCode ? products.find((product) => product.code?.toLocaleLowerCase('en') === productCode.toLocaleLowerCase('en')) : undefined
+    const byRef = productRowRef ? products.find((product) => product.rowRef === productRowRef) : undefined
+    if ((productCode && !byCode) || (productRowRef && !byRef) || (byCode && byRef && byCode !== byRef)) {
+      errors.push(`GruposOpciones fila ${rowNumber}: producto_codigo no existe o producto_fila no identifica el mismo producto del lote.`)
       return
     }
     if (groupCodes.has(key)) {
@@ -252,7 +287,7 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
       return
     }
     groupCodes.add(key)
-    groups.push({ productCode, groupCode, name, required, minSelect: minimum, maxSelect: maximum, sortOrder, active })
+    groups.push({ ...(productCode ? { productCode } : {}), ...(productRowRef ? { productRowRef } : {}), groupCode, name, required, minSelect: minimum, maxSelect: maximum, sortOrder, active })
   })
 
   const optionCodes = new Set<string>()
@@ -282,6 +317,14 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
   })
 
   if (products.length === 0) errors.push('Productos: agregá al menos una fila válida.')
+  for (const group of groups) {
+    const product = products.find((candidate) => candidate.rowRef === group.productRowRef)
+    // Existing groups may retain options omitted by a patch. Only a row without
+    // either identity is certainly new; the RPC validates the complete final graph.
+    if (!group.active || !product || product.id || product.code) continue
+    const activeOptions = options.filter((option) => option.groupCode.toLocaleLowerCase('en') === group.groupCode.toLocaleLowerCase('en') && option.active).length
+    if (group.minSelect > activeOptions) errors.push(`GruposOpciones: ${group.groupCode} requiere ${group.minSelect} opciones, pero el producto nuevo sólo tiene ${activeOptions} ${activeOptions === 1 ? 'opción activa' : 'opciones activas'}.`)
+  }
   if (products.length > 500) errors.push('La importación supera el límite de 500 productos.')
   if (groups.length > 2_500) errors.push('La importación supera el límite de 2.500 grupos.')
   if (options.length > 10_000) errors.push('La importación supera el límite de 10.000 opciones.')

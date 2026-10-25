@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { currentProductPrice, formatMoney, roundBasisPoints, toCents } from '../lib/money'
+import { currentProductPrice, formatMoney, parsePriceCents, roundBasisPoints, toCents } from '../lib/money'
 import { estimateAdjustment } from '../lib/orders'
 import type { PublicPaymentMethod } from '../types/domain'
 
@@ -8,6 +8,12 @@ const method: PublicPaymentMethod = {
 }
 
 describe('money', () => {
+  it('parses explicit catalogue amounts exactly without silently rounding or guessing separators', () => {
+    for (const value of ['1234,56', '1234.56', '1.234,56', 1234.56]) expect(parsePriceCents(value)).toBe(123456)
+    expect(parsePriceCents('0.29')).toBe(29)
+    expect(parsePriceCents(10_000_000_000)).toBe(1_000_000_000_000)
+    for (const value of ['1,234.56', '1.234', '1,234', '', '1e3', '0x10', '12 34', '1.234,567', 1.234, -1, Infinity, 10_000_000_001, null]) expect(parsePriceCents(value)).toBeNull()
+  })
   it('converts decimal values to integer cents', () => {
     expect(toCents('1234,56')).toBe(123456)
   })
