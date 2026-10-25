@@ -8,6 +8,8 @@ export function usePublicMenu(slug: string | undefined) {
     queryFn: () => fetchPublicMenu(slug ?? ''),
     enabled: Boolean(slug && env.isSupabaseConfigured),
     staleTime: 60_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
     retry: 1,
   })
 }

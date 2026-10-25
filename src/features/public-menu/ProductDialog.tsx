@@ -5,11 +5,14 @@ import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/qua
 import { publicAssetUrl } from '../../lib/supabase/client'
 import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/domain'
 
-export function ProductDialog({ product, restaurant, onClose, onAdd }: { product: PublicProduct; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void }) {
+export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine }: { product: PublicProduct; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const [quantity, setQuantity] = useState(1)
-  const [notes, setNotes] = useState('')
-  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  const [quantity, setQuantity] = useState(initialLine?.quantity ?? 1)
+  const [notes, setNotes] = useState(initialLine?.notes ?? '')
+  const [selections, setSelections] = useState<Record<string, string[]>>(() => Object.fromEntries(product.optionGroups.map(group => [group.id, group.options.filter(option => initialLine?.selectedOptions.some(selected => selected.id === option.id)).map(option => option.id)])))
+  const [removedOptions, setRemovedOptions] = useState<Set<string>>(new Set())
+  const knownOptionIds = new Set(product.optionGroups.flatMap(group => group.options.map(option => option.id)))
+  const unavailableSelections = initialLine?.selectedOptions.filter(option => !knownOptionIds.has(option.id) && !removedOptions.has(option.id)) ?? []
   const [error, setError] = useState<string | null>(null)
   const basePrice = currentProductPrice(product)
   const advertisedQuantityPrices = effectiveQuantityPrices(basePrice, product.quantityPrices)
@@ -45,11 +48,14 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
       const values = current[groupId] ?? []
       if (values.includes(optionId)) return { ...current, [groupId]: values.filter((id) => id !== optionId) }
       if (maxSelect === 1) return { ...current, [groupId]: [optionId] }
-      return { ...current, [groupId]: [...values, optionId].slice(-maxSelect) }
+      if (values.length >= maxSelect) { setError('Quitá una opción antes de elegir otra en este grupo.'); return current }
+      return { ...current, [groupId]: [...values, optionId] }
     })
   }
 
   function add() {
+    if (!product.available) { setError('Este producto ya no está disponible.'); return }
+    if (unavailableSelections.length) { setError('Revisá y quitá explícitamente las opciones que ya no están disponibles.'); return }
     if (selectedOptions.length > 30) {
       setError('El producto admite hasta 30 opciones seleccionadas.')
       return
@@ -62,7 +68,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
       }
     }
     onAdd({
-      key: crypto.randomUUID(),
+      key: initialLine?.key ?? crypto.randomUUID(),
       productId: product.id,
       productName: product.name,
       productImagePath: product.imagePath,
@@ -116,6 +122,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
               ) : null}
             </div>
             <div className="mt-6 space-y-6">
+              {unavailableSelections.length ? <section className="rounded-xl bg-amber-50 p-3"><h3 className="font-semibold">Opciones que necesitan revisión</h3><p className="mt-1 text-sm">Conservamos tu elección anterior. Quitá cada opción que ya no existe y elegí un reemplazo si corresponde.</p>{unavailableSelections.map(option => <div key={option.id} className="mt-2 flex items-center justify-between gap-3"><span>{option.name}</span><button type="button" className="button-secondary" onClick={() => setRemovedOptions(previous => new Set([...previous, option.id]))}>Quitar {option.name}</button></div>)}</section> : null}
               {product.optionGroups.map((group) => (
                 <fieldset key={group.id}>
                   <legend className="font-semibold text-stone-950">
@@ -156,10 +163,10 @@ export function ProductDialog({ product, restaurant, onClose, onAdd }: { product
           <div className="flex shrink-0 items-center overflow-hidden rounded-xl border border-stone-300 bg-white">
             <button type="button" className="quantity-button" aria-label="Restar uno" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus aria-hidden /></button>
             <span className="w-8 text-center font-bold text-stone-950 sm:w-10" aria-live="polite">{quantity}</span>
-            <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(20, value + 1))}><Plus aria-hidden /></button>
+            <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(initialLine ? 100 : 20, value + 1))}><Plus aria-hidden /></button>
           </div>
           <button type="button" className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
-            <span className="truncate">Agregar · {formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</span>
+            <span className="truncate">{initialLine ? 'Guardar cambios' : 'Agregar'} · {formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</span>
           </button>
         </div>
       </div>
