@@ -24,6 +24,8 @@ const commandSchema = z.discriminatedUnion('name', [
   z.object({ name: z.literal('inventory_adjust'), args: z.object({ p_restaurant_id: uuid, p_operation_id: uuid, p_kind: z.enum(['receipt', 'adjustment', 'external_sale']), p_rows: z.array(z.object({ productId: uuid, quantity: z.string(), expectedVersion: z.string() })), p_reason: z.string(), p_external_reference: z.string().optional() }) }),
 ])
 type Command = z.infer<typeof commandSchema>
+type ExternalSaleRow = { key: string; productId: string; quantity: string }
+const emptyExternalSaleRow = (): ExternalSaleRow => ({ key: crypto.randomUUID(), productId: '', quantity: '' })
 const pendingKey = (restaurantId: string) => `mozzi:inventory-command:${restaurantId}`
 function readPending(restaurantId: string) {
   try {
@@ -32,6 +34,8 @@ function readPending(restaurantId: string) {
   } catch { return null }
 }
 const orderSchema = z.object({ id: uuid, display_number: z.string(), status: z.string() })
+const externalReferenceSchema = z.array(z.object({ id: uuid, external_reference: z.string().min(1) })).max(100)
+const externalReferenceError = 'No se pudieron cargar las referencias de las ventas externas. Reintentá la carga para consultar el historial completo.'
 
 export function InventoryPage() {
   const scope = useRestaurantScope()
@@ -61,6 +65,7 @@ function InventoryWorkspace() {
   const [movementQuantity, setMovementQuantity] = useState('')
   const [movementReason, setMovementReason] = useState('')
   const [externalReference, setExternalReference] = useState('')
+  const [externalRows, setExternalRows] = useState<ExternalSaleRow[]>(() => [emptyExternalSaleRow()])
   const query = useQuery({
     queryKey: ['inventory', restaurantId], enabled: Boolean(restaurantId),
     queryFn: async () => {
@@ -75,7 +80,21 @@ function InventoryWorkspace() {
           if (parsed.policy.version !== combined.policy.version) throw new Error('El inventario cambió mientras se cargaba. Actualizá la pantalla.')
           combined.items.push(...parsed.items)
         }
-        if (!parsed.nextCursor) return combined
+        if (!parsed.nextCursor) {
+          const ids = combined.operations.filter(operation => operation.kind === 'external_sale').map(operation => operation.id)
+          if (ids.length) {
+            if (ids.length > 100) throw new Error(externalReferenceError)
+            try {
+              const references = await supabase.from('inventory_operations').select('id,external_reference').eq('restaurant_id', restaurantId).in('id', ids)
+              const parsedReferences = externalReferenceSchema.safeParse(references.data)
+              if (references.error || !parsedReferences.success) throw new Error(externalReferenceError)
+              const byId = new Map(parsedReferences.data.map(row => [row.id, row.external_reference]))
+              if (byId.size !== ids.length || ids.some(id => !byId.has(id))) throw new Error(externalReferenceError)
+              combined.operations = combined.operations.map(operation => operation.kind === 'external_sale' ? { ...operation, externalReference: byId.get(operation.id)! } : operation)
+            } catch { throw new Error(externalReferenceError) }
+          }
+          return combined
+        }
         after = parsed.nextCursor
       }
       throw new Error('El catálogo supera los 5.000 productos admitidos en esta pantalla. No se cargó una lista incompleta.')
@@ -101,8 +120,15 @@ function InventoryWorkspace() {
     },
   })
   useEffect(() => {
-    setPending(readPending(restaurantId)); setError(null); setMessage(null)
+    const recovered = readPending(restaurantId)
+    setPending(recovered); setError(null); setMessage(null)
     setReason(''); setProductId(''); setBusinessAccepted(false); setReviewedOrders([])
+    if (recovered?.name === 'inventory_adjust' && recovered.args.p_kind === 'external_sale') {
+      setMovementKind('external_sale')
+      setExternalRows(recovered.args.p_rows.map(row => ({ key: crypto.randomUUID(), productId: row.productId, quantity: row.quantity })))
+      setMovementReason(recovered.args.p_reason)
+      setExternalReference(recovered.args.p_external_reference ?? '')
+    }
   }, [restaurantId])
   useEffect(() => {
     setCounts(countId ? readCountDraft(restaurantId, countId) : {})
@@ -128,6 +154,7 @@ function InventoryWorkspace() {
       }
       sessionStorage.removeItem(pendingKey(restaurantId)); setPending(null)
       if (command.name === 'finish_inventory_count') localStorage.removeItem(`mozzi:inventory-count:${restaurantId}:${command.args.p_count_id}`)
+      if (command.name === 'inventory_adjust' && command.args.p_kind === 'external_sale') setExternalRows([emptyExternalSaleRow()])
       setMessage('Operación registrada.'); setMovementQuantity(''); setMovementReason(''); setExternalReference(''); setReason('')
       await Promise.all([
         client.invalidateQueries({ queryKey: ['inventory', restaurantId] }),
@@ -155,16 +182,38 @@ function InventoryWorkspace() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Revisá las cantidades.') }
   }
   function recordMovement() {
+    if (movementKind === 'external_sale') {
+      if (externalReference.trim().length < 3 || externalReference.trim().length > 120) {
+        setError('Indicá el canal y una referencia común para la venta, de 3 a 120 caracteres.'); return
+      }
+      if (movementReason.trim().length > 0 && movementReason.trim().length < 3) {
+        setError('La nota es opcional; si la escribís, usá al menos 3 caracteres.'); return
+      }
+      if (!externalRows.length || new Set(externalRows.map(row => row.productId)).size !== externalRows.length) {
+        setError('Cada producto debe aparecer una sola vez en la venta.'); return
+      }
+      const rows = []
+      for (const row of externalRows) {
+        const item = query.data?.items.find(item => item.productId === row.productId)
+        if (!item?.initialized || !item.version || !/^\d{1,13}$/.test(row.quantity) || BigInt(row.quantity) === 0n) {
+          setError('Elegí un producto con conteo y una cantidad entera mayor que cero en cada fila de la venta.'); return
+        }
+        rows.push({ productId: row.productId, quantity: row.quantity, expectedVersion: item.version })
+      }
+      void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: rows, p_reason: movementReason.trim() || 'Venta fuera de la app', p_external_reference: externalReference.trim() } })
+      return
+    }
     const item = query.data?.items.find(row => row.productId === productId)
     if (!item?.initialized || !item.version || !/^-?\d{1,13}$/.test(movementQuantity) || BigInt(movementQuantity) === 0n || (movementKind !== 'adjustment' && BigInt(movementQuantity) < 0n)) {
       setError('Elegí un producto con conteo y una cantidad entera válida.'); return
     }
-    void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: [{ productId, quantity: movementQuantity, expectedVersion: item.version }], p_reason: movementReason.trim(), ...(movementKind === 'external_sale' ? { p_external_reference: externalReference.trim() } : {}) } })
+    void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: [{ productId, quantity: movementQuantity, expectedVersion: item.version }], p_reason: movementReason.trim() } })
   }
 
   if (query.isLoading) return <LoadingScreen />
-  if (query.error || !query.data) return <ErrorPanel>{query.error?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
+  if (query.error || !query.data) return <ErrorPanel action={<button className="button-secondary" disabled={query.isFetching} onClick={() => void query.refetch()}>Reintentar carga</button>}>{query.error?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
   const { policy, items, operations } = query.data
+  const initializedItems = items.filter(item => item.initialized)
   const disabled = busy || Boolean(pending)
   const modeLabel = countId ? 'Conteo en curso' : policy.mode === 'enforced' ? 'Activo' : policy.mode === 'paused' ? 'Pausado' : 'Sin activar'
   return <>
@@ -178,7 +227,31 @@ function InventoryWorkspace() {
     {countId ? <p className="mb-4 rounded-2xl bg-amber-50 p-4">Ventana iniciada: {new Date(policy.countStartedAt!).toLocaleString('es-AR')}. Registrá cada cantidad mientras contás. Si hubo movimientos físicos durante la ventana, detené el registro y conciliá antes de cerrar.</p> : null}
     <section className="form-card"><h2 className="form-card-title">Existencias · {items.length} productos</h2><p className="mb-4 text-sm">Incluye productos archivados con saldo registrado o pedidos pendientes; también deben contarse.</p><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Producto</th><th>Código / SKU</th><th>Existencia</th><th>Reservado</th><th>Disponible</th>{countId && isAdmin ? <th>Conteo físico</th> : null}</tr></thead><tbody>{items.map(item => <tr key={item.productId}><td>{item.name}{item.archived ? <span className="ml-2 text-xs text-stone-500">Archivado</span> : null}</td><td>{item.code}</td><td>{item.initialized ? item.onHand : 'Sin conteo'}</td><td>{item.reserved ?? '—'}</td><td>{item.available ?? '—'}</td>{countId && isAdmin ? <td><input className="w-28 rounded-lg border p-2" aria-label={`Conteo de ${item.name}`} inputMode="numeric" value={counts[item.productId]?.quantity ?? ''} disabled={disabled} onChange={event => updateCount(item.productId, event.target.value)} /></td> : null}</tr>)}</tbody></table></div></section>
     {countId && isAdmin ? <section className="form-card mt-5"><h2 className="form-card-title">Revisar y registrar conteo</h2><p>{Object.values(counts).filter(row => row.quantity !== '').length} cantidades cargadas. Revisá la tabla: cero es una cantidad explícita; un campo vacío sigue sin contar.</p><label className="field mt-4"><span>Observación del conteo</span><textarea maxLength={2000} value={note} disabled={disabled} onChange={event => setNote(event.target.value)} placeholder="Responsable, alcance contado y comprobación de todos los canales" /></label><label className="check-field mt-4"><input type="checkbox" checked={noMovements} disabled={disabled} onChange={event => setNoMovements(event.target.checked)} />Confirmo que no hubo movimientos físicos entre contar y registrar, en ningún canal.</label>{policy.mode === 'never_enabled' ? <><label className="check-field mt-4"><input type="checkbox" checked={activate} disabled={disabled || !policy.businessConfirmed} onChange={event => setActivate(event.target.checked)} />Activar el stock con este conteo.</label>{!policy.businessConfirmed ? <p className="mt-2 text-sm">Primero confirmá las reglas comerciales.</p> : null}{activate ? <div className="mt-4"><h3 className="font-bold">Pedidos pendientes que se incorporarán</h3><p className="text-sm">Revisá cada pedido. Los ya aceptados reservarán mercadería al activar; los demás reservarán al aceptarlos.</p>{openOrders.error ? <ErrorPanel>{openOrders.error.message}</ErrorPanel> : null}{openOrders.data?.map(order => <label className="check-field mt-2" key={order.id}><input type="checkbox" checked={reviewedOrders.includes(order.id)} disabled={disabled} onChange={event => setReviewedOrders(rows => event.target.checked ? [...rows, order.id] : rows.filter(id => id !== order.id))} /><Link to={`/admin/pedidos/${order.id}`}>{order.display_number}</Link> · {order.status === 'accepted' ? 'Aceptado: reservar' : 'Pendiente de aceptación'}</label>)}</div> : null}</> : <p className="mt-3 text-sm">Finalizar el conteo conserva la pausa. Reanudá cuando la contingencia esté resuelta.</p>}<button className="button-primary mt-4" disabled={disabled || !noMovements || note.trim().length < 10 || (activate && (openOrders.isLoading || Boolean(openOrders.error) || reviewedOrders.length !== openOrders.data?.length))} onClick={finishCount}>Registrar conteo{activate ? ' y activar stock' : ''}</button></section> : null}
-    {isAdmin && policy.mode === 'enforced' && !countId ? <section className="form-card mt-5"><h2 className="form-card-title">Registrar movimiento</h2><div className="grid gap-4 sm:grid-cols-2"><label className="field"><span>Acción</span><select value={movementKind} disabled={disabled} onChange={event => setMovementKind(event.target.value as typeof movementKind)}><option value="receipt">Ingreso de mercadería</option><option value="adjustment">Merma o corrección de movimiento</option>{policy.businessPolicy?.otherChannels === 'record_before_handoff' ? <option value="external_sale">Venta fuera de la app</option> : null}</select></label><label className="field"><span>Producto</span><select value={productId} disabled={disabled} onChange={event => setProductId(event.target.value)}><option value="">Elegí un producto</option>{items.filter(item => item.initialized).map(item => <option key={item.productId} value={item.productId}>{item.name} · {item.code}</option>)}</select></label><label className="field"><span>{movementKind === 'adjustment' ? 'Cantidad a sumar o restar' : 'Cantidad'}</span><input inputMode="numeric" value={movementQuantity} disabled={disabled} onChange={event => setMovementQuantity(event.target.value)} /></label><label className="field"><span>Motivo del movimiento</span><input value={movementReason} maxLength={500} disabled={disabled} onChange={event => setMovementReason(event.target.value)} /></label>{movementKind === 'external_sale' ? <label className="field"><span>Canal y referencia de la venta</span><input value={externalReference} disabled={disabled} onChange={event => setExternalReference(event.target.value)} placeholder="Por ejemplo: mostrador, comprobante 123" /></label> : null}</div>{movementKind === 'adjustment' ? <p className="mt-3 text-sm">Indicá el cambio, no el saldo final. Para reemplazar existencias según un conteo, usá la ventana de conteo físico.</p> : null}<button className="button-primary mt-4" disabled={disabled || movementReason.trim().length < 3 || !productId || !movementQuantity || (movementKind === 'external_sale' && externalReference.trim().length < 3)} onClick={recordMovement}>Registrar movimiento</button></section> : null}
-    <section className="form-card mt-5"><h2 className="form-card-title">Últimos {operations.length} movimientos</h2><p className="mb-4 text-sm">Se muestran hasta 100 operaciones. Las reservas afectan disponible; las entregas afectan existencia. Una devolución no confirma un reintegro de dinero.</p><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Motivo y cantidades</th><th>Responsable</th><th>Pedido</th></tr></thead><tbody>{operations.map(operation => <tr key={operation.id}><td>{new Date(operation.createdAt).toLocaleString('es-AR')}</td><td>{operationLabels[operation.kind] ?? operation.kind}</td><td>{operation.reason}{operation.movements.length ? <details className="mt-2"><summary className="cursor-pointer">Ver cantidades</summary><ul className="mt-2 space-y-1">{operation.movements.map(movement => <li key={movement.productId}>{items.find(item => item.productId === movement.productId)?.name ?? 'Producto archivado'}: existencia {movement.deltaOnHand}, reserva {movement.deltaReserved}{movement.returnedQuantity !== '0' ? `, recibido en devolución ${movement.returnedQuantity}` : ''}. Saldo: {movement.onHandAfter}.</li>)}</ul></details> : null}</td><td>{operation.actorName || 'Operador registrado'}</td><td>{operation.orderId ? <Link to={`/admin/pedidos/${operation.orderId}`}>Ver pedido</Link> : '—'}</td></tr>)}</tbody></table></div></section>
+    {isAdmin && policy.mode === 'enforced' && !countId ? <section className="form-card mt-5">
+      <h2 className="form-card-title">Registrar movimiento</h2>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="field"><span>Acción</span><select value={movementKind} disabled={disabled} onChange={event => setMovementKind(event.target.value as typeof movementKind)}><option value="receipt">Ingreso de mercadería</option><option value="adjustment">Merma o corrección de movimiento</option>{policy.businessPolicy?.otherChannels === 'record_before_handoff' ? <option value="external_sale">Venta fuera de la app</option> : null}</select></label>
+        {movementKind !== 'external_sale' ? <>
+          <label className="field"><span>Producto</span><select value={productId} disabled={disabled} onChange={event => setProductId(event.target.value)}><option value="">Elegí un producto</option>{initializedItems.map(item => <option key={item.productId} value={item.productId}>{item.name} · {item.code}</option>)}</select></label>
+          <label className="field"><span>{movementKind === 'adjustment' ? 'Cantidad a sumar o restar' : 'Cantidad'}</span><input inputMode="numeric" value={movementQuantity} disabled={disabled} onChange={event => setMovementQuantity(event.target.value)} /></label>
+        </> : <label className="field"><span>Canal y referencia de la venta</span><input value={externalReference} maxLength={120} disabled={disabled} onChange={event => setExternalReference(event.target.value)} placeholder="Por ejemplo: mostrador, comprobante 123" /></label>}
+        <label className="field"><span>{movementKind === 'external_sale' ? 'Nota (opcional)' : 'Motivo del movimiento'}</span><input value={movementReason} maxLength={500} disabled={disabled} onChange={event => setMovementReason(event.target.value)} /></label>
+      </div>
+      {movementKind === 'external_sale' ? <div className="mt-4 space-y-3">
+        <p className="text-sm">Registrá la venta completa al entregar. Todos sus productos se descontarán juntos con una única referencia.</p>
+        {externalRows.map((row, index) => <div key={row.key} className="grid items-end gap-3 rounded-xl border border-stone-200 p-3 sm:grid-cols-[minmax(0,1fr)_8rem_auto]">
+          <label className="field"><span>Producto {index + 1}</span><select value={row.productId} disabled={disabled} onChange={event => setExternalRows(rows => rows.map(current => current.key === row.key ? { ...current, productId: event.target.value } : current))}>
+            <option value="">Elegí un producto</option>
+            {initializedItems.map(item => <option key={item.productId} value={item.productId} disabled={externalRows.some(other => other.key !== row.key && other.productId === item.productId)}>{item.name} · {item.code}</option>)}
+          </select></label>
+          <label className="field"><span>Cantidad {index + 1}</span><input inputMode="numeric" value={row.quantity} disabled={disabled} onChange={event => setExternalRows(rows => rows.map(current => current.key === row.key ? { ...current, quantity: event.target.value } : current))} /></label>
+          <button className="button-secondary" aria-label={`Quitar producto ${index + 1}`} disabled={disabled || externalRows.length === 1} onClick={() => setExternalRows(rows => rows.filter(current => current.key !== row.key))}>Quitar</button>
+        </div>)}
+        <button className="button-secondary" disabled={disabled || externalRows.length >= initializedItems.length} onClick={() => setExternalRows(rows => [...rows, emptyExternalSaleRow()])}>Agregar producto</button>
+      </div> : null}
+      {movementKind === 'adjustment' ? <p className="mt-3 text-sm">Indicá el cambio, no el saldo final. Para reemplazar existencias según un conteo, usá la ventana de conteo físico.</p> : null}
+      <button className="button-primary mt-4" disabled={disabled || (movementKind === 'external_sale' ? externalReference.trim().length < 3 || externalRows.some(row => !row.productId || !row.quantity) : movementReason.trim().length < 3 || !productId || !movementQuantity)} onClick={recordMovement}>{movementKind === 'external_sale' ? 'Registrar venta externa' : 'Registrar movimiento'}</button>
+    </section> : null}
+    <section className="form-card mt-5"><h2 className="form-card-title">Últimos {operations.length} movimientos</h2><p className="mb-4 text-sm">Se muestran hasta 100 operaciones. Las reservas afectan disponible; las entregas afectan existencia. Una devolución no confirma un reintegro de dinero.</p><div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Motivo, referencia y cantidades</th><th>Responsable</th><th>Pedido</th></tr></thead><tbody>{operations.map(operation => <tr key={operation.id}><td>{new Date(operation.createdAt).toLocaleString('es-AR')}</td><td>{operationLabels[operation.kind] ?? operation.kind}</td><td>{operation.reason}{operation.kind === 'external_sale' && operation.externalReference ? <p className="mt-1 text-sm">Canal y referencia: <span>{operation.externalReference}</span></p> : null}{operation.movements.length ? <details className="mt-2"><summary className="cursor-pointer">Ver cantidades</summary><ul className="mt-2 space-y-1">{operation.movements.map(movement => <li key={movement.productId}>{items.find(item => item.productId === movement.productId)?.name ?? 'Producto archivado'}: existencia {movement.deltaOnHand}, reserva {movement.deltaReserved}{movement.returnedQuantity !== '0' ? `, recibido en devolución ${movement.returnedQuantity}` : ''}. Saldo: {movement.onHandAfter}.</li>)}</ul></details> : null}</td><td>{operation.actorName || 'Operador registrado'}</td><td>{operation.orderId ? <Link to={`/admin/pedidos/${operation.orderId}`}>Ver pedido</Link> : '—'}</td></tr>)}</tbody></table></div></section>
   </>
 }

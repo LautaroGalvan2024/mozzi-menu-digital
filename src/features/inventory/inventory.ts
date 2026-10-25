@@ -15,7 +15,7 @@ export const inventorySchema = z.object({
   items: z.array(inventoryItemSchema), nextCursor: z.string().uuid().nullable(),
   operations: z.array(z.object({
     id: z.string().uuid(), kind: z.string(), orderId: z.string().uuid().nullable(), sourceOperationId: z.string().uuid().nullable(),
-    reason: z.string(), actorUserId: z.string().uuid(), actorName: z.string().nullable().optional(), createdAt: z.string(), result: z.unknown(),
+    reason: z.string(), externalReference: z.string().nullable().optional(), actorUserId: z.string().uuid(), actorName: z.string().nullable().optional(), createdAt: z.string(), result: z.unknown(),
     movements: z.array(z.object({ productId: z.string().uuid(), deltaOnHand: z.string(), deltaReserved: z.string(), returnedQuantity: quantity, onHandAfter: quantity, reservedAfter: quantity })).default([]),
   })),
 })
