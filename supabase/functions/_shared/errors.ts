@@ -142,6 +142,16 @@ const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
     code: "FORBIDDEN",
     message: "No tenés permisos para administrar miembros.",
   },
+  LAST_RESTAURANT_ADMIN_REQUIRED: {
+    status: 422,
+    code: "LAST_RESTAURANT_ADMIN_REQUIRED",
+    message: "El comercio debe conservar al menos un administrador activo.",
+  },
+  MEMBERSHIP_INPUT_INVALID: {
+    status: 400,
+    code: "MEMBERSHIP_INPUT_INVALID",
+    message: "Los datos de la membresía no son válidos.",
+  },
   ROLE_ASSIGNMENT_FORBIDDEN: {
     status: 403,
     code: "FORBIDDEN",

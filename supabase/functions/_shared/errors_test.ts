@@ -41,3 +41,31 @@ Deno.test("invalid import categories map to a sanitized validation error", () =>
   assertEquals(mapped.code, "IMPORT_CATEGORY_INVALID");
   assertEquals(mapped.message.includes("internal"), false);
 });
+
+Deno.test("membership validation failures map to safe actionable responses", () => {
+  for (
+    const [code, status, message] of [
+      [
+        "LAST_RESTAURANT_ADMIN_REQUIRED",
+        422,
+        "El comercio debe conservar al menos un administrador activo.",
+      ],
+      [
+        "MEMBERSHIP_INPUT_INVALID",
+        400,
+        "Los datos de la membresía no son válidos.",
+      ],
+    ] as const
+  ) {
+    const mapped = databaseApiError({
+      code: "P0001",
+      message: code,
+      details: "private membership identifiers",
+      hint: "internal query text",
+    });
+    assertEquals(mapped.status, status);
+    assertEquals(mapped.code, code);
+    assertEquals(mapped.message, message);
+    assertEquals(mapped.details, undefined);
+  }
+});
