@@ -2,33 +2,50 @@
 
 Fecha: **24/10/2026**, America/Buenos_Aires. Etapa: auditoría, diseño y planificación; sin implementación funcional.
 
+Revisión documental posterior: alcance de la primera versión para **un mayorista**. Se conservan los hallazgos y mediciones originales; esta revisión no vuelve a certificar el código, las pruebas ni el despliegue y no implementa correcciones.
+
 ## 1. Veredicto ejecutivo
 
 **No apto en las condiciones actuales para comprometer un servicio de catálogo, pedidos e inventario mayorista.** La base puede evolucionar a **apto con correcciones previas** manteniendo React, Vercel y Supabase. No se encontró un impedimento que justifique reescritura, microservicios o infraestructura adicional.
 
 **500 es el límite de un lote de importación, no del catálogo.** El frontend mostró 500, 1.500 y 5.000 artículos sintéticos completos; eso no certifica capacidad de PostgreSQL, tráfico simultáneo ni experiencia aceptable en dispositivos reales. Hoy existen límites de pedidos, riesgos en importación/administración y, sobre todo, **no hay stock numérico ni descuento al entregar**.
 
-Condiciones antes de vender la solución pedida:
+La primera entrega se evalúa con el catálogo, pedidos, operadores y pico acordados para ese mayorista. Los escenarios de 10 o 50 comercios y 5.000 productos son referencias de crecimiento y estrés; **no son condiciones automáticas para habilitar ese piloto**. Sí son obligatorias la integridad del inventario, los permisos efectivos, la recuperación de reintentos y la validación de su volumen real en un entorno aislado.
+
+Condiciones antes de ofrecer la primera versión:
 
 1. Corregir la invitación que permite degradar administradores y el procesamiento excesivo de entradas públicas (S01/S03/S04).
-2. Evitar actualización destructiva de precios, catálogos inválidos por opciones y gestión incompleta de productos (C01/C02/C05/C11).
-3. Acordar tamaño del pedido, unidades y ventas por otros canales; adaptar límites/UX según ese acuerdo (O02/C09).
+2. Evitar actualización destructiva de precios y catálogos inválidos (C02/C10/C11); cerrar C05 si usa opciones y C01 si el catálogo con margen alcanza el límite efectivo de filas. Comprobar esas condiciones antes del piloto.
+3. Acordar qué acción representa una entrega física, tamaño del pedido, unidad/caja/fracción, disponibilidad al aceptar y ventas por otros canales; adaptar límites/UX según ese acuerdo (O02/C09).
 4. Implementar y probar entrega transaccional con inventario, sin doble descuento ni movimientos parciales (O01 y plan).
 5. Resolver idempotencia con formulario modificado y revisión de precios canónicos (O03/O04/C03).
 6. Validar instalación reproducible, pruebas DB/concurrencia aisladas, restauración y plan contratado compatible con uso comercial. **Suscripciones, cuotas, consumo y recuperación efectiva no están verificados.**
 
 No se halló una fuga entre comercios en los caminos revisados, pero no equivale a un pentest aprobado: faltan pruebas negativas autenticadas y de concurrencia en base aislada. S01 afecta la separación de facultades dentro de un comercio.
 
+### Alcance de lanzamiento y trabajo posterior
+
+| Grupo | Alcance de la primera versión | Criterio de cierre |
+|---|---|---|
+| Correcciones indispensables | Permisos S01; entradas públicas S03/S04; importación C02/C10/C11; C01/C05 y límites según alcance comprobado; precios/reintentos del pedido; instalación reproducible y configuración operativa | Casos reproducidos y corregidos, regresiones del flujo vigente y pruebas de permisos en DB real aislada; catálogo completo accesible y pedido coherente |
+| Inventario mínimo | Carga inicial, reposición, ajustes y otras ventas; entrega atómica e idempotente; correcciones/devoluciones acordadas; UI e informes que distinguen operaciones vigentes y compensadas; corte y contingencia | Pruebas DB reales de concurrencia, reintentos, rollback y permisos; conciliación de saldos/movimientos y piloto del mayorista |
+| Mejoras posteriores | Escala multicomercio B/C, optimizaciones sin cuello demostrado, directorios globales y funciones comerciales adicionales | Se priorizan por crecimiento o necesidad confirmada; un defecto que afecte seguridad o integridad del piloto no se posterga por estar clasificado P2 |
+
+El [plan de implementación](PLAN_MAYORISTA_Y_STOCK.md) concentra tareas, dependencias y estimación. **El lanzamiento completo no se estima en 5–8 jornadas**: ese rango describía tareas individuales. Para el escenario todavía **no aprobado** de unidad entera, sin reservas, devolución completa y carga manual de otras ventas, la base es **33–53 jornadas**, con margen del 20% y redondeo de planificación de **40–64 jornadas**. No es una fecha comprometida ni confirma que ese escenario represente la operación real. El plan desglosa ambiente, correcciones, modelo/RPC, UI/conteo, correcciones/reportes e integración/piloto. Devoluciones parciales y entregas parciales son ampliaciones independientes, con estimaciones provisionales de **4–7** y **8–12 jornadas**, respectivamente; requieren definición antes de incorporarse.
+
+La primera tanda propuesta es **reproducción aislada y S01 de membresías, 3–5 jornadas incluidas en el total**, sin enviar correos reales. Debe preparar la base de prueba, reproducir la omisión y cubrir roles, estado vigente del administrador, protección del último administrador, reinvitaciones, carreras entre sesiones y compatibilidad de altas/reactivaciones permitidas. Su aceptación exige pruebas de DB real y del handler con correo simulado; no habilita stock ni acredita el lanzamiento completo. Esta revisión sólo documenta esa tanda: no la ejecuta.
+
 ## 2. Identidad, método y arquitectura
 
 - Repositorio: `https://github.com/LautaroGalvan2024/mozzi-menu-digital.git`; npm `mozzi-menu`, versión declarada 0.0.0.
-- Checkout: `C:\Users\Nico\Documents\ChatGPT\Mozzi-Menu`, rama `main`, commit **bf183767 b8 ba6012 e2 d33 d177 e473 d5534669 b9 c** (01/10/2026). `main...origin/main` sin divergencia indicada; no se hizo fetch, por lo que no se certifica último commit remoto.
+- Base de la auditoría original: checkout `C:\Users\Nico\Documents\ChatGPT\Mozzi-Menu`, rama `main`, commit **bf183767b8ba6012e2d33d177e473d5534669b9c** (01/10/2026). En esa toma `main...origin/main` no indicaba divergencia y no se hizo fetch; esa evidencia no certificaba el último commit remoto.
+- Contexto de esta revisión documental: rama `feature/mayorista-stock`, creada desde `origin/main` actualizado; informes y benchmark preservados en el commit `97c6a36`, según la preparación de la rama realizada en esta sesión. Esto no convierte las mediciones históricas en pruebas repetidas sobre una nueva versión.
 - Git inicialmente limpio. No se encontraron `AGENTS.md` en proyecto/directorios ascendientes inspeccionados. Se respetaron README, documentación y restricciones del pedido. Entornos/secretos existentes conservados y no reproducidos.
 - Revisión del código propio, API, seis Edge Functions, helpers, **23 migraciones en orden** y pruebas. Se evaluaron definiciones finales, no grants/funciones obsoletas reemplazadas. No se revisó código generado/dependencias línea por línea.
 - Ensayos locales sintéticos. Únicas consultas remotas: metadatos/configuración del esquema; sin carga, migraciones, degradaciones, pedidos reales ni mensajes a clientes.
-- Sólo se añadieron informes y soportes reproducibles en `docs/auditoria-mayorista`. Sin cambios funcionales, dependencias nuevas, commits o despliegues.
+- La auditoría añadió los informes de `docs` y soportes reproducibles de `docs/auditoria-mayorista`, sin cambios funcionales, dependencias nuevas ni despliegues. Esta revisión modifica sólo documentación; la conservación posterior en Git no implica implementación.
 
-**Convenciones:** P1 bloquea compromiso o habilitación del flujo afectado; P2 reduce confiabilidad/operabilidad; P3 opcional. No hay P0 de exposición total demostrada. «Comprobado» significa código/ensayo indicado, no explotación remota. «Riesgo» es condición razonada todavía no reproducida. Esfuerzos orientativos de un desarrollador familiarizado: S hasta 1–2 jornadas; M 2–4; L 5–8, más validación según tarea; no cotización, con solapamientos.
+**Convenciones:** P1 bloquea compromiso o habilitación del flujo afectado; P2 reduce confiabilidad/operabilidad; P3 opcional. No hay P0 de exposición total demostrada. «Comprobado» significa código/ensayo indicado, no explotación remota. «Riesgo» es condición razonada todavía no reproducida. Los esfuerzos S hasta 1–2 jornadas, M 2–4 y L 5–8 son referencias históricas **por tarea**, más su validación; no son el esfuerzo de lanzamiento ni deben sumarse mecánicamente. La estimación integral y sus supuestos están en el plan enlazado.
 
 | Capa | Implementación real | Implicación |
 |---|---|---|
@@ -49,16 +66,17 @@ Modelo: comercio → categorías → productos → grupos/opciones; pedido → �
 | Elemento | Evidencia obtenida | Límite |
 |---|---|---|
 | Supabase vinculado | Ref `coqkgyaekenxccbxlozo` en `.temp` y CLI | No certifica qué deployment/cliente usa ese backend |
-| Migraciones remotas | `migration list --linked`: **23/23**, incluida202610010001 | Historial no es checksum ni excluye cambios manuales |
-| Esquema/permisos | SELECT catálogos:20 tablas con RLS; anon EXECUTE sólo get_public_menu; private sin USAGE anon/authenticated; sin vistas públicas | No reemplaza tests de todas las policies por rol |
+| Migraciones remotas | `migration list --linked`: **23/23**, incluida 202610010001 | Historial no es checksum ni excluye cambios manuales |
+| Esquema/permisos | SELECT catálogos: 20 tablas con RLS; anon EXECUTE sólo get_public_menu; private sin USAGE anon/authenticated; sin vistas públicas | No reemplaza tests de todas las policies por rol |
 | Función sensible | pg_get_functiondef de upsert_restaurant_membership confirma omisión S01 remota | No se ejercitó vulnerabilidad ni comparó fuente Edge desplegada |
 | Storage | Bucket público, MIME JPEG/PNG/WebP,1.048.576 bytes | No prueba archivos/restore existentes |
 | Realtime | Publicación orders/order_events | No mide latencia/consumo |
 | PostgreSQL | Remoto **17.6**; config local **15** | Alinear entorno para certificar reconstrucción |
 | Edge | Seis ACTIVE; create-order v7, restantes v6 | No equivalencia fuente Git ni prueba funcional productiva |
 | Vercel | `.vercel/project.json`: mozzi-menu-digital, Vite/npm/dist, Node 22.x | Sin verificar deployment activo/plan/headers/consumo |
-| CI | Workflow versionado completo; consulta GitHub de runs por commit vacía (herramienta filtra eventos PR) | No prueba ausencia de runs por push ni CI verde |
-| README197–200 | Declara migración23 pendiente/baseline anterior | Desactualizado frente al historial remoto actual |
+| CI | `.github/workflows/ci.yml` ejecuta checks en `pull_request` y `push` a `main`: calidad/build/audit, DB/RLS, Edge y secretos | Sin etapa explícita de deploy; consulta original de runs vacía no prueba ausencia de runs por push ni CI verde |
+| Integración Git de Vercel | Configuración externa no inspeccionada | Pendiente confirmar si crea previews o despliega automáticamente; no inferirlo del workflow de CI |
+| README 197–200 | Declara migración 23 pendiente/baseline anterior | Desactualizado frente al historial remoto de la auditoría |
 
 Comandos remotos de sólo lectura: `supabase migration list --linked`, `supabase functions list --project-ref ...` y `supabase db query --linked` con SELECT de `pg_class`, `pg_proc`, `pg_namespace`, `pg_publication_tables`, `pg_extension` y metadata de `storage.buckets`. pg_cron ausente. `authenticator_settings=null` al consultar sólo db_schemas/db_max_rows **no confirma** max_rows remoto: puede configurarse fuera de esas filas. No se leyó PII de pedidos.
 
@@ -80,7 +98,7 @@ Matiz: si un Super Admin tiene además una membresía de tenant activa, las help
 
 | Módulo | Profundidad | Comprobación y límite |
 |---|---|---|
-| Catálogo/búsqueda/promos | Alta | RPC final→Zod→render/modal; unitarias/E2 E mock y benchmark; DB real pendiente |
+| Catálogo/búsqueda/promos | Alta | RPC final→Zod→render/modal; unitarias/E2E mock y benchmark; DB real pendiente |
 | Productos/categorías/importación/imágenes | Alta | Editor/RPC, XLSX/CSV/ZIP, defaults, relaciones/reintentos; parser probado; integración SQL/Storage pendiente |
 | Carrito/checkout/WhatsApp | Alta | Límites/precios/fingerprint/snapshots/enlaces; tests; sin enviar mensajes |
 | Toma/estados/historial/export/métricas | Alta | SQL/autorización/consultas/fechas; carreras DB pendientes |
@@ -127,7 +145,7 @@ Flujo real: admin/importación confirma metadata transaccional e imágenes apart
 
 ## 4. Hallazgos detallados
 
-C: catálogo/importación; O: pedidos; S: seguridad; G: transversal. Las validaciones propuestas no se presentan como ejecutadas.
+C: catálogo/importación; O: pedidos; S: seguridad; G: transversal. Las validaciones propuestas no se presentan como ejecutadas. Los tamaños exploratorios de estas fichas se conservan como referencia técnica: el plan revisado define cuáles corresponden al piloto y cuáles quedan para crecimiento. No se exige validar 5.000 productos ni optimizar escalas mayores para cerrar un piloto cuyo alcance real sea menor.
 
 Referencias abreviadas de migraciones: 003=`202609280003_catalog.sql`;005=`202609280005_orders_audit_private.sql`;007=`202609280007_public_read_rpcs.sql`;008=`202609280008_order_admin_rpcs.sql`;009=`202609280009_order_creation_rpcs.sql`;010=`202609280010_tenant_import_rpcs.sql`;014=`202609280014_reporting_rpc.sql`;015=`202609280015_member_management_and_admin_hardening.sql`;018=`202609280018_transactional_admin_writes.sql`;20261001=`202610010001_product_quantity_pricing.sql`. Todas en `supabase/migrations`. Nombres TSX abreviados se encuentran en `src/features` del módulo indicado; helpers Edge en `supabase/functions/_shared`. Líneas referidas al commit auditado.
 
@@ -181,7 +199,7 @@ Referencias abreviadas de migraciones: 003=`202609280003_catalog.sql`;005=`20260
 - **Condición:** se ofrece control de stock o se marca un pedido como Completado.
 - **Impacto:** no satisface el requisito confirmado; la disponibilidad es una bandera manual y nunca decrece por vender. `completed` significa operación finalizada, no existe una semántica garantizada de entrega física.
 - **Solución mínima:** saldos/movimientos, política por comercio, snapshots de unidad y una operación transaccional de entrega descrita en PLAN_MAYORISTA_Y_STOCK.md; convertir el botón a “Confirmar entrega” y su semántica operativa; conservar estados existentes si `completed` se define formalmente como entregado.
-- **Esfuerzo:** L para MVP de stock con pruebas de concurrencia, másUI/activación; planificar como trabajo separado y validar estimación tras acordar unidades/devoluciones.
+- **Esfuerzo:** L describía el núcleo transaccional aislado, no el MVP ni el lanzamiento completo. Modelo, permisos, UI, corte, reportes, correcciones, validación e implementación integral se desglosan y estiman en el plan; reestimar tras acordar unidades/devoluciones.
 - **Validación:** criterios AC01–AC15 del plan. No presentar `available` como stock real.
 
 ### O02 — P1 si los pedidos reales exceden los topes — Límites rígidos de pedido y captura de cantidades (hecho)
@@ -266,7 +284,7 @@ Referencias abreviadas de migraciones: 003=`202609280003_catalog.sql`;005=`20260
 - **Impacto:** el admin puede degradar al otro admin y luego suspenderlo mediante la RPC permitida; el único admin puede degradarse a sí mismo y dejar el tenant sin administración local. Incumple el límite documentado de gestionar solo managers y exige rescate del Super Admin.
 - **Solución mínima:** bloquear membresías del tenant con orden determinista, releer actor y objetivo, impedir que un admin de tenant altere un objetivo cuyo rol anterior sea admin y conservar al menos un admin activo para cualquier degradación/suspensión autorizada. Definir invitación repetida del mismo rol como no-op; evitar usar la invitación como editor implícito de roles.
 - **Esfuerzo:** M, aproximadamente 1–2 días de desarrollo y prueba, sin servicio adicional.
-- **Validación propuesta:** pgTAP de admin A intentando reinvitar admin B y a sí mismo como manager; último admin protegido para Super Admin y solicitudes concurrentes; invitación de nuevo manager, repetición y reactivación permitida siguen operativas. E2 E aislado del handler autenticado. No se ejecutó una degradación remota.
+- **Validación propuesta:** pgTAP de admin A intentando reinvitar admin B y a sí mismo como manager; último admin protegido para Super Admin y solicitudes concurrentes; invitación de nuevo manager, repetición y reactivación permitida siguen operativas. E2E aislado del handler autenticado. No se ejecutó una degradación remota.
 
 ### S02 — P2 — Registro público de WhatsApp carece de límite de intentos
 
@@ -340,7 +358,7 @@ RLS y FKs compuestas, schema privado/grants explícitos/search_path vacío, rec�
 
 ### Entorno y resultado general
 
-Windows x64, AMD Ryzen7 3700 X(16 hilos),17.126.653.952 bytes RAM(~16 GiB), Node 24.14.1/npm11.6.1. Build Vite 8.3.2/React 19.3.0/TS6.0.3 instalados. Deno2.9.6 existente fuera de PATH, CLI Supabase2.119.0. No se instaló software. Vercel indica Node 22: repetir con paridad.
+Windows x64, AMD Ryzen 7 3700X (16 hilos), 17.126.653.952 bytes RAM (~16 GiB), Node 24.14.1/npm 11.6.1. Build Vite 8.3.2/React 19.3.0/TS 6.0.3 instalados. Deno 2.9.6 existente fuera de PATH, CLI Supabase 2.119.0. No se instaló software. Vercel indica Node 22: repetir con paridad.
 
 | Comando/caso | Resultado | Alcance |
 |---|---|---|
@@ -359,7 +377,7 @@ Windows x64, AMD Ryzen7 3700 X(16 hilos),17.126.653.952 bytes RAM(~16 GiB), Node
 | pgTAP | **No ejecutado** |10 suites/276 aserciones declaradas; falta runtime Docker/Podman local |
 | Concurrencia/stock futuro | **No ejecutado** | Criterios en plan, no hay implementación |
 
-Se forzó E2 E_LIVE=0/E2 E_CREATE_ORDER=0, configuración pública sintética/base local; Supabase/WhatsApp interceptados. Deno desde supabase/functions con binario existente; sin secretos productivos en ensayos. Consulta de runs GitHub no certificó CI. No se sustituyó la prueba DB por build.
+Se forzó `E2E_LIVE=0`/`E2E_CREATE_ORDER=0`, configuración pública sintética/base local; Supabase/WhatsApp interceptados. Deno desde supabase/functions con binario existente; sin secretos productivos en ensayos. Consulta de runs GitHub no certificó CI. No se sustituyó la prueba DB por build.
 
 Bundle: entrada307,43 kB(gzip96,49); Supabase214,98(55,32); CSS83,85(13,84); página pública23,67(7,48); importador187,05(57,50). Son tamaños de archivos, no suma transferida por sesión; importador lazy. No justifican cambiar framework.
 
@@ -450,23 +468,35 @@ Tests existentes revisados: `src/tests/import-products.test.ts` cubre centavos, 
 
 ### Procedimiento de capacidad pendiente
 
-Reconstruir migraciones/pgTAP en Supabase **local aislado**, PostgreSQL alineado, o staging ya disponible dentro del plan. Nunca reset/carga sobre --linked. Si falta entorno, no aprobar capacidad.
+Reconstruir migraciones/pgTAP en Supabase **local aislado**, PostgreSQL alineado, o staging ya disponible dentro del plan. Nunca reset/carga sobre --linked. **Antes de activar inventario son obligatorias pruebas sobre DB real aislada** de dos sesiones concurrentes, reintento después de commit/timeout, fallos antes de commit, atomicidad de varios productos y permisos por rol/comercio. Los mocks, el build, el benchmark de render y los tests secuenciales no certifican esas garantías. Si falta ese entorno o una prueba crítica falla, no activar stock.
+
+Para el primer mayorista se acuerda y prueba su catálogo completo, historial inicial/proyectado, imágenes, tamaño de pedido y pico de clientes/operadores. El fixture A es un punto de partida: debe ajustarse a su volumen real **superior a 500** si corresponde. Los fixtures B y C se conservan para evaluar crecimiento multicomercio; **no condicionan el primer piloto** mientras no formen parte del alcance acordado. La prueba negativa con un segundo tenant sintético sigue siendo obligatoria para aislamiento aunque se lance un solo mayorista.
 
 | Fixture propuesto | Catálogo/fotos | Historial y comercios | Simultaneidad |
 |---|---|---|---|
-|A|500/20 categorías/1 foto150 KiB media|10.000 pedidos,1 comercio|5 clientes+2 operadores|
-|B|1.500/40 categorías/1 foto150 KiB|100.000 pedidos totales,10 comercios,70% en principal|20 clientes+5 operadores|
-|C estrés|5.000/80 categorías/1 foto300 KiB|500.000 pedidos totales,50 comercios|50 clientes+10 operadores|
+|A: referencia del piloto, ajustar al mayorista|500/20 categorías/1 foto de 150 KiB media|10.000 pedidos, 1 comercio|5 clientes + 2 operadores|
+|B: crecimiento posterior|1.500/40 categorías/1 foto de 150 KiB|100.000 pedidos totales, 10 comercios, 70% en principal|20 clientes + 5 operadores|
+|C: estrés posterior|5.000/80 categorías/1 foto de 300 KiB|500.000 pedidos totales, 50 comercios|50 clientes + 10 operadores|
 
-Repetir con una categoría grande,0/3/19 reglas y0/2 grupos×4 opciones. Pedidos1/10/25 líneas y1/50/100 unidades;26 líneas/101 unidades deben fallar hoy. Mayores límites sólo tras implementación y acuerdo. Propuesta:2 min warmup+10 min medidos,3 repeticiones/caso; llegada controlada sin exceder rate limit salvo caso explícito de abuso. Cache fría/caliente, menú/historial/exportación/pedido/entrega futura. Medir p50/p95/p99,QPS,errores clasificados(incluido429 legítimo),bytes,CPU/IO/locks/conexiones y reparto por tenant.
+Seleccionar las variantes que representen al piloto y sus límites; no ejecutar todas las combinaciones exploratorias por obligación. Ejemplos: categoría grande, 0/3/19 reglas y 0/2 grupos × 4 opciones. Pedidos de 1/10/25 líneas y 1/50/100 unidades; 26 líneas/101 unidades deben fallar hoy. Mayores límites sólo tras implementación y acuerdo. Propuesta de medición: 2 min de calentamiento + 10 min medidos, 3 repeticiones por caso elegido; llegada controlada sin exceder rate limit salvo caso explícito de abuso. Cache fría/caliente, menú/historial/exportación/pedido/entrega futura. Medir p50/p95/p99, QPS, errores clasificados (incluido 429 legítimo), bytes, CPU/IO/locks/conexiones y reparto por tenant.
 
 EXPLAIN(ANALYZE,BUFFERS) **sólo SELECT aislados**; medir con rol/JWT equivalente para incluir RLS, no extrapolar service_role. Ya hay índices tenant+created_at,tenant+status+created_at y catálogo/grupos/opciones: conservar y perfilar antes de agregar. `%texto%` no queda resuelto por un B-tree ordinario; pg_trgm sólo si evidencia lo justifica. Orden estable con id/keyset para historia profunda. Realtime=eventos×suscriptores+lecturas por invalidación; probar ráfagas/reconexión sin suscripción por SKU.
 
 Umbrales de piloto propuestos, no prometidos: todos los SKU accesibles,0 errores de integridad/aislamiento; búsqueda<200 ms p95 y primera lista usable<3 s en dispositivo/red acordados; RPC lectura/pedido/entrega<1 s p95 al pico objetivo salvo contención controlada. Ninguna medición actual certifica estos objetivos.
 
+### Controles operativos mínimos antes de activar stock
+
+- **Entrega:** confirmar con el negocio qué evento físico habilita el descuento: entrega al cliente, retiro efectivamente realizado u otro hito definido. Abrir WhatsApp, aceptar, preparar y cobrar no se reinterpretan automáticamente como entrega. Reservar al aceptar sigue siendo una decisión pendiente, compatible con descontar existencia física sólo al entregar.
+- **Corte de existencias:** contar y registrar en una ventana sin ingresos, entregas, devoluciones ni salidas por otros canales para los SKU afectados. Si no se puede detener la operación, registrar y conciliar todos los movimientos entre el momento del conteo físico y su carga, con frontera por SKU y responsable si se cuentan a distintas horas; cargar después un conteo viejo como saldo actual no es seguro. No duplicar movimientos ya incorporados al saldo. Resolver también los pedidos pendientes, sin descontar históricos ni inventar existencias.
+- **Contingencia:** pausar en servidor las operaciones de inventario afectadas y bloquear nuevos pedidos que dependan de esa operación mientras no pueda garantizarse consistencia. Conservar saldos, movimientos, idempotencia, snapshots y protecciones de los pedidos ya creados. Nunca desactivar stock ni volver a una RPC anterior para permitir entregas sin débito. Las operaciones pendientes se resuelven con trazabilidad y conciliación antes de reanudar.
+- **Correcciones y reportes:** una entrega corregida o devuelta conserva su registro original y compensación vinculada. UI, filtros, exportaciones y métricas deben distinguir entregas vigentes, corregidas y devueltas. Un pedido reemplazante queda vinculado: original corregido y reemplazo no cuentan como dos entregas comerciales vigentes. Si hubo una devolución física y otra expedición real, ambas salidas sí aparecen en el bruto físico y se calcula el neto con el retorno; no borrar movimientos por compartir raíz. Probar estados, fechas y cantidades sin multiplicación por joins. Recibir mercadería no vendible no repone stock vendible ni confirma reembolso. El plan define estas diferencias.
+- **Otras ventas y sistema principal:** si existe otro sistema, definir cuál mantiene la existencia principal y cómo se registran diferencias y ventas externas. No asumir sincronización ni dos saldos igualmente autoritativos. En el escenario manual, asignar responsable y frecuencia de registro/conciliación; si no se pueden garantizar, limitar la promesa de actualización del stock.
+
+Estos controles y los criterios de aceptación de DB del [plan](PLAN_MAYORISTA_Y_STOCK.md) forman parte del lanzamiento mínimo; no requieren ejecutar escenarios multicomercio de gran escala.
+
 ## 7. Costos y mantenimiento
 
-No se obtuvo plan, cuota remanente, compute, factura o uso actual. No se citan precios ni se autoriza aumento. Viabilidad **arquitectónica** favorable; suficiencia **económica/contractual** pendiente G02.
+No se obtuvo plan, cuota remanente, compute, factura o uso actual. No se citan precios ni se autoriza aumento. Viabilidad **arquitectónica** favorable; suficiencia **económica/contractual** pendiente G02. Conservar proveedores y arquitectura **no demuestra que alcance el mismo abono**: el piloto necesita verificar planes, consumo disponible y recuperación. Si no alcanza, se revisa el alcance con el usuario; no se presupone ni autoriza otro plan.
 
 | Consumo | Operaciones | Estimación/reducción |
 |---|---|---|
@@ -491,18 +521,20 @@ Fuentes consultadas24/10/2026: [categorías de consumo Supabase](https://supabas
 
 ## 8. Información imprescindible pendiente
 
-1. Tamaño habitual/máximo de pedido, pico por10 min, usuarios/operadores/comercios esperados; aceptar o adaptar límites actuales.
-2. Unidad/caja/bulto/fracción, códigos por presentación/variante y equivalencias exactas.
-3. Política de últimas unidades: inicialmente sin reservas y aceptación sujeta a disponibilidad; si se promete al aceptar, agregar reserva explícita.
-4. Conteo físico inicial, responsables y registro de ventas externas/reposiciones/conciliación.
-5. Devoluciones físicas, correcciones administrativas y necesidad real de parciales.
-6. Planes Vercel/Supabase y recursos/uso, backup DB+Storage/RPO/RTO, dominio/deployment de referencia, Auth/SMTP/Turnstile.
+1. Qué significa **entregado** en la operación real y qué acción autorizada lo confirma. El requisito de descontar al entregar está confirmado; su hito físico no debe quedar implícito en el nombre `completed`.
+2. Catálogo y tamaño habitual/máximo de pedido, pico por 10 min y clientes/operadores del **primer mayorista**; aceptar o adaptar límites actuales. La escala multicomercio se estima después.
+3. Unidad, caja, bulto o fracción; códigos por presentación/variante y conversiones exactas. Unidad entera es un supuesto de estimación, no una decisión aprobada.
+4. Si aceptar un pedido debe reservar disponibilidad. Sin reserva puede haber faltantes al entregar; si se garantiza mercadería al aceptar, la reserva pasa a alcance necesario antes de ofrecer esa garantía.
+5. Conteo físico inicial, ventana sin movimientos o conciliación entre conteo y registro; tratamiento de pedidos pendientes; responsables de ventas externas, reposiciones y ajustes.
+6. Si existe otro sistema de stock, cuál será la fuente principal y quién registrará/conciliará las diferencias. No hay integración autorizada ni demostrada.
+7. Devoluciones físicas y correcciones administrativas; confirmar por separado si se necesitan **devoluciones parciales** y **entregas parciales**. Definir cómo se presentan y contabilizan las operaciones compensadas y pedidos reemplazantes.
+8. Planes Vercel/Supabase y recursos/uso, backup DB+Storage/RPO/RTO, dominio/deployment de referencia, integración Git externa de Vercel, Auth/SMTP/Turnstile. No confirmar mismo abono ni automatismo de despliegue sin esa evidencia.
 
 ## 9. Respuestas finales
 
-1. **¿Sirve hoy?** No apto en condiciones actuales para la solución completa pedida. La base de catálogo/pedidos es aprovechable y >500 no exige otro stack.
-2. **¿Demostrado?** Código/arquitectura/límites/defectos/ausencia de stock, checks locales, render sintético y metadata remota indicada. Faltan backend/concurrencia, paridad deployment, tests DB, plan y recuperación.
-3. **¿Bloqueantes?** Permisos/abuso, importación/contratos seguros, catálogo gestionable, pedidos acordes al negocio, idempotencia/precios, inventario transaccional y piloto validado.
-4. **¿Stock al entregar?** RPC autorizada con bloqueo pedido+saldos, necesidades canónicas agregadas, validación total, descuento/movimientos/estado en una transacción y replay del mismo resultado. Ver plan.
-5. **¿Mismos servicios y suscripciones?** Arquitectura sí. Suscripciones aún no verificadas; si plan/cuota/RPO no cumplen, mantenerlos limita el alcance comercial. No se autoriza upgrade.
-6. **¿Primero?** S01/S03 y C02/C11 mientras se fijan unidades/límites; luego entrega con inventario y carreras probadas, paginación/UX y piloto. No montar inventario sobre permisos/importaciones inseguros.
+1. **¿Sirve hoy?** No apto en condiciones actuales para la solución completa pedida. La base de catálogo/pedidos es aprovechable y >500 no exige otro stack. La primera versión apunta a un mayorista y su volumen acordado, no a aprobar toda la matriz de crecimiento.
+2. **¿Demostrado?** Código/arquitectura/límites/defectos/ausencia de stock, checks locales, render sintético y metadata remota de la auditoría original. Faltan backend/concurrencia, paridad de despliegue, tests DB, plan y recuperación; esta revisión sólo actualiza documentación.
+3. **¿Bloqueantes?** Correcciones indispensables, reglas comerciales definidas, inventario mínimo con reportes/corte/contingencia seguros, pruebas de DB real y piloto del mayorista validado. B/C multicomercio quedan para crecimiento posterior.
+4. **¿Stock al entregar?** Hito físico confirmado por el negocio y RPC autorizada con bloqueo de pedido+saldos, necesidades canónicas agregadas, validación total, descuento/movimientos/estado en una transacción y replay del mismo resultado. Pruebas DB de concurrencia, reintentos, fallos y permisos obligatorias antes de activar; nunca bypass en contingencia. Ver plan.
+5. **¿Mismos servicios y suscripciones?** Arquitectura sí. Mismo abono todavía no confirmado: planes, uso y recuperación siguen pendientes; si no alcanzan, se revisa el alcance sin upgrade implícito.
+6. **¿Primero?** Tanda de reproducción aislada + S01, 3–5 jornadas incluidas en el total y sin correos reales; después el resto de correcciones e inventario mínimo. El escenario de lanzamiento aún no aprobado estima 40–64 jornadas con margen, no 5–8; desglose, dependencias y ampliaciones en el [plan](PLAN_MAYORISTA_Y_STOCK.md).
