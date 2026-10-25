@@ -18,6 +18,10 @@ jobs:
     name: Lint, types, tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # This job only runs isolated browser mocks; live suites are opt-in elsewhere.
+      E2E_LIVE: '0'
+      E2E_BASE_URL: ''
 
     steps:
       - name: Check out repository
@@ -48,7 +52,19 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Browser smoke tests
+        id: browser_smoke
         run: npm run test:e2e
+
+      - name: Upload mock browser failure diagnostics
+        if: ${{ failure() && steps.browser_smoke.outcome == 'failure' && env.E2E_LIVE == '0' && env.E2E_BASE_URL == '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-mock-failure
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Production build
         run: npm run build
