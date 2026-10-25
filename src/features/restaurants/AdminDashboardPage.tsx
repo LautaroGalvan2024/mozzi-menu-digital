@@ -11,7 +11,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { MetricCard } from '../../components/MetricCard'
 import { PageHeader } from '../../components/PageHeader'
@@ -22,21 +21,7 @@ import { supabase } from '../../lib/supabase/client'
 import { dayRangeInTimeZone } from '../../lib/timezone'
 import { useRestaurantScope } from './RestaurantScope'
 import { useRestaurant } from './useRestaurant'
-
-const count = z.number().int().nonnegative()
-const money = z.union([z.number(), z.string().regex(/^\d+$/)]).transform(Number)
-const metricsSchema = z.object({
-  generated: count,
-  whatsappOpened: count,
-  accepted: count,
-  completed: count,
-  cancelled: count,
-  expired: count,
-  acceptedAmountCents: money,
-  completedAmountCents: money,
-  byFulfillment: z.record(z.string(), count),
-  byPaymentMethod: z.array(z.object({ name: z.string(), count, amountCents: money })),
-})
+import { orderMetricsSchema } from '../orders/orderMetrics'
 
 export function AdminDashboardPage() {
   const scope = useRestaurantScope()
@@ -60,7 +45,7 @@ export function AdminDashboardPage() {
         p_to: range.to,
       })
       if (error) throw new Error('No se pudieron cargar las métricas.')
-      return metricsSchema.parse(data)
+      return orderMetricsSchema.parse(data)
     },
   })
 
@@ -92,8 +77,8 @@ export function AdminDashboardPage() {
   const stats = [
     ['Creados', metrics.generated, ClipboardList, 'amber'],
     ['WhatsApp abierto', metrics.whatsappOpened, MessageCircle, 'orange'],
-    ['Tomados', metrics.accepted, ShoppingBag, 'blue'],
-    ['Completados', metrics.completed, CheckCircle2, 'emerald'],
+    ['Aceptados alguna vez', metrics.accepted, ShoppingBag, 'blue'],
+    ['Entregas vigentes', metrics.completed, CheckCircle2, 'emerald'],
     ['Cancelados', metrics.cancelled, XCircle, 'red'],
     ['Expirados', metrics.expired, Clock3, 'orange'],
   ] as const
@@ -107,20 +92,20 @@ export function AdminDashboardPage() {
       <PageHeader
         eyebrow="Hoy"
         title={`Hola, ${selected.name}`}
-        description="Las métricas usan el día local del restaurante. Los pedidos generados no se cuentan como ventas confirmadas."
+        description="Pedidos creados hoy, según el día local del comercio y su estado actual. Los importes vigentes excluyen entregas corregidas o devueltas; no representan cobros ni reintegros."
         actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos</Link>}
       />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.5fr)]">
         <article className="flex min-h-full flex-col justify-between overflow-hidden rounded-2xl bg-stone-950 p-6 text-white shadow-lg shadow-stone-950/10 sm:p-7">
           <div>
-            <p className="text-sm font-medium text-stone-400">Importe de pedidos tomados</p>
+            <p className="text-sm font-medium text-stone-400">Importe vigente aceptado o entregado</p>
             <p className="mt-3 font-display text-4xl font-bold tracking-tight sm:text-5xl">
               {formatMoney(metrics.acceptedAmountCents, restaurant.currency_code, restaurant.locale)}
             </p>
           </div>
           <div className="mt-8 rounded-xl border border-white/10 bg-white/5 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[.12em] text-stone-400">Importe completado</p>
+            <p className="text-xs font-semibold uppercase tracking-[.12em] text-stone-400">Importe de entregas vigentes</p>
             <p className="mt-1.5 font-display text-2xl font-bold tracking-tight">
               {formatMoney(metrics.completedAmountCents, restaurant.currency_code, restaurant.locale)}
             </p>
@@ -135,6 +120,15 @@ export function AdminDashboardPage() {
       </section>
 
       <section className="mt-4 grid gap-4 md:grid-cols-2">
+        <SectionCard title="Correcciones y devoluciones" description="Estado actual de los pedidos creados hoy; el original se conserva en el historial.">
+          <dl className="space-y-3 text-sm"><div className="flex justify-between"><dt>Entregas corregidas</dt><dd>{metrics.corrected}</dd></div><div className="flex justify-between"><dt>Devoluciones completas</dt><dd>{metrics.returned}</dd></div></dl>
+        </SectionCard>
+        <SectionCard title="Operaciones realizadas hoy" description="Según la fecha de entrega o movimiento, incluidos pedidos creados antes de hoy. Los reemplazos pertenecen al mismo caso comercial.">
+          <dl className="space-y-3 text-sm"><div className="flex justify-between"><dt>Casos comerciales entregados vigentes</dt><dd>{metrics.validDeliveredCommercialCases}</dd></div><div className="flex justify-between"><dt>Entregas físicas con inventario</dt><dd>{metrics.physicalDispatches}</dd></div><div className="flex justify-between"><dt>Unidades recibidas por devolución</dt><dd>{BigInt(metrics.receivedReturnUnits).toLocaleString('es-AR')}</dd></div><div className="flex justify-between"><dt>Unidades devueltas repuestas como vendibles</dt><dd>{BigInt(metrics.sellableRestockedReturnUnits).toLocaleString('es-AR')}</dd></div></dl>
+        </SectionCard>
+      </section>
+
+      <section className="mt-4 grid gap-4 md:grid-cols-2">
         <SectionCard title="Modalidad" description="Distribución de los pedidos creados hoy.">
           <dl className="grid grid-cols-2 divide-x divide-stone-200 rounded-xl border border-stone-200 bg-stone-50">
             {fulfillment.map(([label, value]) => (
@@ -146,7 +140,7 @@ export function AdminDashboardPage() {
           </dl>
         </SectionCard>
 
-        <SectionCard title="Medios de pago" description="Cantidad e importe de los pedidos de hoy.">
+        <SectionCard title="Medios de pago" description="Pedidos creados hoy, aceptados o entregados y vigentes. Excluye correcciones y devoluciones; no confirma pagos.">
           {metrics.byPaymentMethod.length ? (
             <div className="divide-y divide-stone-100">
               {metrics.byPaymentMethod.map((method) => (

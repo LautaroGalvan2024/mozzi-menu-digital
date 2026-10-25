@@ -1,6 +1,7 @@
 import { statusLabel, type AdminOrderRow } from './orderSchemas'
+import { inventoryOutcomeLabel } from './inventoryOrder'
 
-export function StatusPill({status}:{status:AdminOrderRow['status']}) {
+export function StatusPill({status, outcome = 'none'}:{status:AdminOrderRow['status']; outcome?: AdminOrderRow['inventory_outcome']}) {
   const colors: Record<AdminOrderRow['status'], { badge: string; dot: string }> = {
     generated: { badge: 'border-amber-200 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
     whatsapp_opened: { badge: 'border-violet-200 bg-violet-50 text-violet-800', dot: 'bg-violet-500' },
@@ -10,9 +11,9 @@ export function StatusPill({status}:{status:AdminOrderRow['status']}) {
     expired: { badge: 'border-stone-300 bg-stone-100 text-stone-700', dot: 'bg-stone-500' },
   }
   return (
-    <span className={`status-badge whitespace-nowrap ${colors[status].badge}`}>
+    <span className={`status-badge whitespace-nowrap ${outcome === 'corrected' || outcome === 'returned' ? 'border-amber-200 bg-amber-50 text-amber-900' : colors[status].badge}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${colors[status].dot}`} aria-hidden />
-      {statusLabel[status]}
+      {outcome === 'corrected' || outcome === 'returned' ? inventoryOutcomeLabel[outcome] : statusLabel[status]}
     </span>
   )
 }

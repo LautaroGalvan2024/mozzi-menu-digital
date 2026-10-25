@@ -1,6 +1,28 @@
 import { databaseApiError, toApiError } from "./errors.ts";
 import { assertEquals } from "./test-assert.ts";
 
+Deno.test("public inventory failures preserve safe actionable codes", () => {
+  for (
+    const code of [
+      "INVENTORY_PAUSED",
+      "INVENTORY_CUTOVER",
+      "INVENTORY_NOT_INITIALIZED",
+      "INSUFFICIENT_STOCK",
+    ]
+  ) {
+    const mapped = databaseApiError({
+      code: "P0001",
+      message: code,
+      details: "private quantities and product UUID",
+      hint: "internal SQL",
+    });
+    assertEquals(mapped.status, 409);
+    assertEquals(mapped.code, code);
+    assertEquals(mapped.message.includes("private"), false);
+    assertEquals(mapped.details, undefined);
+  }
+});
+
 Deno.test("known rate-limit database failure maps to a sanitized 429", () => {
   const mapped = databaseApiError({
     code: "P0001",

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ClaimOrderPage } from './ClaimOrderPage'
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
   selectRestaurant: vi.fn(),
+  role: 'restaurant_admin' as 'restaurant_admin' | 'order_manager',
 }))
 
 vi.mock('../../lib/supabase/client', () => ({
@@ -27,14 +29,14 @@ vi.mock('../restaurants/RestaurantScope', () => ({
       name: 'Restaurante de prueba',
       slug: 'restaurante-prueba',
       status: 'active',
-      role: 'restaurant_admin',
+      role: mocks.role,
     }],
     selected: {
       id: RESTAURANT_ID,
       name: 'Restaurante de prueba',
       slug: 'restaurante-prueba',
       status: 'active',
-      role: 'restaurant_admin',
+      role: mocks.role,
     },
     selectRestaurant: mocks.selectRestaurant,
   }),
@@ -149,9 +151,92 @@ describe('operational order details', () => {
   afterEach(cleanup)
 
   beforeEach(() => {
+    localStorage.clear()
+    mocks.role = 'restaurant_admin'
     mocks.from.mockReset()
     mocks.rpc.mockReset()
     mocks.selectRestaurant.mockReset()
+  })
+
+  it('acceptance reserves explicitly and blocks duplicate clicks while a response is pending', async () => {
+    let finish: ((value: unknown) => void) | undefined
+    mocks.rpc.mockImplementation((name: string) => name === 'claim_order'
+      ? new Promise((resolve) => { finish = resolve })
+      : Promise.resolve({ data: { ...claimOrder, inventoryTracked: true }, error: null }))
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    const button = await screen.findByRole('button', { name: 'Aceptar y reservar' })
+    expect(screen.getByText(/La existencia física se descuenta cuando confirmes la recepción/)).toBeVisible()
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'claim_order')).toHaveLength(1)
+    finish?.({ data: { claimed: true, alreadyClaimed: false }, error: null })
+    expect(await screen.findByRole('status')).toHaveTextContent('todavía no se descontó la existencia física')
+  })
+
+  it('shows insufficient-stock failures without exposing database messages', async () => {
+    mocks.rpc.mockImplementation((name: string) => Promise.resolve(name === 'claim_order'
+      ? { data: null, error: { message: 'INSUFFICIENT_STOCK private inventory balances' } }
+      : { data: { ...claimOrder, inventoryTracked: true }, error: null }))
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Aceptar y reservar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No hay stock disponible suficiente')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('private')
+  })
+
+  it('requires physical receipt confirmation and sends one delivery on double click', async () => {
+    const order = setupInventoryOrder('accepted')
+    let finish: ((value: unknown) => void) | undefined
+    mocks.rpc.mockImplementation((name: string) => name === 'complete_order'
+      ? new Promise((resolve) => { finish = resolve })
+      : Promise.resolve({ data: inventoryDetail, error: null }))
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    const button = await screen.findByRole('button', { name: 'Confirmar recepción' })
+    expect(button).toBeDisabled()
+    fireEvent.click(screen.getByLabelText('Confirmo que el cliente recibió todo el pedido.'))
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'complete_order')).toHaveLength(1)
+    order.status = 'completed'
+    order.inventory_outcome = 'delivered'
+    finish?.({ data: { alreadyDelivered: false }, error: null })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirmar recepción' })).not.toBeInTheDocument())
+  })
+
+  it('retries a complete return with the same operation and explicit sellable quantities', async () => {
+    const user = userEvent.setup()
+    const order = setupInventoryOrder('completed')
+    let attempts = 0
+    mocks.rpc.mockImplementation((name: string, args: Record<string, unknown>) => {
+      if (name !== 'reverse_order_inventory') return Promise.resolve({ data: inventoryDetail, error: null })
+      attempts += 1
+      if (attempts === 1) return Promise.resolve({ data: null, error: { message: 'connection lost' } })
+      order.inventory_outcome = 'returned'
+      return Promise.resolve({ data: { operationId: args.p_operation_id, orderId: ORDER_ID }, error: null })
+    })
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    await screen.findByRole('heading', { name: 'Devolución o corrección completa' })
+    await user.type(screen.getByLabelText('Motivo'), 'Envase dañado')
+    await user.selectOptions(screen.getByLabelText('Mercadería que queda vendible'), 'partial')
+    await user.type(screen.getByLabelText('Producto de prueba · recibidas 3'), '1')
+    await user.click(screen.getByLabelText('Confirmo que se recibió la devolución completa y revisé la cantidad vendible.'))
+    await user.click(screen.getByRole('button', { name: 'Registrar devolución completa' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos confirmar la operación')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reintentar misma operación' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Reintentar misma operación' }))
+    const calls = mocks.rpc.mock.calls.filter(([name]) => name === 'reverse_order_inventory')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]![1]).toEqual(calls[0]![1])
+    expect(calls[0]![1]).toMatchObject({ p_kind: 'return', p_restock: true, p_restock_quantities: [{ productId: PRODUCT_ID, quantity: 1 }] })
+    expect(await screen.findByText(/Su importe no se suma como venta vigente/)).toBeVisible()
+  })
+
+  it('does not expose administrator reversals to an order manager', async () => {
+    mocks.role = 'order_manager'
+    setupInventoryOrder('completed')
+    mocks.rpc.mockResolvedValue({ data: inventoryDetail, error: null })
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    await screen.findByRole('heading', { name: 'Entrega e inventario' })
+    expect(screen.queryByRole('heading', { name: 'Devolución o corrección completa' })).not.toBeInTheDocument()
   })
 
   it('shows every operational field on the claim screen', async () => {
@@ -210,3 +295,20 @@ describe('operational order details', () => {
     }
   })
 })
+
+const PRODUCT_ID = '60000000-0000-4000-8000-000000000001'
+const inventoryDetail = { replacementOrderId: null, inventoryOperations: [] }
+function setupInventoryOrder(status: string) {
+  const order = { ...adminOrder, status, inventory_tracked: true, inventory_outcome: status === 'completed' ? 'delivered' : 'none' }
+  mocks.from.mockImplementation((table: string) => {
+    const rows = table === 'order_items' ? [{
+      id: '50000000-0000-4000-8000-000000000001', order_id: ORDER_ID, product_id: PRODUCT_ID,
+      product_name_snapshot: 'Producto de prueba', product_code_snapshot: 'P-1', quantity: 3,
+      unit_price_cents: 100, base_subtotal_cents: 300, pricing_mode_snapshot: 'unit', pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 100, baseSubtotalCents: 300, components: [] }, options_total_unit_cents: 0, line_total_cents: 300, notes: null,
+    }] : []
+    const request: Record<string, unknown> & PromiseLike<unknown> = { then(resolve, reject) { return Promise.resolve({ data: rows, error: null }).then(resolve, reject) }, single: () => Promise.resolve({ data: order, error: null }) }
+    for (const method of ['select', 'eq', 'order', 'in', 'is', 'limit', 'ilike']) request[method] = () => request
+    return request
+  })
+  return order
+}

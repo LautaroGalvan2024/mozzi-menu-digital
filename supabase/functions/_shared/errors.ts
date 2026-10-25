@@ -17,6 +17,28 @@ type SafeDatabaseError = {
 };
 
 const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
+  INVENTORY_PAUSED: {
+    status: 409,
+    code: "INVENTORY_PAUSED",
+    message: "El comercio pausó temporalmente la recepción de pedidos. Consultá al comercio.",
+  },
+  INVENTORY_CUTOVER: {
+    status: 409,
+    code: "INVENTORY_CUTOVER",
+    message: "El comercio está actualizando sus existencias. Volvé a intentar en unos minutos.",
+  },
+  INVENTORY_NOT_INITIALIZED: {
+    status: 409,
+    code: "INVENTORY_NOT_INITIALIZED",
+    message:
+      "El comercio debe revisar las existencias antes de recibir este pedido. Consultá al comercio.",
+  },
+  INSUFFICIENT_STOCK: {
+    status: 409,
+    code: "INSUFFICIENT_STOCK",
+    message:
+      "No hay existencias suficientes para este pedido. Revisá las cantidades o consultá al comercio.",
+  },
   ACCOUNT_DISABLED: {
     status: 403,
     code: "ACCOUNT_DISABLED",
