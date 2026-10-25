@@ -7,6 +7,7 @@ import { importProductsSchema, parseInput } from "../_shared/schemas.ts";
 const MAX_BODY_BYTES = 2 * 1_024 * 1_024;
 
 const importResultSchema = z.object({
+  batchId: z.string().uuid().optional(),
   summary: z.object({
     created: z.number().int().min(0),
     updated: z.number().int().min(0),
@@ -15,6 +16,7 @@ const importResultSchema = z.object({
   products: z.array(
     z.object({
       code: z.string(),
+      rowRef: z.string().min(1).max(80).optional(),
       id: z.string().uuid(),
       outcome: z.enum(["created", "updated", "skipped"]),
     }).strict(),
@@ -28,29 +30,6 @@ const importResultSchema = z.object({
   ).max(500),
 }).strict();
 
-const existingProductRowsSchema = z.array(z.object({ code: z.string() }).strict());
-const DATABASE_PAGE_SIZE = 1_000;
-
-async function loadExistingProductCodes(
-  actor: Awaited<ReturnType<typeof verifyActor>>,
-  restaurantId: string,
-): Promise<Set<string>> {
-  const codes = new Set<string>();
-  for (let offset = 0;; offset += DATABASE_PAGE_SIZE) {
-    const { data, error } = await actor.client
-      .from("products")
-      .select("code")
-      .eq("restaurant_id", restaurantId)
-      .is("deleted_at", null)
-      .range(offset, offset + DATABASE_PAGE_SIZE - 1);
-    if (error) throw databaseApiError(error);
-    const rows = existingProductRowsSchema.parse(data ?? []);
-    rows.forEach((row) => codes.add(row.code.toLocaleLowerCase("en")));
-    if (rows.length < DATABASE_PAGE_SIZE) break;
-  }
-  return codes;
-}
-
 serve({
   maxBodyBytes: MAX_BODY_BYTES,
   handler: async (request, context) => {
@@ -62,44 +41,26 @@ serve({
       throw new ApiError(403, "FORBIDDEN", "No tenés permisos para importar el catálogo.");
     }
 
-    if (input.mode === "create_only") {
-      const existingCodes = await loadExistingProductCodes(actor, input.restaurantId);
-      const conflicts = input.products.flatMap((product, index) =>
-        existingCodes.has(product.code.toLocaleLowerCase("en"))
-          ? [{
-            row: index + 2,
-            code: "PRODUCT_CODE_EXISTS",
-            message: `El código ${product.code} ya existe en este restaurante.`,
-          }]
-          : []
-      );
-      if (conflicts.length) {
-        return {
-          summary: { created: 0, updated: 0, skipped: 0 },
-          products: [],
-          errors: conflicts,
-        };
-      }
-    }
-
     const productByGroupCode = new Map(
       input.groups.map((group) => [
         group.groupCode.toLocaleLowerCase("en"),
-        group.productCode,
+        { productCode: group.productCode, productRowRef: group.productRowRef },
       ]),
     );
     const rows = {
+      ...(input.batchId ? { batchId: input.batchId } : {}),
       products: input.products,
       optionGroups: input.groups,
       options: input.options.map((option) => ({
         ...option,
-        productCode: productByGroupCode.get(option.groupCode.toLocaleLowerCase("en")),
+        ...productByGroupCode.get(option.groupCode.toLocaleLowerCase("en")),
       })),
     };
     const rpcMode = {
       create_or_update: "upsert",
       create_only: "create",
       skip_existing: "skip",
+      update_only: "update",
     }[input.mode];
 
     // The user-scoped client preserves auth.uid(); the RPC repeats tenant/role checks.
@@ -120,6 +81,7 @@ serve({
       optionCount: input.options.length,
     });
     return {
+      ...(parsed.data.batchId ? { batchId: parsed.data.batchId } : {}),
       summary: {
         created: parsed.data.summary.created,
         updated: parsed.data.summary.updated,

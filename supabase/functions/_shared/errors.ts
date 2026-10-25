@@ -177,6 +177,47 @@ const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
     code: "IMPORT_CONFLICT",
     message: "La importación contiene un código de producto que ya existe.",
   },
+  IMPORT_IDEMPOTENCY_CONFLICT: {
+    status: 409,
+    code: "IMPORT_IDEMPOTENCY_CONFLICT",
+    message:
+      "Este lote ya se usó con otro contenido. Recuperá su resultado antes de iniciar otra importación.",
+  },
+  IMPORT_BATCH_ID_REQUIRED: {
+    status: 400,
+    code: "IMPORT_BATCH_ID_REQUIRED",
+    message: "La importación necesita un identificador de reintento. Volvé a cargar la página.",
+  },
+  PRODUCT_CODE_INVALID: {
+    status: 422,
+    code: "PRODUCT_CODE_INVALID",
+    message: "El código debe ser texto de hasta 80 caracteres, sin saltos de línea ni controles.",
+  },
+  PRODUCT_CODE_ALREADY_USED: {
+    status: 409,
+    code: "PRODUCT_CODE_ALREADY_USED",
+    message: "Ese código ya pertenece o perteneció a otro producto de este comercio.",
+  },
+  IMPORT_PRODUCT_IDENTITY_CONFLICT: {
+    status: 422,
+    code: "IMPORT_PRODUCT_IDENTITY_CONFLICT",
+    message: "El código y el identificador no corresponden al mismo producto.",
+  },
+  IMPORT_DUPLICATE_PRODUCT: {
+    status: 422,
+    code: "IMPORT_DUPLICATE_PRODUCT",
+    message: "El lote contiene el mismo producto más de una vez.",
+  },
+  IMPORT_ROW_REFERENCE_INVALID: {
+    status: 422,
+    code: "IMPORT_ROW_REFERENCE_INVALID",
+    message: "Revisá las referencias de fila: deben ser únicas dentro del archivo.",
+  },
+  IMPORT_PRODUCT_REFERENCE_INVALID: {
+    status: 422,
+    code: "IMPORT_PRODUCT_REFERENCE_INVALID",
+    message: "Un grupo u opción no identifica de forma inequívoca un producto del lote.",
+  },
   IMPORT_PRODUCT_NOT_FOUND: {
     status: 422,
     code: "IMPORT_PRODUCT_NOT_FOUND",

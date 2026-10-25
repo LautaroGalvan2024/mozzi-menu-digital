@@ -173,10 +173,22 @@ export const registerWhatsappOpenedSchema = z.object({
   clientEventToken: z.string().min(22).max(256).regex(/^[A-Za-z0-9_-]+$/),
 }).strict();
 
+const containsControls = (value: string) =>
+  Array.from(value).some((character) =>
+    character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+  );
+const importCode = z.string().max(80).refine(
+  (value) => !containsControls(value),
+  "El código no puede contener saltos de línea ni caracteres de control.",
+).transform((value) => value.trim()).optional();
+const importRowRef = z.string().min(1).max(80).refine((value) => !containsControls(value));
+
 const importProductSchema = z.object({
-  code: singleLine(80),
+  rowRef: importRowRef.optional(),
+  id: uuid.optional(),
+  code: importCode,
   name: singleLine(160),
-  description: optionalMultiline(2_000).default(""),
+  description: optionalMultiline(2_000),
   category: singleLine(100).refine(
     (value) => normalizeSlug(value).length > 0,
     "La categoría debe contener letras o números.",
@@ -185,10 +197,10 @@ const importProductSchema = z.object({
   promotionalPriceCents: cents.nullable().optional(),
   promotionStartsAt: z.string().datetime({ offset: true }).nullable().optional(),
   promotionEndsAt: z.string().datetime({ offset: true }).nullable().optional(),
-  active: z.boolean().default(true),
-  available: z.boolean().default(true),
-  featured: z.boolean().default(false),
-  sortOrder: sortOrder.default(0),
+  active: z.boolean().optional(),
+  available: z.boolean().optional(),
+  featured: z.boolean().optional(),
+  sortOrder: sortOrder.optional(),
   imageFilename: optionalSingleLine(255),
 }).strict().refine(
   (value) => !value.promotionalPriceCents || value.promotionalPriceCents <= value.basePriceCents,
@@ -204,7 +216,8 @@ const importProductSchema = z.object({
 );
 
 const importGroupSchema = z.object({
-  productCode: singleLine(80),
+  productRowRef: importRowRef.optional(),
+  productCode: importCode,
   groupCode: singleLine(80),
   name: singleLine(120),
   required: z.boolean(),
@@ -231,28 +244,70 @@ const importOptionSchema = z.object({
 
 export const importProductsSchema = z.object({
   restaurantId: uuid,
-  mode: z.enum(["create_or_update", "create_only", "skip_existing"]),
-  products: z.array(importProductSchema).min(1).max(500),
-  groups: z.array(importGroupSchema).max(2_500).default([]),
-  options: z.array(importOptionSchema).max(10_000).default([]),
+  batchId: uuid.optional(),
+  mode: z.enum(["create_or_update", "create_only", "skip_existing", "update_only"]),
+  products: z.array(importProductSchema).min(1).max(MAX_IMPORT_PRODUCTS),
+  groups: z.array(importGroupSchema).max(MAX_IMPORT_GROUPS).default([]),
+  options: z.array(importOptionSchema).max(MAX_IMPORT_OPTIONS).default([]),
 }).strict().superRefine((value, context) => {
   const productCodes = new Set<string>();
+  const productRefs = new Map<string, number>();
+  const productIds = new Set<string>();
   value.products.forEach((product, index) => {
-    const key = product.code.toLocaleLowerCase("en");
-    if (productCodes.has(key)) {
+    const key = product.code?.toLocaleLowerCase("en");
+    if (key && productCodes.has(key)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["products", index, "code"],
         message: "Código de producto duplicado en la importación.",
       });
     }
-    productCodes.add(key);
+    if (key) productCodes.add(key);
+    if (product.rowRef) {
+      if (productRefs.has(product.rowRef)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["products", index, "rowRef"],
+          message: "Referencia de fila duplicada.",
+        });
+      }
+      productRefs.set(product.rowRef, index);
+    }
+    if (product.id) {
+      if (productIds.has(product.id.toLowerCase())) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["products", index, "id"],
+          message: "Producto repetido dentro del lote.",
+        });
+      }
+      productIds.add(product.id.toLowerCase());
+    }
+    if (!key && !product.id && (!value.batchId || value.mode === "update_only")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["products", index, "code"],
+        message: value.mode === "update_only"
+          ? "Para actualizar indicá el código o identificador del producto."
+          : "La importación sin códigos requiere un lote recuperable. Volvé a seleccionar el archivo.",
+      });
+    }
   });
 
   const groupCodes = new Set<string>();
   value.groups.forEach((group, index) => {
     const key = group.groupCode.toLocaleLowerCase("en");
-    if (!productCodes.has(group.productCode.toLocaleLowerCase("en"))) {
+    const byCode = group.productCode
+      ? value.products.findIndex((product) =>
+        product.code?.toLocaleLowerCase("en") === group.productCode?.toLocaleLowerCase("en")
+      )
+      : undefined;
+    const byRef = group.productRowRef ? productRefs.get(group.productRowRef) : undefined;
+    if (
+      (!group.productCode && !group.productRowRef) || (group.productCode && byCode === -1) ||
+      (group.productRowRef && byRef === undefined) ||
+      (group.productCode && group.productRowRef && byCode !== byRef)
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["groups", index, "productCode"],

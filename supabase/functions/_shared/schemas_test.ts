@@ -26,6 +26,59 @@ const validOrder = {
   antiSpam: { formStartedAt: new Date(Date.now() - 5_000).toISOString(), honeypot: "" },
 };
 
+Deno.test("SKU imports preserve text and omitted patch fields, and resolve anonymous rows", async () => {
+  const input = {
+    restaurantId: "d26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    batchId: "e26095be-96d5-4cd5-aad4-4c8cb82d510a",
+    mode: "create_or_update",
+    products: [
+      { rowRef: "2", name: "Uno", category: "Cat", basePriceCents: 100 },
+      { rowRef: "3", code: " 0001  A ", name: "Dos", category: "Cat", basePriceCents: 100 },
+    ],
+    groups: [{
+      productRowRef: "2",
+      groupCode: "G1",
+      name: "Extras",
+      required: false,
+      minSelect: 0,
+      maxSelect: 1,
+    }],
+  };
+  const parsed = parseInput(importProductsSchema, input);
+  assertEquals(parsed.products[1]?.code, "0001  A");
+  assertEquals(Object.hasOwn(parsed.products[0]!, "description"), false);
+  assertEquals(Object.hasOwn(parsed.products[0]!, "available"), false);
+  assertEquals(Object.hasOwn(parsed.products[0]!, "promotionalPriceCents"), false);
+  assertEquals(parsed.groups[0]?.productRowRef, "2");
+  await assertRejects(() => parseInput(importProductsSchema, { ...input, batchId: undefined }));
+  await assertRejects(() => parseInput(importProductsSchema, { ...input, mode: "update_only" }));
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      products: input.products.map((product) => ({ ...product, rowRef: "2" })),
+    })
+  );
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      groups: [{ ...input.groups[0], productCode: "0001  A" }],
+    })
+  );
+  await assertRejects(() =>
+    parseInput(importProductsSchema, {
+      ...input,
+      products: [{ ...input.products[0], code: "A\nB" }],
+    })
+  );
+  const update = parseInput(importProductsSchema, {
+    ...input,
+    mode: "update_only",
+    groups: [],
+    products: [{ ...input.products[0], id: input.restaurantId, code: " " }],
+  });
+  assertEquals(update.products[0]?.code, "");
+});
+
 Deno.test("order validation normalizes public input and rejects unknown fields", async () => {
   const parsed = parseInput(createOrderSchema, validOrder);
   assertEquals(parsed.restaurantSlug, "cafe-central");
