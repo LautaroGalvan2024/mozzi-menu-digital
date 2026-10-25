@@ -91,11 +91,11 @@ select is((select line_total_cents from public.order_items where restaurant_id =
 set local role service_role;
 create temporary table replay_result as
 select public.create_order_transaction(
-  '{"restaurantSlug":"orders-a","idempotencyKey":"81000000-0000-4000-8000-000000000001"}'::jsonb,
+  '{"restaurantSlug":"orders-a","idempotencyKey":"81000000-0000-4000-8000-000000000001","customer":{"name":"Client","phone":"+5494444444444"},"fulfillment":{"type":"pickup"},"paymentMethodId":"71000000-0000-4000-8000-000000000001","items":[{"productId":"41000000-0000-4000-8000-000000000001","quantity":2,"optionIds":["61000000-0000-4000-8000-000000000001"]}]}'::jsonb,
   repeat('a', 64), repeat('b', 64), repeat('d', 64)
 ) as response;
 reset role;
-select is((select (response ->> 'idempotentReplay')::boolean from replay_result), true, 'same idempotency key returns replay');
+select is((select (response ->> 'idempotentReplay')::boolean from replay_result), true, 'same idempotency key and complete business request return replay');
 select is((select count(*)::integer from public.orders where restaurant_id = '21000000-0000-4000-8000-000000000001'), 1, 'idempotent replay does not duplicate order');
 select is((select token_hash from private.order_client_event_tokens where order_id = (select id from order_identity limit 1)), repeat('d', 64), 'replay safely renews unused event token');
 
