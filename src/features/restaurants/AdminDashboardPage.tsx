@@ -34,7 +34,7 @@ const metricsSchema = z.object({
   expired: count,
   acceptedAmountCents: money,
   completedAmountCents: money,
-  byFulfillment: z.record(count),
+  byFulfillment: z.record(z.string(), count),
   byPaymentMethod: z.array(z.object({ name: z.string(), count, amountCents: money })),
 })
 
