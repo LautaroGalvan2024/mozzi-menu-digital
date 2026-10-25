@@ -446,7 +446,7 @@ select is(
     where o.idempotency_key = '9a000000-0000-4000-8000-000000000001'
   ),
   (
-    select sum(oi.line_total_cents)
+    select sum(oi.line_total_cents)::bigint
     from public.order_items oi
     join public.orders o on o.id = oi.order_id
     where o.idempotency_key = '9a000000-0000-4000-8000-000000000001'
