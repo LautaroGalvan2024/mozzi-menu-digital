@@ -36,27 +36,79 @@ export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: SECURITY_HEADERS });
 }
 
+function cancelBody(body: { cancel(): Promise<void> } | null): void {
+  // Cancellation is best effort: a broken/pending transport must not replace or
+  // delay the validation response. Always handle its rejection.
+  if (body) void body.cancel().catch(() => {});
+}
+
 export async function readJson(request: Request, maxBodyBytes: number): Promise<unknown> {
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1) {
+    throw new RangeError("maxBodyBytes must be a positive safe integer.");
+  }
   const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") {
+    cancelBody(request.body);
     throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Se requiere Content-Type application/json.");
   }
 
   const declaredLength = request.headers.get("content-length");
-  if (declaredLength && Number(declaredLength) > maxBodyBytes) {
-    throw new ApiError(413, "PAYLOAD_TOO_LARGE", "El contenido enviado es demasiado grande.");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) {
+      cancelBody(request.body);
+      throw new ApiError(400, "INVALID_CONTENT_LENGTH", "La longitud del contenido no es válida.");
+    }
+    if (Number(declaredLength) > maxBodyBytes) {
+      cancelBody(request.body);
+      throw new ApiError(413, "PAYLOAD_TOO_LARGE", "El contenido enviado es demasiado grande.");
+    }
   }
 
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > maxBodyBytes) {
-    throw new ApiError(413, "PAYLOAD_TOO_LARGE", "El contenido enviado es demasiado grande.");
+  if (!request.body) {
+    throw new ApiError(400, "INVALID_JSON", "El cuerpo JSON es obligatorio.");
   }
-  if (bytes.byteLength === 0) {
+  if (request.bodyUsed || request.body.locked) {
+    throw new ApiError(400, "INVALID_JSON", "El cuerpo JSON ya no está disponible.");
+  }
+
+  const reader = request.body.getReader();
+  let bytes = new Uint8Array(0);
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { value: chunk, done } = await reader.read();
+      if (done) break;
+      if (chunk.byteLength > maxBodyBytes - byteLength) {
+        throw new ApiError(413, "PAYLOAD_TOO_LARGE", "El contenido enviado es demasiado grande.");
+      }
+      const needed = byteLength + chunk.byteLength;
+      if (needed > bytes.byteLength) {
+        // Geometric growth avoids keeping an unbounded number of tiny chunk
+        // objects. The retained byte buffer never exceeds the configured cap.
+        const capacity = Math.min(maxBodyBytes, Math.max(8_192, bytes.byteLength * 2, needed));
+        const expanded = new Uint8Array(capacity);
+        expanded.set(bytes.subarray(0, byteLength));
+        bytes = expanded;
+      }
+      bytes.set(chunk, byteLength);
+      byteLength = needed;
+    }
+  } catch (error) {
+    cancelBody(reader);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(400, "INVALID_JSON", "No se pudo leer el cuerpo JSON.");
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (byteLength === 0) {
     throw new ApiError(400, "INVALID_JSON", "El cuerpo JSON es obligatorio.");
   }
 
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, byteLength)),
+    );
   } catch {
     throw new ApiError(400, "INVALID_JSON", "El cuerpo JSON no es válido.");
   }
