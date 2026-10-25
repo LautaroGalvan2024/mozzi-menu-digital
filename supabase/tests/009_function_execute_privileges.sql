@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(67);
+select plan(91);
 
 with expected(signature, access) as (
   values
@@ -13,6 +13,14 @@ with expected(signature, access) as (
     ('public.cancel_order(uuid,text)', 'authenticated'),
     ('public.import_products_batch(uuid,jsonb,text)', 'authenticated'),
     ('public.get_catalog_import_result(uuid,uuid)', 'authenticated'),
+    ('public.get_inventory(uuid,uuid,integer)', 'authenticated'),
+    ('public.confirm_inventory_business_policy(uuid,jsonb)', 'authenticated'),
+    ('public.begin_inventory_count(uuid,uuid,text)', 'authenticated'),
+    ('public.finish_inventory_count(uuid,jsonb,uuid[],boolean,text,boolean)', 'authenticated'),
+    ('public.change_inventory_policy(uuid,text,text,bigint)', 'authenticated'),
+    ('public.inventory_adjust(uuid,uuid,text,jsonb,text,text)', 'authenticated'),
+    ('public.reverse_order_inventory(uuid,uuid,text,boolean,text,jsonb)', 'authenticated'),
+    ('public.link_order_replacement(uuid,uuid,text)', 'authenticated'),
     ('public.get_order_metrics(uuid,timestamptz,timestamptz)', 'authenticated'),
     ('public.set_restaurant_member_status(uuid,public.membership_status)', 'authenticated'),
     ('public.save_restaurant_hours(uuid,jsonb,jsonb,uuid[],uuid[])', 'authenticated'),
@@ -55,7 +63,7 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  21::bigint,
+  29::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 
