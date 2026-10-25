@@ -120,11 +120,95 @@ describe('catalog import file state', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Conservamos el mismo lote')
     const firstBody = mocks.invoke.mock.calls[0]![1].body
     expect(firstBody.batchId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: 'Recuperar o continuar importación' }))
     expect(await screen.findByText(/Importación terminada: 1 creados/)).toBeVisible()
     expect(mocks.invoke.mock.calls[1]![1].body).toEqual(firstBody)
     expect(mocks.rpc).toHaveBeenCalledWith('get_catalog_import_result', { p_restaurant_id: firstBody.restaurantId, p_batch_id: firstBody.batchId })
     expect(screen.getByRole('button', { name: 'Descargar resultado' })).toBeVisible()
+  })
+
+  it.each([
+    [409, 'IMPORT_CONFLICT', 'create_only'],
+    [422, 'IMPORT_PRODUCT_NOT_FOUND', 'update_only'],
+  ])('allows an explicit mode correction after atomic HTTP %s / %s rollback', async (status, code, rejectedMode) => {
+    const user = userEvent.setup()
+    mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code, message: 'El modo elegido no permite importar esta fila.' } }), { status }) } })
+      .mockImplementationOnce((_name, request) => Promise.resolve({ data: {
+        batchId: request.body.batchId, summary: { created: 0, updated: 1, skipped: 0 }, errors: [],
+        products: [{ rowRef: '2', id: '10000000-0000-4000-8000-000000000002', code: 'P-1', outcome: 'updated' }],
+      }, error: null }))
+    const { container, unmount } = renderPage()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Cómo importar' }), rejectedMode)
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await screen.findByRole('heading', { name: 'Vista previa' })
+    await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
+    expect(await screen.findByText(/El servidor rechazó la importación sin guardar cambios/)).toBeVisible()
+    const rejectedBody = mocks.invoke.mock.calls[0]![1].body
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeEnabled()
+    unmount()
+    renderPage()
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeEnabled()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Cómo importar' }), 'create_or_update')
+    expect(mocks.invoke).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
+    expect(await screen.findByText(/Importación terminada: 0 creados, 1 actualizados/)).toBeVisible()
+    expect(mocks.invoke.mock.calls[1]![1].body.mode).toBe('create_or_update')
+    expect(mocks.invoke.mock.calls[1]![1].body.batchId).not.toBe(rejectedBody.batchId)
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
+  it('preserves the original identity when a successful response cannot be verified', async () => {
+    const user = userEvent.setup()
+    const response = { batchId: '10000000-0000-4000-8000-000000000099', summary: { created: 1, updated: 0, skipped: 0 }, errors: [], products: [{ rowRef: '2', id: '10000000-0000-4000-8000-000000000002', code: 'P-1', outcome: 'created' }] }
+    mocks.invoke.mockResolvedValueOnce({ data: response, error: null })
+      .mockImplementationOnce((_name, request) => Promise.resolve({ data: { ...response, batchId: request.body.batchId }, error: null }))
+    const { container } = renderPage()
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await screen.findByRole('heading', { name: 'Vista previa' })
+    await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
+    await screen.findByText(/Conservamos el mismo lote/)
+    const original = mocks.invoke.mock.calls[0]![1].body
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Recuperar o continuar importación' }))
+    await screen.findByText(/Importación terminada: 1 creados/)
+    expect(mocks.invoke.mock.calls[1]![1].body).toEqual(original)
+  })
+
+  it('does not unlock an earlier uncertain batch even when a later retry receives a conflict', async () => {
+    const user = userEvent.setup()
+    mocks.invoke.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code: 'IMPORT_CONFLICT', message: 'El código ya existe.' } }), { status: 409 }) } })
+    const { container } = renderPage()
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await screen.findByRole('heading', { name: 'Vista previa' })
+    await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
+    await screen.findByRole('alert')
+    const original = mocks.invoke.mock.calls[0]![1].body
+    await user.click(screen.getByRole('button', { name: 'Recuperar o continuar importación' }))
+    expect(await screen.findByText(/El código ya existe/)).toBeVisible()
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeDisabled()
+    expect(mocks.invoke.mock.calls[1]![1].body).toEqual(original)
+    expect(screen.queryByText(/sin guardar cambios/)).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [500, 'IMPORT_CONFLICT'],
+    [409, 'IMPORT_IDEMPOTENCY_CONFLICT'],
+    [409, 'UNKNOWN_REJECTION'],
+  ])('keeps the batch locked for an unverifiable rejection: HTTP %s / %s', async (status, code) => {
+    const user = userEvent.setup()
+    mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code, message: 'No se pudo confirmar.' } }), { status }) } })
+    const { container, unmount } = renderPage()
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await screen.findByRole('heading', { name: 'Vista previa' })
+    await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
+    await screen.findByText(/Conservamos el mismo lote/)
+    const body = mocks.invoke.mock.calls[0]![1].body
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeDisabled()
+    unmount()
+    renderPage()
+    expect(screen.getByRole('combobox', { name: 'Cómo importar' })).toBeDisabled()
+    expect(JSON.parse(localStorage.getItem(`catalog-import:v1:${body.restaurantId}`)!).latest).toBe(body.batchId)
   })
 
   it('restores a completed result after remount and never reinvokes metadata on replay', async () => {

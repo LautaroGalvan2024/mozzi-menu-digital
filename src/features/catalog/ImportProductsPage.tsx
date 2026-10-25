@@ -9,7 +9,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { csvRecordsToSheet, parseImportSheets, type ImportData } from '../../lib/import-products'
-import { importResultSchema, latestImportSession, persistImportSession, prepareImportSession, type ImportMode, type ImportResult, type ImportSession } from '../../lib/import-session'
+import { importResultSchema, latestImportSession, persistImportSession, prepareImportSession, rejectImportSession, withImportSubmission, type ImportMode, type ImportResult, type ImportSession } from '../../lib/import-session'
 import { downloadBlob, importResultWorkbook, importWorkbook } from '../../lib/import-workbook'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
@@ -17,6 +17,9 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 const MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 const MAX_ZIP_BYTES = 100 * 1024 * 1024
 const MAX_EXTRACTED_BYTES = 250 * 1024 * 1024
+// These RPC errors are thrown inside the atomic import transaction, before any
+// result can commit. Other failures (including idempotency conflicts) stay uncertain.
+const MODE_REJECTION_STATUS: Readonly<Record<string, number>> = { IMPORT_CONFLICT: 409, IMPORT_PRODUCT_NOT_FOUND: 422 }
 interface ImageError { filename: string; message: string }
 interface ServerError { code: string; message: string; path?: string; row?: number }
 interface Progress { current: number; total: number; label: string }
@@ -182,7 +185,7 @@ export function ImportProductsPage() {
         if (currentPath === undefined) throw new Error('No se pudo comprobar la imagen actual del producto. Reintentá sin repetir el catálogo.')
         if (attempt?.path === currentPath) {
           attempt.associated = true
-          persistImportSession(restaurantId, activeSession)
+          await persistImportSession(restaurantId, activeSession)
           continue
         }
         if (attempt && attempt.expectedPath !== currentPath) throw new Error('La imagen cambió después de este intento. No se reemplazó; revisá la ficha del producto.')
@@ -204,7 +207,7 @@ export function ImportProductsPage() {
           activeSession.images[product.rowRef] = attempt
           // Persist the uploaded path before attempting association. A lost reply
           // can then be reconciled without another upload or unsafe deletion.
-          persistImportSession(restaurantId, activeSession)
+          await persistImportSession(restaurantId, activeSession)
         }
         let update = supabase.from('products').update({ image_path: attempt.path }).eq('id', productId).eq('restaurant_id', restaurantId)
         update = attempt.expectedPath === null ? update.is('image_path', null) : update.eq('image_path', attempt.expectedPath)
@@ -214,7 +217,7 @@ export function ImportProductsPage() {
           if (check.error || check.data.image_path !== attempt.path) throw new Error('No pudimos confirmar la asociación de la imagen. Conservamos el archivo para revisar o reintentar; el catálogo ya está importado.')
         }
         attempt.associated = true
-        persistImportSession(restaurantId, activeSession)
+        await persistImportSession(restaurantId, activeSession)
         // Retain previous/uncertain assets: another writer may still reference
         // them. Garbage collection requires an authoritative reference check.
       } catch (uploadError) {
@@ -240,72 +243,86 @@ export function ImportProductsPage() {
     setServerErrors([])
     setProgress({ current: 0, total: data.products.length, label: 'Validando metadata' })
     try {
-      const activeSession = session && session.mode === mode ? session : await prepareImportSession(scope.selected.id, data, mode, fileName)
-      setSession(activeSession)
-      let preparedZip: JSZip | undefined
-      if (zipFile) {
-        setProgress({ current: 0, total: data.products.length, label: 'Validando ZIP de imágenes' })
-        try {
-          preparedZip = await JSZip.loadAsync(zipFile)
-        } catch {
-          setError('No pudimos abrir el ZIP de imágenes. La metadata no fue importada.')
-          return
-        }
-        setProgress({ current: 0, total: data.products.length, label: 'Validando metadata' })
-      }
-      let recoveredResult: unknown = null
-      if (activeSession.submitted) {
-        const recovery = await supabase.rpc('get_catalog_import_result', { p_restaurant_id: scope.selected.id, p_batch_id: activeSession.batchId })
-        if (recovery.error) throw new Error('No pudimos consultar el resultado anterior. Conservamos el mismo lote para reintentar.')
-        recoveredResult = recovery.data
-      }
-      activeSession.submitted = true
-      persistImportSession(scope.selected.id, activeSession)
-      const { data: response, error: invokeError } = recoveredResult
-        ? { data: recoveredResult, error: null }
-        : await supabase.functions.invoke('import-products', {
-          body: { restaurantId: scope.selected.id, batchId: activeSession.batchId, mode: activeSession.mode, products: activeSession.data.products, groups: activeSession.data.groups, options: activeSession.data.options },
-        })
-      if (invokeError) {
-        let reported: ServerError[] = [{
-          code: 'EDGE_REQUEST_FAILED',
-          message: 'No pudimos confirmar el resultado. Reintentá este mismo lote para recuperarlo sin duplicar productos.',
-        }]
-        const context = (invokeError as { context?: unknown }).context
-        if (context instanceof Response) {
+      const prepared = session && session.mode === mode ? session : await prepareImportSession(scope.selected.id, data, mode, fileName)
+      const restaurantId = scope.selected.id
+      await withImportSubmission(restaurantId, prepared, async (activeSession) => {
+        setSession(activeSession)
+        let preparedZip: JSZip | undefined
+        if (zipFile) {
+          setProgress({ current: 0, total: data.products.length, label: 'Validando ZIP de imágenes' })
           try {
-            const payload = edgeErrorSchema.safeParse(await context.clone().json())
-            if (payload.success) {
-              const fields = payload.data.error.details?.fields ?? []
-              reported = fields.length
-                ? fields.map((field) => ({
-                    code: payload.data.error.code,
-                    message: field.message,
-                    ...serverFieldLocation(field.path),
-                  }))
-                : [{ code: payload.data.error.code, message: payload.data.error.message }]
-            }
+            preparedZip = await JSZip.loadAsync(zipFile)
           } catch {
-            // Keep the generic, non-sensitive report when the response is not JSON.
+            setError('No pudimos abrir el ZIP de imágenes. La metadata no fue importada.')
+            return
           }
+          setProgress({ current: 0, total: data.products.length, label: 'Validando metadata' })
         }
-        setServerErrors(reported)
-        throw invokeError
-      }
-      const imported = importResultSchema.parse(response)
-      if (imported.batchId !== activeSession.batchId || imported.products.length !== activeSession.data.products.length || new Set(imported.products.map((product) => product.rowRef)).size !== imported.products.length || new Set(imported.products.map((product) => product.id)).size !== imported.products.length || imported.products.some((product) => !activeSession.data.products.some((row) => row.rowRef === product.rowRef))) throw new Error('El resultado no corresponde al lote enviado. Conservamos el intento para recuperarlo.')
-      activeSession.result = imported
-      persistImportSession(scope.selected.id, activeSession)
-      if (currentRestaurant.current !== scope.selected.id) return
-      setSession({ ...activeSession })
-      setResult(imported)
-      if (!imported.errors.length) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['products', scope.selected.id] }),
-          queryClient.invalidateQueries({ queryKey: ['public-menu'] }),
-        ])
-        await uploadImages(imported, activeSession, preparedZip)
-      }
+        let recoveredResult: unknown = null
+        const wasSubmitted = activeSession.submitted
+        if (wasSubmitted) {
+          const recovery = await supabase.rpc('get_catalog_import_result', { p_restaurant_id: restaurantId, p_batch_id: activeSession.batchId })
+          if (recovery.error) throw new Error('No pudimos consultar el resultado anterior. Conservamos el mismo lote para reintentar.')
+          recoveredResult = recovery.data
+        }
+        activeSession.submitted = true
+        await persistImportSession(restaurantId, activeSession)
+        const { data: response, error: invokeError } = recoveredResult
+          ? { data: recoveredResult, error: null }
+          : await supabase.functions.invoke('import-products', {
+            body: { restaurantId, batchId: activeSession.batchId, mode: activeSession.mode, products: activeSession.data.products, groups: activeSession.data.groups, options: activeSession.data.options },
+          })
+        if (invokeError) {
+          let reported: ServerError[] = [{
+            code: 'EDGE_REQUEST_FAILED',
+            message: 'No pudimos confirmar el resultado. Reintentá este mismo lote para recuperarlo sin duplicar productos.',
+          }]
+          const context = (invokeError as { context?: unknown }).context
+          let confirmedRejection = false
+          if (context instanceof Response) {
+            try {
+              const payload = edgeErrorSchema.safeParse(await context.clone().json())
+              if (payload.success) {
+                confirmedRejection = !wasSubmitted && MODE_REJECTION_STATUS[payload.data.error.code] === context.status
+                const fields = payload.data.error.details?.fields ?? []
+                reported = fields.length
+                  ? fields.map((field) => ({
+                      code: payload.data.error.code,
+                      message: field.message,
+                      ...serverFieldLocation(field.path),
+                    }))
+                  : [{ code: payload.data.error.code, message: payload.data.error.message }]
+              }
+            } catch {
+              // Keep the generic, non-sensitive report when the response is not JSON.
+            }
+          }
+          setServerErrors(reported)
+          if (confirmedRejection) {
+            const rejected = await rejectImportSession(restaurantId, activeSession.batchId)
+            if (rejected.submitted) throw invokeError
+            setSession(rejected)
+            setRecovered(false)
+            setError('El servidor rechazó la importación sin guardar cambios. Podés corregir el modo y volver a importar.')
+            return
+          }
+          throw invokeError
+        }
+        const imported = importResultSchema.parse(response)
+        if (imported.batchId !== activeSession.batchId || imported.products.length !== activeSession.data.products.length || new Set(imported.products.map((product) => product.rowRef)).size !== imported.products.length || new Set(imported.products.map((product) => product.id)).size !== imported.products.length || imported.products.some((product) => !activeSession.data.products.some((row) => row.rowRef === product.rowRef))) throw new Error('El resultado no corresponde al lote enviado. Conservamos el intento para recuperarlo.')
+        activeSession.result = imported
+        await persistImportSession(restaurantId, activeSession)
+        if (currentRestaurant.current !== restaurantId) return
+        setSession({ ...activeSession })
+        setResult(imported)
+        if (!imported.errors.length) {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['products', restaurantId] }),
+            queryClient.invalidateQueries({ queryKey: ['public-menu'] }),
+          ])
+          await uploadImages(imported, activeSession, preparedZip)
+        }
+      })
     } catch {
       setError('No pudimos confirmar todos los resultados. Conservamos el mismo lote: reintentá para recuperar lo guardado sin duplicar productos.')
     } finally {
@@ -322,7 +339,8 @@ export function ImportProductsPage() {
     setError(null)
     setImageErrors([])
     try {
-      await uploadImages(result, session)
+      if (!scope.selected) return
+      await withImportSubmission(scope.selected.id, session, (current) => uploadImages(current.result ?? result, current))
     } catch {
       setError('No se pudo volver a abrir el ZIP. Seleccionalo otra vez e intentá de nuevo.')
     } finally {

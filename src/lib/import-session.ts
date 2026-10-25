@@ -49,8 +49,7 @@ export function latestImportSession(restaurantId: string): ImportSession | null 
   return store.sessions[store.latest] ?? null
 }
 
-export function persistImportSession(restaurantId: string, session: ImportSession): void {
-  const store = readStore(restaurantId)
+function writeSession(restaurantId: string, store: SessionStore, session: ImportSession): void {
   store.latest = session.batchId
   store.sessions[session.batchId] = session
   try {
@@ -61,16 +60,60 @@ export function persistImportSession(restaurantId: string, session: ImportSessio
   }
 }
 
+async function withImportLock<T>(name: string, callback: () => T | Promise<T>): Promise<T> {
+  // An in-memory fallback cannot coordinate other tabs. Fail before sending a batch.
+  if (!navigator.locks) throw new Error('Este navegador no puede proteger el reintento entre pestañas. Actualizalo antes de importar.')
+  return navigator.locks.request(name, callback)
+}
+
+// Call only while holding the store lock; acquiring it here would be reentrant.
+function persistSessionLocked(restaurantId: string, session: ImportSession): ImportSession {
+  const store = readStore(restaurantId)
+  const saved = store.sessions[session.batchId]
+  const images = { ...session.images, ...saved?.images }
+  for (const [rowRef, attempt] of Object.entries(session.images)) {
+    const prior = images[rowRef]
+    if (prior?.path === attempt.path) images[rowRef] = { ...prior, associated: prior.associated || attempt.associated }
+  }
+  // A stale tab must not erase a committed result, pending submission, or image progress.
+  const merged = { ...session, ...saved, submitted: !!saved?.submitted || session.submitted, images }
+  const result = saved?.result ?? session.result
+  if (result) merged.result = result
+  writeSession(restaurantId, store, merged)
+  return merged
+}
+
+export async function persistImportSession(restaurantId: string, session: ImportSession): Promise<ImportSession> {
+  return withImportLock(`catalog-import:${restaurantId}`, () => persistSessionLocked(restaurantId, session))
+}
+
+export async function withImportSubmission<T>(restaurantId: string, session: ImportSession, callback: (current: ImportSession) => Promise<T>): Promise<T> {
+  // Network work is serialized per batch, without blocking persistence for other batches.
+  // This also prevents one tab's rollback from unlocking another tab's in-flight request.
+  return withImportLock(`catalog-import-submit:${restaurantId}:${session.batchId}`, async () => callback(await persistImportSession(restaurantId, session)))
+}
+
+// Only after an authoritative rollback on a previously unsubmitted batch, inside
+// withImportSubmission. Ambiguous attempts and idempotency conflicts must stay submitted.
+export async function rejectImportSession(restaurantId: string, batchId: string): Promise<ImportSession> {
+  return withImportLock(`catalog-import:${restaurantId}`, () => {
+    const store = readStore(restaurantId)
+    const saved = store.sessions[batchId]
+    if (!saved) throw new Error('No pudimos recuperar el registro local de la importación.')
+    const rejected = saved.result ? saved : { ...saved, submitted: false }
+    writeSession(restaurantId, store, rejected)
+    return rejected
+  })
+}
+
 export async function prepareImportSession(restaurantId: string, data: ImportData, mode: ImportMode, fileName: string, forceNew = false): Promise<ImportSession> {
   const content = JSON.stringify({ products: data.products, groups: data.groups, options: data.options })
   const hash = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), (byte) => byte.toString(16).padStart(2, '0')).join('')
   const [fingerprint, contentFingerprint] = await Promise.all([hash(`${mode}:${content}`), hash(content)])
-  if (!navigator.locks) throw new Error('Este navegador no puede proteger el reintento entre pestañas. Actualizalo antes de importar.')
-  return navigator.locks.request(`catalog-import:${restaurantId}`, () => {
+  return withImportLock(`catalog-import:${restaurantId}`, () => {
     const store = readStore(restaurantId)
     const prior = Object.values(store.sessions).findLast((session) => session.fingerprint === fingerprint || (session.submitted && session.contentFingerprint === contentFingerprint))
     const session = !forceNew && prior ? prior : { batchId: crypto.randomUUID(), fingerprint, contentFingerprint, fileName, mode, data, submitted: false, images: {} }
-    persistImportSession(restaurantId, session)
-    return session
+    return persistSessionLocked(restaurantId, session)
   })
 }
