@@ -3,12 +3,11 @@ import { getAppBaseUrl, getRateLimitSecret } from "../_shared/config.ts";
 import { hmacSha256Hex, randomToken, sha256Hex } from "../_shared/crypto.ts";
 import { ApiError, databaseApiError } from "../_shared/errors.ts";
 import { jsonResponse, readJson, safeLog, serve } from "../_shared/http.ts";
-import { parseOrderResult, parseOrderRpcMetadata } from "../_shared/order-result.ts";
+import { orderConfirmationResponse } from "../_shared/order-confirmation.ts";
 import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
 import { clientIp } from "../_shared/request-meta.ts";
 import { createOrderSchema, parseInput } from "../_shared/schemas.ts";
 import { verifyTurnstileIfEnabled } from "../_shared/turnstile.ts";
-import { buildWhatsapp } from "../_shared/whatsapp.ts";
 
 const MAX_BODY_BYTES = 192 * 1_024;
 const MIN_FORM_AGE_MS = 1_000;
@@ -51,40 +50,32 @@ serve({
     const clientEventToken = randomToken(32);
     const clientEventTokenHash = await sha256Hex(clientEventToken);
     const tokenExpiresAt = new Date(Date.now() + CLIENT_EVENT_LIFETIME_MS).toISOString();
+    const recoveryToken = randomToken(32);
+    const recoveryTokenHash = await sha256Hex(recoveryToken);
+    const recoveryExpiresAt = new Date(Date.now() + CLIENT_EVENT_LIFETIME_MS).toISOString();
     const { antiSpam: _antiSpam, ...orderRequest } = input;
 
     // This public function has a deliberately narrow service-only creation RPC. Prices,
     // availability, opening hours, snapshots, idempotency and inserts are checked atomically.
     const { data, error } = await admin.rpc("create_order_transaction", {
-      p_request: { ...orderRequest, tokenExpiresAt },
+      p_request: { ...orderRequest, tokenExpiresAt, recoveryTokenHash, recoveryExpiresAt },
       p_ip_hash: ipHash,
       p_phone_hash: phoneHash,
       p_client_event_token_hash: clientEventTokenHash,
     });
     if (error) throw databaseApiError(error);
 
-    const metadata = parseOrderRpcMetadata(data);
-    const result = parseOrderResult(data);
-    const whatsapp = buildWhatsapp(result.canonical, getAppBaseUrl());
+    const result = orderConfirmationResponse(data, getAppBaseUrl(), {
+      clientEventToken,
+      clientEventExpiresAtFallback: tokenExpiresAt,
+      recoveryToken,
+    });
     safeLog("info", "order.created", context.requestId, {
-      actionId: result.canonical.actionId,
-      displayNumber: result.canonical.displayNumber,
+      actionId: result.order.actionId,
+      displayNumber: result.order.displayNumber,
       idempotentReplay: result.idempotentReplay,
     });
 
-    return jsonResponse({
-      order: {
-        actionId: result.canonical.actionId,
-        displayNumber: result.canonical.displayNumber,
-        status: result.status,
-        totalCents: result.canonical.totalCents,
-        currencyCode: result.canonical.currencyCode,
-        createdAt: result.canonical.createdAt,
-      },
-      whatsapp,
-      clientEventToken: metadata.clientEventTokenStored ? clientEventToken : null,
-      clientEventExpiresAt: metadata.clientEventExpiresAt ?? tokenExpiresAt,
-      idempotentReplay: result.idempotentReplay,
-    }, result.idempotentReplay ? 200 : 201);
+    return jsonResponse(result, result.idempotentReplay ? 200 : 201);
   },
 });
