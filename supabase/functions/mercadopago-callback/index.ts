@@ -13,9 +13,9 @@ import {
   createAdminClient,
   exchangeAuthorizationCode,
   mpEncryptionKey,
+  normalizeOAuthTokenResponse,
   rpc,
   saveProviderAccount,
-  validateProviderToken,
 } from "../_shared/mercadopago.ts";
 
 Deno.serve(async (request) => {
@@ -76,9 +76,12 @@ Deno.serve(async (request) => {
     else {
       const code = z.string().min(1).max(2048).parse(url.searchParams.get("code"));
       stage = "token_exchange";
-      const token = await exchangeAuthorizationCode(code, payload.verifier);
+      const exchange = await exchangeAuthorizationCode(code, payload.verifier);
       stage = "token_validation";
-      const validatedToken = validateProviderToken(token);
+      const validatedToken = normalizeOAuthTokenResponse(
+        exchange.rawToken,
+        exchange.requestedLiveMode,
+      );
       stage = "account_save";
       await saveProviderAccount(admin, payload.restaurantId, validatedToken);
       resultUrl.searchParams.set("mp", "connected");

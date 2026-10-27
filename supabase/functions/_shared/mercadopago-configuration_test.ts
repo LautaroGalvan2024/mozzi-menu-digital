@@ -18,7 +18,7 @@ const actor = {
 const key = base64url(new Uint8Array(32).fill(8));
 const fixtureClientId = "1234567890123456";
 
-async function withConfiguration(action: () => Promise<void>) {
+async function withConfiguration(action: () => Promise<void> | void) {
   const values = {
     MERCADOPAGO_CLIENT_ID: fixtureClientId,
     MERCADOPAGO_CLIENT_SECRET: "secret-fixture-for-configuration",
@@ -102,7 +102,7 @@ Deno.test("invalid OAuth application IDs cannot persist state or reach Mercado P
 });
 
 Deno.test("connection status reports missing configuration without disclosing its values", async () => {
-  await withConfiguration(async () => {
+  await withConfiguration(() => {
     assertEquals(paymentConnectionConfiguration(), { configured: true, configurationIssue: null });
     for (
       const name of [

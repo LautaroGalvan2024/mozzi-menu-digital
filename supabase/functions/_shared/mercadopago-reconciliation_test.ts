@@ -3,6 +3,7 @@ import { ApiError } from "./errors.ts";
 import { base64url, decryptCredentials, encryptCredentials } from "./mercadopago-core.ts";
 import {
   exchangeAuthorizationCode,
+  normalizeOAuthTokenResponse,
   paymentAccount,
   paymentReturnUrl,
   reconcileAttempt,
@@ -79,11 +80,19 @@ async function withEnvironment(action: () => Promise<void>) {
   }
 }
 
-async function encryptedAccount(active = true, expired = false) {
+async function encryptedAccount(
+  active = true,
+  expired = false,
+  liveMode: boolean | "legacy" = false,
+) {
   return {
     ...account,
     encryptedCredentials: await encryptCredentials(
-      { accessToken: "access-token-fixture", refreshToken: "refresh-token-fixture" },
+      {
+        accessToken: "access-token-fixture",
+        refreshToken: "refresh-token-fixture",
+        ...(liveMode === "legacy" ? {} : { liveMode }),
+      },
       key,
       restaurantId,
     ),
@@ -110,7 +119,10 @@ Deno.test("OAuth code exchange requests sandbox tokens only in test mode and pre
         else Deno.env.set("MERCADOPAGO_MODE", mode);
         assertEquals(
           await exchangeAuthorizationCode("authorization-code-fixture", "pkce-verifier-fixture"),
-          { access_token: "returned-token-fixture" },
+          {
+            rawToken: { access_token: "returned-token-fixture" },
+            requestedLiveMode: mode !== "test",
+          },
         );
         assertEquals(requests.at(-1), {
           url: "https://api.mercadopago.com/oauth/token",
@@ -157,9 +169,190 @@ Deno.test("OAuth credentials require the configured live_mode before any account
       assertEquals(calls[0]!.args.p_activate, true);
       assertEquals(
         await decryptCredentials(String(calls[0]!.args.p_encrypted_credentials), key, restaurantId),
-        { accessToken: token.access_token, refreshToken: token.refresh_token },
+        {
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token,
+          liveMode: expectedLiveMode,
+        },
       );
     }
+  });
+});
+
+Deno.test("OAuth omission uses the captured request mode without inferring an APP_USR prefix", async () => {
+  await withEnvironment(async () => {
+    const rawToken = {
+      access_token: "APP_USR-fixture-shared-prefix",
+      refresh_token: "refresh-token-fixture",
+      user_id: account.providerUserId,
+      expires_in: 3600,
+    };
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const expectedLiveMode of [false, true]) {
+        Deno.env.set("MERCADOPAGO_MODE", expectedLiveMode ? "production" : "test");
+        globalThis.fetch = () => {
+          // The environment may change while awaiting the provider; it is not the request's context.
+          Deno.env.set("MERCADOPAGO_MODE", expectedLiveMode ? "test" : "production");
+          return Promise.resolve(Response.json(rawToken));
+        };
+        const exchange = await exchangeAuthorizationCode("code-fixture", "verifier-fixture");
+        assertEquals(exchange.requestedLiveMode, expectedLiveMode);
+        const normalized = normalizeOAuthTokenResponse(
+          exchange.rawToken,
+          exchange.requestedLiveMode,
+        );
+        assertEquals(normalized.live_mode, expectedLiveMode);
+        const blocked = fakeAdmin();
+        await assertRejects(
+          () => saveProviderAccount(blocked.client, restaurantId, normalized),
+          (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
+        );
+        assertEquals(blocked.calls, []);
+        Deno.env.set("MERCADOPAGO_MODE", expectedLiveMode ? "production" : "test");
+        const saved = fakeAdmin();
+        await saveProviderAccount(saved.client, restaurantId, normalized);
+        assertEquals(
+          await decryptCredentials(
+            String(saved.calls[0]!.args.p_encrypted_credentials),
+            key,
+            restaurantId,
+          ),
+          {
+            accessToken: rawToken.access_token,
+            refreshToken: rawToken.refresh_token,
+            liveMode: expectedLiveMode,
+          },
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("OAuth normalization rejects conflicting explicit modes and malformed values", async () => {
+  const rawToken = {
+    access_token: "access-token-fixture",
+    refresh_token: "refresh-token-fixture",
+    user_id: account.providerUserId,
+    expires_in: 3600,
+  };
+  for (const expected of [false, true]) {
+    assertEquals(
+      normalizeOAuthTokenResponse({ ...rawToken, live_mode: expected }, expected).live_mode,
+      expected,
+    );
+    await assertRejects(
+      () => normalizeOAuthTokenResponse({ ...rawToken, live_mode: !expected }, expected),
+      (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
+    );
+    for (const malformed of [null, "false", "true", 0, 1, undefined]) {
+      await assertRejects(
+        () => normalizeOAuthTokenResponse({ ...rawToken, live_mode: malformed }, expected),
+        (error) => error instanceof ApiError && error.code === "PAYMENT_TOKEN_RESPONSE_INVALID",
+      );
+    }
+  }
+});
+
+Deno.test("legacy credentials and environment changes block token use before refresh or provider requests", async () => {
+  await withEnvironment(async () => {
+    let providerRequests = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => {
+      providerRequests++;
+      throw new Error("Unexpected provider call");
+    };
+    try {
+      for (const expired of [false, true]) {
+        for (const liveMode of ["legacy", true] as const) {
+          const stored = await encryptedAccount(true, expired, liveMode);
+          const { client, calls } = fakeAdmin(() => stored);
+          await assertRejects(
+            () => paymentAccount(client, { restaurantId }, true),
+            (error) =>
+              error instanceof ApiError &&
+              error.code === (liveMode === "legacy"
+                  ? "PAYMENT_ACCOUNT_RECONNECT_REQUIRED"
+                  : "PAYMENT_ENVIRONMENT_MISMATCH"),
+          );
+          assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+        }
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(providerRequests, 0);
+  });
+});
+
+Deno.test("refresh omission preserves each encrypted account mode and inactive state", async () => {
+  await withEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const liveMode of [false, true]) {
+        Deno.env.set("MERCADOPAGO_MODE", liveMode ? "production" : "test");
+        const stored = await encryptedAccount(false, true, liveMode);
+        const { client, calls } = fakeAdmin((name) =>
+          name === "get_payment_account" ? stored : true
+        );
+        let requestBody: Record<string, unknown> = {};
+        globalThis.fetch = (_input, init) => {
+          requestBody = JSON.parse(String(init?.body));
+          return Promise.resolve(Response.json({
+            access_token: "new-access-token-fixture",
+            refresh_token: "new-refresh-token-fixture",
+            user_id: account.providerUserId,
+            expires_in: 3600,
+          }));
+        };
+        const result = await paymentAccount(client, { restaurantId });
+        assertEquals(result.accessToken, "new-access-token-fixture");
+        assertEquals(Object.hasOwn(requestBody, "test_token"), false);
+        const saved = calls.find((call) => call.name === "save_payment_account")!;
+        assertEquals(saved.args.p_activate, false);
+        assertEquals(
+          await decryptCredentials(String(saved.args.p_encrypted_credentials), key, restaurantId),
+          {
+            accessToken: "new-access-token-fixture",
+            refreshToken: "new-refresh-token-fixture",
+            liveMode,
+          },
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("refresh cannot substitute the current deployment mode for persisted account context", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount(true, true, false);
+    const { client, calls } = fakeAdmin((name) => name === "get_payment_account" ? stored : true);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => {
+      Deno.env.set("MERCADOPAGO_MODE", "production");
+      return Promise.resolve(Response.json({
+        access_token: "new-access-token-fixture",
+        refresh_token: "new-refresh-token-fixture",
+        user_id: account.providerUserId,
+        expires_in: 3600,
+      }));
+    };
+    try {
+      await assertRejects(
+        () => paymentAccount(client, { restaurantId }),
+        (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(calls.map((call) => call.name), [
+      "get_payment_account",
+      "acquire_payment_account_refresh",
+    ]);
   });
 });
 
@@ -341,7 +534,11 @@ Deno.test("refreshing a disconnected account preserves inactive state for pendin
     assertEquals(saved.args.p_activate, false);
     assertEquals(
       await decryptCredentials(String(saved.args.p_encrypted_credentials), key, restaurantId),
-      { accessToken: "refreshed-access-token", refreshToken: "refreshed-refresh-token" },
+      {
+        accessToken: "refreshed-access-token",
+        refreshToken: "refreshed-refresh-token",
+        liveMode: false,
+      },
     );
   });
 });

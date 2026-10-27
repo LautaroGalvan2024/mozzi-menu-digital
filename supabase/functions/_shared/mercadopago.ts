@@ -63,6 +63,34 @@ export function validateProviderToken(raw: unknown): z.infer<typeof providerToke
   }
   return result.data;
 }
+function assertPaymentEnvironment(actualLiveMode: boolean, expectedLiveMode: boolean): void {
+  if (actualLiveMode !== expectedLiveMode) {
+    throw new ApiError(
+      409,
+      "PAYMENT_ENVIRONMENT_MISMATCH",
+      "La cuenta de Mercado Pago no corresponde al ambiente de cobros configurado.",
+    );
+  }
+}
+
+/** Only OAuth responses may omit live_mode; the caller must supply the known request/account mode. */
+export function normalizeOAuthTokenResponse(
+  raw: unknown,
+  expectedLiveMode: boolean,
+): z.infer<typeof providerTokenSchema> {
+  if (typeof expectedLiveMode !== "boolean") {
+    throw new ApiError(
+      500,
+      "PAYMENT_CONFIGURATION_ERROR",
+      "No se pudo verificar el ambiente de la conexión de Mercado Pago.",
+    );
+  }
+  const mayAddMode = raw && typeof raw === "object" && !Array.isArray(raw) &&
+    !Object.hasOwn(raw, "live_mode");
+  const token = validateProviderToken(mayAddMode ? { ...raw, live_mode: expectedLiveMode } : raw);
+  assertPaymentEnvironment(token.live_mode, expectedLiveMode);
+  return token;
+}
 const accountSchema = z.object({
   restaurantId: z.string().uuid(),
   providerUserId: z.string(),
@@ -73,6 +101,7 @@ const accountSchema = z.object({
 const credentialsSchema = z.object({
   accessToken: z.string().min(8),
   refreshToken: z.string().min(8),
+  liveMode: z.boolean(),
 });
 export const paymentAttemptSchema = z.object({
   attemptId: z.string().uuid(),
@@ -116,16 +145,21 @@ export function oauthRedirectUri(): string {
 function providerLiveMode(): boolean {
   return Deno.env.get("MERCADOPAGO_MODE") !== "test";
 }
-export async function exchangeAuthorizationCode(code: string, verifier: string): Promise<unknown> {
-  return await providerRequest("/oauth/token", undefined, {
+export async function exchangeAuthorizationCode(
+  code: string,
+  verifier: string,
+): Promise<{ rawToken: unknown; requestedLiveMode: boolean }> {
+  const requestedLiveMode = providerLiveMode();
+  const rawToken = await providerRequest("/oauth/token", undefined, {
     grant_type: "authorization_code",
     client_id: requireMercadoPagoClientId(),
     client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
     code,
     redirect_uri: oauthRedirectUri(),
     code_verifier: verifier,
-    ...(!providerLiveMode() ? { test_token: true } : {}),
+    ...(!requestedLiveMode ? { test_token: true } : {}),
   });
+  return { rawToken, requestedLiveMode };
 }
 
 /** Call only after authorizing the administrator; deployment errors never create OAuth state. */
@@ -232,18 +266,16 @@ export async function saveProviderAccount(
   activate = true,
 ): Promise<void> {
   const token = validateProviderToken(raw);
-  if (token.live_mode !== providerLiveMode()) {
-    throw new ApiError(
-      409,
-      "PAYMENT_ENVIRONMENT_MISMATCH",
-      "La cuenta de Mercado Pago no corresponde al ambiente de cobros configurado.",
-    );
-  }
+  assertPaymentEnvironment(token.live_mode, providerLiveMode());
   await rpc(admin, "save_payment_account", {
     p_restaurant_id: restaurantId,
     p_provider_user_id: token.user_id,
     p_encrypted_credentials: await encryptCredentials(
-      { accessToken: token.access_token, refreshToken: token.refresh_token },
+      {
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token,
+        liveMode: token.live_mode,
+      },
       mpEncryptionKey(),
       restaurantId,
     ),
@@ -271,9 +303,18 @@ export async function paymentAccount(
   if (requireActive && !account.active) {
     throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
   }
-  let credentials = credentialsSchema.parse(
+  const parsedCredentials = credentialsSchema.safeParse(
     await decryptCredentials(account.encryptedCredentials, mpEncryptionKey(), account.restaurantId),
   );
+  if (!parsedCredentials.success) {
+    throw new ApiError(
+      409,
+      "PAYMENT_ACCOUNT_RECONNECT_REQUIRED",
+      "La conexión guardada de Mercado Pago necesita renovarse. Reconectá la cuenta desde el panel del comercio.",
+    );
+  }
+  let credentials = parsedCredentials.data;
+  assertPaymentEnvironment(credentials.liveMode, providerLiveMode());
   if (Date.parse(account.expiresAt) <= Date.now() + 60_000) {
     const clientId = requireMercadoPagoClientId();
     const acquired = await rpc(admin, "acquire_payment_account_refresh", {
@@ -289,19 +330,24 @@ export async function paymentAccount(
     }
     // Refresh inherits the original token's environment; test_token belongs to initial authorization.
     // https://www.mercadopago.com.ar/developers/es/docs/split-payments/additional-content/security/oauth/renewal
-    const refresh = validateProviderToken(
+    const refresh = normalizeOAuthTokenResponse(
       await providerRequest("/oauth/token", undefined, {
         grant_type: "refresh_token",
         client_id: clientId,
         client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
         refresh_token: credentials.refreshToken,
       }),
+      credentials.liveMode,
     );
     if (refresh.user_id !== account.providerUserId) {
       throw new Error("Provider refresh account mismatch");
     }
     await saveProviderAccount(admin, account.restaurantId, refresh, false);
-    credentials = { accessToken: refresh.access_token, refreshToken: refresh.refresh_token };
+    credentials = {
+      accessToken: refresh.access_token,
+      refreshToken: refresh.refresh_token,
+      liveMode: refresh.live_mode,
+    };
   }
   return { ...account, accessToken: credentials.accessToken };
 }
