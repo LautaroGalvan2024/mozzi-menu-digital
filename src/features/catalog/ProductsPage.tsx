@@ -9,6 +9,7 @@ import { formatMoney } from '../../lib/money'
 import { publicAssetUrl,supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
+import { ProductFamilies } from './ProductFamilies'
 
 const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),description:z.string(),base_price_cents:z.union([z.number(),z.string()]),promotional_price_cents:z.union([z.number(),z.string()]).nullable(),image_path:z.string().nullable(),active:z.boolean(),available:z.boolean(),featured:z.boolean(),sort_order:z.number().int(),category_id:z.string().uuid(),categories:z.object({name:z.string()}).nullable()})
 type ToggleField='available'|'active'|'featured'
@@ -43,6 +44,7 @@ export function ProductsPage(){
       actions={<Link className="button-primary w-full sm:w-auto" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>}
     />
     {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
+    <ProductFamilies key={scope.selected?.id} />
     <div className="filter-bar mb-5 p-3">
       <label className="relative block">
         <span className="sr-only">Buscar productos</span>

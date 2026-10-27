@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      product_families: {
+        Row: {
+          id: string
+          restaurant_id: string
+          category_id: string
+          code: string
+          name: string
+          description: string
+          image_path: string | null
+          axes: string[]
+          active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          restaurant_id: string
+          category_id: string
+          code: string
+          name: string
+          description?: string
+          image_path?: string | null
+          axes: string[]
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          restaurant_id?: string
+          category_id?: string
+          code?: string
+          name?: string
+          description?: string
+          image_path?: string | null
+          axes?: string[]
+          active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: Database["public"]["Enums"]["audit_action"]
@@ -408,7 +450,7 @@ export type Database = {
       }
       inventory_operations: {
         Row: {
-          actor_user_id: string
+          actor_user_id: string | null
           created_at: string
           external_reference: string | null
           id: string
@@ -420,9 +462,10 @@ export type Database = {
           restaurant_id: string
           result: Json
           source_operation_id: string | null
+          actor_type: string
         }
         Insert: {
-          actor_user_id: string
+          actor_user_id?: string | null
           created_at?: string
           external_reference?: string | null
           id: string
@@ -434,9 +477,10 @@ export type Database = {
           restaurant_id: string
           result: Json
           source_operation_id?: string | null
+          actor_type?: string
         }
         Update: {
-          actor_user_id?: string
+          actor_user_id?: string | null
           created_at?: string
           external_reference?: string | null
           id?: string
@@ -448,6 +492,7 @@ export type Database = {
           restaurant_id?: string
           result?: Json
           source_operation_id?: string | null
+          actor_type?: string
         }
         Relationships: [
           {
@@ -645,6 +690,8 @@ export type Database = {
           quantity: number
           restaurant_id: string
           unit_price_cents: number
+          family_name_snapshot: string | null
+          variant_attributes_snapshot: Json
         }
         Insert: {
           base_subtotal_cents: number
@@ -662,6 +709,8 @@ export type Database = {
           quantity: number
           restaurant_id: string
           unit_price_cents: number
+          family_name_snapshot?: string | null
+          variant_attributes_snapshot?: Json
         }
         Update: {
           base_subtotal_cents?: number
@@ -679,6 +728,8 @@ export type Database = {
           quantity?: number
           restaurant_id?: string
           unit_price_cents?: number
+          family_name_snapshot?: string | null
+          variant_attributes_snapshot?: Json
         }
         Relationships: [
           {
@@ -756,6 +807,9 @@ export type Database = {
           total_cents: number
           updated_at: string
           whatsapp_opened_at: string | null
+          channel: string
+          checkout_mode: string
+          payment_status: string
         }
         Insert: {
           accepted_at?: string | null
@@ -808,6 +862,9 @@ export type Database = {
           total_cents: number
           updated_at?: string
           whatsapp_opened_at?: string | null
+          channel?: string
+          checkout_mode?: string
+          payment_status?: string
         }
         Update: {
           accepted_at?: string | null
@@ -860,6 +917,9 @@ export type Database = {
           total_cents?: number
           updated_at?: string
           whatsapp_opened_at?: string | null
+          channel?: string
+          checkout_mode?: string
+          payment_status?: string
         }
         Relationships: [
           {
@@ -918,6 +978,7 @@ export type Database = {
           sort_order: number
           transfer_alias: string | null
           updated_at: string
+          provider: string | null
         }
         Insert: {
           account_holder?: string | null
@@ -937,6 +998,7 @@ export type Database = {
           sort_order?: number
           transfer_alias?: string | null
           updated_at?: string
+          provider?: string | null
         }
         Update: {
           account_holder?: string | null
@@ -956,6 +1018,7 @@ export type Database = {
           sort_order?: number
           transfer_alias?: string | null
           updated_at?: string
+          provider?: string | null
         }
         Relationships: [
           {
@@ -1172,6 +1235,8 @@ export type Database = {
           sort_order: number
           updated_at: string
           updated_by: string | null
+          family_id: string | null
+          variant_attributes: Json
         }
         Insert: {
           active?: boolean
@@ -1194,6 +1259,8 @@ export type Database = {
           sort_order?: number
           updated_at?: string
           updated_by?: string | null
+          family_id?: string | null
+          variant_attributes?: Json
         }
         Update: {
           active?: boolean
@@ -1216,6 +1283,8 @@ export type Database = {
           sort_order?: number
           updated_at?: string
           updated_by?: string | null
+          family_id?: string | null
+          variant_attributes?: Json
         }
         Relationships: [
           {
@@ -1361,6 +1430,10 @@ export type Database = {
           trade_name: string
           updated_at: string
           whatsapp_phone_e164: string
+          store_enabled: boolean
+          store_ordering_policy: string
+          store_checkout_whatsapp_enabled: boolean
+          store_checkout_online_enabled: boolean
         }
         Insert: {
           address?: string
@@ -1394,6 +1467,10 @@ export type Database = {
           trade_name: string
           updated_at?: string
           whatsapp_phone_e164: string
+          store_enabled?: boolean
+          store_ordering_policy?: string
+          store_checkout_whatsapp_enabled?: boolean
+          store_checkout_online_enabled?: boolean
         }
         Update: {
           address?: string
@@ -1427,6 +1504,10 @@ export type Database = {
           trade_name?: string
           updated_at?: string
           whatsapp_phone_e164?: string
+          store_enabled?: boolean
+          store_ordering_policy?: string
+          store_checkout_whatsapp_enabled?: boolean
+          store_checkout_online_enabled?: boolean
         }
         Relationships: [
           {
@@ -1493,6 +1574,133 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      set_online_checkout_preference: {
+        Args: {
+          p_attempt_id: string
+          p_preference_id: string
+          p_checkout_url: string
+          p_lease_id: string
+        }
+        Returns: Json
+      }
+      save_product_family: {
+        Args: {
+          p_restaurant_id: string
+          p_family: Json
+          p_variants: Json
+        }
+        Returns: Json
+      }
+      save_payment_oauth_state: {
+        Args: {
+          p_state_hash: string
+          p_encrypted_payload: string
+        }
+        Returns: undefined
+      }
+      save_payment_account: {
+        Args: {
+          p_restaurant_id: string
+          p_provider_user_id: string
+          p_encrypted_credentials: string
+          p_expires_at: string
+          p_activate?: boolean
+        }
+        Returns: Json
+      }
+      reconcile_online_payment: {
+        Args: {
+          p_attempt_id: string
+          p_payment_id: string
+          p_status: string
+          p_amount_cents: number
+          p_currency: string
+          p_provider_updated_at: string
+          p_provider_data?: Json
+        }
+        Returns: Json
+      }
+      mark_online_reconciled: {
+        Args: {
+          p_attempt_id: string
+        }
+        Returns: undefined
+      }
+      list_online_reconciliation: {
+        Args: {
+          p_limit?: number
+        }
+        Returns: Json
+      }
+      get_public_catalog: {
+        Args: {
+          p_restaurant_slug: string
+          p_channel?: string
+        }
+        Returns: Json
+      }
+      get_payment_connection: {
+        Args: {
+          p_restaurant_id: string
+        }
+        Returns: Json
+      }
+      get_payment_account: {
+        Args: {
+          p_restaurant_id?: string
+          p_provider_user_id?: string
+        }
+        Returns: Json
+      }
+      get_online_payment_attempt: {
+        Args: {
+          p_attempt_id: string
+        }
+        Returns: Json
+      }
+      get_online_checkout_status: {
+        Args: {
+          p_action_id: string
+          p_token_hash: string
+        }
+        Returns: Json
+      }
+      expire_online_reservations: {
+        Args: {
+          p_before?: string
+          p_limit?: number
+        }
+        Returns: number
+      }
+      disconnect_payment_account: {
+        Args: {
+          p_restaurant_id: string
+        }
+        Returns: Json
+      }
+      consume_payment_oauth_state: {
+        Args: {
+          p_state_hash: string
+        }
+        Returns: Json
+      }
+      begin_online_checkout: {
+        Args: {
+          p_request: Json
+          p_ip_hash: string
+          p_phone_hash: string
+          p_client_event_token_hash: string
+          p_status_token_hash: string
+        }
+        Returns: Json
+      }
+      acquire_payment_account_refresh: {
+        Args: {
+          p_restaurant_id: string
+          p_expected_expires_at: string
+        }
+        Returns: boolean
+      }
       begin_inventory_count: {
         Args: {
           p_operation_id: string

@@ -48,6 +48,8 @@ export interface QuantityPrice {
 }
 
 export interface PublicProduct {
+  family?: { id: string; name: string; description: string; imagePath: string | null; axes: string[] } | null | undefined
+  variantAttributes?: Record<string, string> | undefined
   id: string
   categoryId: string
   code: string
@@ -96,6 +98,7 @@ export interface SpecialHour {
 }
 
 export interface PublicPaymentMethod {
+  provider?: 'mercadopago' | null | undefined
   id: string
   code: string
   name: string
@@ -122,6 +125,10 @@ export interface PublicDeliveryZone {
 }
 
 export interface PublicRestaurant {
+  channel?: 'menu' | 'store' | undefined
+  acceptsOrders?: boolean | undefined
+  storeCheckoutWhatsappEnabled?: boolean | undefined
+  storeCheckoutOnlineEnabled?: boolean | undefined
   id: string
   name: string
   tradeName: string
@@ -224,6 +231,8 @@ export interface AdminOrder {
 }
 
 export interface OrderItemSnapshot {
+  family_name_snapshot?: string | null
+  variant_attributes_snapshot?: Record<string, string>
   id: string
   order_id: string
   product_name_snapshot: string

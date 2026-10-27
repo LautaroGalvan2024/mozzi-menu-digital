@@ -637,6 +637,13 @@ try {
   if ($turnstileEnabled) {
     $localEdgeValues.TURNSTILE_SECRET_KEY = $TurnstileSecretSecure
   }
+  # Keep configured payment secrets separate between local and production.
+  foreach ($paymentName in @('MERCADOPAGO_CLIENT_ID', 'MERCADOPAGO_CLIENT_SECRET', 'MERCADOPAGO_ENCRYPTION_KEY', 'MERCADOPAGO_WEBHOOK_SECRET', 'MERCADOPAGO_MODE')) {
+    $productionPaymentValue = Get-ExistingEnvironmentValue -Path (Join-Path $ProjectRoot '.env.edge.production') -Name $paymentName
+    if ($productionPaymentValue) { $edgeValues[$paymentName] = $productionPaymentValue }
+    $localPaymentValue = Get-ExistingEnvironmentValue -Path (Join-Path $ProjectRoot '.env.edge.local') -Name $paymentName
+    if ($localPaymentValue) { $localEdgeValues[$paymentName] = $localPaymentValue }
+  }
   $expectedEdgeSecretNames = @($edgeValues.Keys)
 
   Write-EnvironmentFile -RelativePath '.env.local' -Values $frontendValues

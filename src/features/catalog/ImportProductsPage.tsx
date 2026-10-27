@@ -368,7 +368,7 @@ export function ImportProductsPage() {
 
   async function downloadTemplate() {
     downloadBlob(await importWorkbook({
-      Productos: [['nombre', 'categoria', 'precio', 'codigo', 'imagen_archivo'], ['Producto de ejemplo', 'General', '100.00', '', '']],
+      Productos: [['nombre', 'categoria', 'precio', 'codigo', 'imagen_archivo', 'familia_codigo', 'familia_nombre', 'atributo_1', 'valor_1', 'atributo_2', 'valor_2', 'atributo_3', 'valor_3'], ['Producto de ejemplo', 'General', '100.00', '', '']],
       GruposOpciones: [['producto_fila', 'producto_codigo', 'grupo_codigo', 'nombre', 'obligatorio', 'minimo', 'maximo', 'orden', 'activo']],
       Opciones: [['grupo_codigo', 'opcion_codigo', 'nombre', 'precio_adicional', 'orden', 'activo']],
       Instrucciones: [
@@ -379,6 +379,9 @@ export function ImportProductsPage() {
         ['Campos omitidos', 'No se modifican. Una descripción o promoción presente pero vacía se borra; omití su columna para conservarla.'],
         ['Grupos sin SKU', 'producto_fila refiere al número de fila de Productos, por ejemplo 2. grupo_codigo debe ser único en el archivo.'],
         ['Imágenes', 'imagen_archivo indica la ruta dentro del ZIP opcional.'],
+        ['Variantes (opcional)', 'Completá familia_codigo y familia_nombre. Repetí ambos en todas las variantes. Cada fila sigue siendo un SKU con su propio precio y stock.'],
+        ['Atributos', 'Ejemplo: atributo_1 = Modelo, valor_1 = iPhone 15, atributo_2 = Color, valor_2 = Negro. Hasta tres atributos; no repitas una combinación.'],
+        ['Familias existentes', 'Conservá exactamente su nombre, categoría y nombres de atributos. Las columnas vacías no desagrupan productos; usá el panel para cambiar una ficha.'],
       ],
     }), 'importacion-productos.xlsx')
   }

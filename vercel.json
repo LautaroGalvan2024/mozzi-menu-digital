@@ -13,6 +13,28 @@
       "destination": "/api/menu-preview?slug=:restaurantSlug"
     },
     {
+      "source": "/t/:restaurantSlug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|whatsapp|facebookexternalhit|FacebookExternalHit|Facebot|facebot|meta-externalagent|Meta-ExternalAgent).*"
+        }
+      ],
+      "destination": "/api/menu-preview?slug=:restaurantSlug&channel=store"
+    },
+    {
+      "source": "/t/:restaurantSlug/producto/:productId",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|whatsapp|facebookexternalhit|FacebookExternalHit|Facebot|facebot|meta-externalagent|Meta-ExternalAgent).*"
+        }
+      ],
+      "destination": "/api/menu-preview?slug=:restaurantSlug&channel=store&product=:productId"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

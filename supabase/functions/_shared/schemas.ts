@@ -148,6 +148,8 @@ const fulfillmentSchema = z.object({
 });
 
 export const createOrderSchema = z.object({
+  channel: z.enum(["menu", "store"]).optional(),
+  checkoutMode: z.enum(["whatsapp", "online"]).optional(),
   restaurantSlug: z.string().max(100).transform(normalizeSlug).refine(
     (value) => /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(value),
     "Restaurante inválido.",
@@ -202,6 +204,22 @@ const importProductSchema = z.object({
   featured: z.boolean().optional(),
   sortOrder: sortOrder.optional(),
   imageFilename: optionalSingleLine(255),
+  familyCode: z.string().trim().min(1).max(80).refine((value) => !containsControls(value))
+    .optional(),
+  familyName: singleLine(120).optional(),
+  variantAttributes: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(80))
+    .refine(
+      (attributes) => {
+        const axes = Object.keys(attributes);
+        return axes.length >= 1 && axes.length <= 3 && new Set(axes.map((axis) =>
+              axis.toLocaleLowerCase("es")
+            )).size === axes.length &&
+          Object.entries(attributes).every(([axis, value]) =>
+            !containsControls(axis) && !containsControls(value)
+          );
+      },
+      "Usá entre uno y tres atributos diferentes, con valores válidos.",
+    ).optional(),
 }).strict().refine(
   (value) => !value.promotionalPriceCents || value.promotionalPriceCents <= value.basePriceCents,
   {
@@ -213,6 +231,16 @@ const importProductSchema = z.object({
     !value.promotionStartsAt || !value.promotionEndsAt ||
     value.promotionStartsAt < value.promotionEndsAt,
   { path: ["promotionEndsAt"], message: "El fin de promoción debe ser posterior al inicio." },
+).refine(
+  (value) =>
+    [value.familyCode, value.familyName, value.variantAttributes].every((field) =>
+      field === undefined
+    ) ||
+    Boolean(value.familyCode && value.familyName && value.variantAttributes),
+  {
+    path: ["variantAttributes"],
+    message: "La variante requiere código y nombre de familia, y sus atributos.",
+  },
 );
 
 const importGroupSchema = z.object({

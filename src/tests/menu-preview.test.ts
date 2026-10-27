@@ -29,6 +29,18 @@ function publicMenuPayload(paths: { coverPath?: string | null; logoPath?: string
 }
 
 describe('menu preview metadata', () => {
+  it('reads the store channel and shares a product canonical without falling back to the menu', async () => {
+    const productId = '10000000-0000-4000-8000-000000000001'
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...publicMenuPayload(), categories: [{ products: [{ id: productId, name: 'Funda roja', description: 'Para iPhone', imagePath: null }] }] }), { status: 200 }))
+    const response = await handleMenuPreviewRequest(new Request(`https://menu.example.com/api/menu-preview?slug=la-rotiseria&channel=store&product=${productId}`), { environment, fetch })
+    const html = await response.text()
+    expect(response.status).toBe(200)
+    expect(String(fetch.mock.calls[0]![0])).toContain('/rpc/get_public_catalog')
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ p_restaurant_slug: 'la-rotiseria', p_channel: 'store' })
+    expect(html).toContain(`/t/la-rotiseria/producto/${productId}`)
+    expect(html).toContain('Funda roja · La Rotisería')
+    expect(html).not.toContain('Abrir menú digital')
+  })
   it('validates slugs with the same public restaurant contract', () => {
     expect(isValidRestaurantSlug('la-rotiseria')).toBe(true)
     expect(isValidRestaurantSlug('A-Rotiseria')).toBe(false)

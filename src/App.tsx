@@ -9,6 +9,8 @@ import { RequireRestaurantAdmin } from './features/auth/RequireRestaurantAdmin'
 const LandingPage=lazy(()=>import('./pages/LandingPage').then((module)=>({default:module.LandingPage})))
 const NotFoundPage=lazy(()=>import('./pages/NotFoundPage').then((module)=>({default:module.NotFoundPage})))
 const PublicMenuPage=lazy(()=>import('./features/public-menu/PublicMenuPage').then((module)=>({default:module.PublicMenuPage})))
+const PublicStorePage=lazy(()=>import('./features/store/PublicStorePage').then((module)=>({default:module.PublicStorePage})))
+const PaymentStatusPage=lazy(()=>import('./features/store/PaymentStatusPage').then((module)=>({default:module.PaymentStatusPage})))
 const CartPage=lazy(()=>import('./features/cart/CartPage').then((module)=>({default:module.CartPage})))
 const CheckoutPage=lazy(()=>import('./features/checkout/CheckoutPage').then((module)=>({default:module.CheckoutPage})))
 const OrderGeneratedPage=lazy(()=>import('./features/checkout/OrderGeneratedPage').then((module)=>({default:module.OrderGeneratedPage})))
@@ -49,6 +51,12 @@ const router=createBrowserRouter([
   {path:'/r/:restaurantSlug/carrito',element:<CartPage/>},
   {path:'/r/:restaurantSlug/checkout',element:<CheckoutPage/>},
   {path:'/r/:restaurantSlug/pedido-generado',element:<OrderGeneratedPage/>},
+  {path:'/t/:restaurantSlug',element:<PublicStorePage/>},
+  {path:'/t/:restaurantSlug/producto/:productId',element:<PublicStorePage/>},
+  {path:'/t/:restaurantSlug/carrito',element:<CartPage/>},
+  {path:'/t/:restaurantSlug/checkout',element:<CheckoutPage/>},
+  {path:'/t/:restaurantSlug/pedido-generado',element:<OrderGeneratedPage/>},
+  {path:'/t/:restaurantSlug/pago',element:<PaymentStatusPage/>},
   {path:'/login',element:<LoginPage/>},
   {path:'/auth/continue',element:<AuthenticatedEntryPage/>},
   {path:'/auth/callback',element:<AuthCallbackPage/>},

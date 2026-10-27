@@ -1,0 +1,29 @@
+name: Payment reconciliation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-maintenance
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: vars.PAYMENT_MAINTENANCE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Reconcile payments and expire stock holds
+        run: node scripts/reconcile-payments.mjs
+        env:
+          MOZZI_SUPABASE_URL: ${{ secrets.MOZZI_SUPABASE_URL }}
+          MOZZI_MAINTENANCE_SECRET: ${{ secrets.MOZZI_MAINTENANCE_SECRET }}

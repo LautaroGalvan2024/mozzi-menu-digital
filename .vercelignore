@@ -1,0 +1,23 @@
+# Deployment builds use Vercel environment variables exclusively.
+.env
+.env.*
+**/.env
+**/.env.*
+*.local
+**/*.local
+/.git/
+/.vercel/
+/.codex*
+/node_modules/
+/dist/
+/dist-ssr/
+/supabase/
+/scripts/
+/docs/
+/e2e/
+/playwright-report/
+/test-results/
+/coverage/
+*.log
+*.dump
+**/*.dump

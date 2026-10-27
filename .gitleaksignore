@@ -1,0 +1,7 @@
+# Fixed UUID idempotency identifiers in the synthetic commerce pilot seed.
+# These four findings are not authentication secrets. Keep the scan and its
+# generic-api-key rule enabled for every other commit, file and line.
+1735e9b372c70956f5431185e33f2c92823e4db4:scripts/catalog-seed/seed-commerce-pilot.sql:generic-api-key:11
+1735e9b372c70956f5431185e33f2c92823e4db4:scripts/catalog-seed/seed-commerce-pilot.sql:generic-api-key:12
+1735e9b372c70956f5431185e33f2c92823e4db4:scripts/catalog-seed/seed-commerce-pilot.sql:generic-api-key:13
+1735e9b372c70956f5431185e33f2c92823e4db4:scripts/catalog-seed/seed-commerce-pilot.sql:generic-api-key:146

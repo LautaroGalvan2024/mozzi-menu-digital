@@ -63,6 +63,13 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(screen.queryByRole('button', { name: 'Registrar movimiento' })).not.toBeInTheDocument()
     expect(mocks.references).not.toHaveBeenCalled()
   })
+  it('shows automated payment holds without requiring a human actor', async () => {
+    mocks.inventory = { ...fixture(), operations: [{ id: externalOperation, kind: 'payment_hold', orderId: null, sourceOperationId: null, reason: 'Mercado Pago: payment_hold', actorUserId: null, actorName: null, createdAt: '2026-10-27T12:00:00Z', result: {}, movements: [] }] }
+    view()
+    expect(await screen.findByText('Reserva temporal de pago')).toBeVisible()
+    expect(screen.getByText('Sistema de pagos')).toBeVisible()
+    expect(screen.getByText('Arroz')).toBeVisible()
+  })
   it('shows the external-sale reference separately from its default reason using a tenant-scoped bounded read', async () => {
     mocks.inventory = historyFixture(); mocks.role = 'order_manager'; view()
     expect(await screen.findByText('Mostrador, comprobante 123')).toBeVisible()

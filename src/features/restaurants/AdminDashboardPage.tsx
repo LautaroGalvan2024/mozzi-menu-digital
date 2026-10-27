@@ -3,8 +3,6 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
-  Copy,
-  ExternalLink,
   MessageCircle,
   ShoppingBag,
   XCircle,
@@ -15,20 +13,19 @@ import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { MetricCard } from '../../components/MetricCard'
 import { PageHeader } from '../../components/PageHeader'
 import { SectionCard } from '../../components/SectionCard'
-import { env } from '../../lib/env'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { dayRangeInTimeZone } from '../../lib/timezone'
 import { useRestaurantScope } from './RestaurantScope'
 import { useRestaurant } from './useRestaurant'
 import { orderMetricsSchema } from '../orders/orderMetrics'
+import { PublicChannelsCard } from './PublicChannelsCard'
 
 export function AdminDashboardPage() {
   const scope = useRestaurantScope()
   const selected = scope.selected
   const queryClient = useQueryClient()
   const restaurantQuery = useRestaurant(selected?.id)
-  const [copied, setCopied] = useState(false)
   const [now] = useState(() => new Date())
   const range = useMemo(
     () => restaurantQuery.data ? dayRangeInTimeZone(now, restaurantQuery.data.timezone) : null,
@@ -73,7 +70,6 @@ export function AdminDashboardPage() {
 
   const restaurant = restaurantQuery.data
   const metrics = query.data
-  const publicUrl = `${env.appBaseUrl}/r/${selected.slug}`
   const stats = [
     ['Creados', metrics.generated, ClipboardList, 'amber'],
     ['WhatsApp abierto', metrics.whatsappOpened, MessageCircle, 'orange'],
@@ -161,26 +157,7 @@ export function AdminDashboardPage() {
         </SectionCard>
       </section>
 
-      <SectionCard className="mt-4" title="Tu menú público" description="Compartilo con tus clientes o revisalo en una nueva pestaña.">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="min-w-0 truncate rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600" title={publicUrl}>
-            {publicUrl}
-          </p>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button
-              className="button-secondary"
-              onClick={() => void navigator.clipboard.writeText(publicUrl).then(() => setCopied(true))}
-            >
-              <Copy className="h-4 w-4" aria-hidden />
-              {copied ? 'Copiado' : 'Copiar link'}
-            </button>
-            <a className="button-secondary" target="_blank" rel="noreferrer" href={publicUrl}>
-              <ExternalLink className="h-4 w-4" aria-hidden />
-              Abrir menú
-            </a>
-          </div>
-        </div>
-      </SectionCard>
+      <div className="mt-4"><PublicChannelsCard slug={selected.slug} menuEnabled={restaurant.public_menu_enabled} storeEnabled={restaurant.store_enabled} /></div>
     </>
   )
 }

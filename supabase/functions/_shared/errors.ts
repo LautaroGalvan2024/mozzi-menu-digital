@@ -17,6 +17,57 @@ type SafeDatabaseError = {
 };
 
 const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
+  CHECKOUT_CHANNEL_INVALID: {
+    status: 422,
+    code: "CHECKOUT_CHANNEL_INVALID",
+    message: "La modalidad de compra no es válida.",
+  },
+  CHECKOUT_MODE_DISABLED: {
+    status: 409,
+    code: "CHECKOUT_MODE_DISABLED",
+    message: "El comercio desactivó esta forma de compra. Volvé a la tienda.",
+  },
+  ONLINE_CHECKOUT_NOT_READY: {
+    status: 409,
+    code: "ONLINE_CHECKOUT_NOT_READY",
+    message: "El comercio todavía no está listo para recibir pagos online.",
+  },
+  ONLINE_AMOUNT_INVALID: {
+    status: 422,
+    code: "ONLINE_AMOUNT_INVALID",
+    message: "El importe del pago online debe ser mayor que cero.",
+  },
+  PAYMENT_ATTEMPT_EXPIRED: {
+    status: 409,
+    code: "PAYMENT_ATTEMPT_EXPIRED",
+    message: "Esta compra venció. Revisá el estado del pago antes de iniciar otra.",
+  },
+  PAYMENT_STATUS_FORBIDDEN: {
+    status: 404,
+    code: "PAYMENT_STATUS_UNAVAILABLE",
+    message: "El enlace de esta compra venció o no está disponible.",
+  },
+  PAYMENT_ACCOUNT_FORBIDDEN: {
+    status: 403,
+    code: "FORBIDDEN",
+    message: "No tenés permisos para administrar esta cuenta.",
+  },
+  PAYMENT_ACCOUNT_CHANGE_REQUIRES_REVIEW: {
+    status: 409,
+    code: "PAYMENT_ACCOUNT_CHANGE_REQUIRES_REVIEW",
+    message:
+      "Hay compras vinculadas a la cuenta anterior. Reconectá esa cuenta para conservar la conciliación.",
+  },
+  PAYMENT_LEASE_CONFLICT: {
+    status: 503,
+    code: "PAYMENT_PREPARING",
+    message: "El pago se está preparando. Reintentá esta misma compra.",
+  },
+  OAUTH_STATE_INVALID: {
+    status: 400,
+    code: "OAUTH_STATE_INVALID",
+    message: "La conexión venció o ya se utilizó. Iniciala nuevamente desde el panel.",
+  },
   INVENTORY_PAUSED: {
     status: 409,
     code: "INVENTORY_PAUSED",

@@ -2,6 +2,39 @@ import { describe,expect,it } from 'vitest'
 import { parseImportSheets } from '../lib/import-products'
 
 describe('catalog import validation',()=>{
+  it('groups variants by stable family code and keeps physical rows and SKUs', () => {
+    const result = parseImportSheets({ Productos: [
+      ['codigo', 'nombre', 'categoria', 'precio', 'familia_codigo', 'familia_nombre', 'atributo_1', 'valor_1', 'atributo_2', 'valor_2'],
+      ['F-15-N', 'Funda negra', 'Fundas', '2000', 'silicona', 'Funda de silicona', 'Modelo', 'iPhone 15', 'Color', 'Negro'],
+      ['F-15-R', 'Funda roja', 'Fundas', '2100', 'silicona', 'Funda de silicona', 'Color', 'Rojo', 'Modelo', 'iPhone 15'],
+      ['CABLE', 'Cable', 'Accesorios', '1000', '', '', '', '', '', ''],
+    ] })
+    expect(result.errors).toEqual([])
+    expect(result.products[0]).toMatchObject({ code: 'F-15-N', familyCode: 'silicona', familyName: 'Funda de silicona', variantAttributes: { Modelo: 'iPhone 15', Color: 'Negro' } })
+    expect(result.products[1]?.basePriceCents).toBe(210000)
+    expect(result.products[2]).not.toHaveProperty('familyCode')
+    expect(result.products[2]).not.toHaveProperty('variantAttributes')
+  })
+  it('rejects duplicate variant combinations regardless of attribute column order', () => {
+    const result = parseImportSheets({ Productos: [
+      ['nombre', 'categoria', 'precio', 'familia_codigo', 'familia_nombre', 'atributo_1', 'valor_1', 'atributo_2', 'valor_2'],
+      ['Uno', 'Fundas', 100, 'F', 'Funda', 'Modelo', '15', 'Color', 'Negro'],
+      ['Dos', 'Fundas', 100, 'f', 'Funda', 'Color', 'Negro', 'Modelo', '15'],
+    ] })
+    expect(result.errors.join(' ')).toMatch(/combinación de atributos duplicada/)
+  })
+  it('requires consistent families and complete distinct attributes before importing', () => {
+    const result = parseImportSheets({ Productos: [
+      ['nombre', 'categoria', 'precio', 'familia_codigo', 'familia_nombre', 'atributo_1', 'valor_1', 'atributo_2', 'valor_2'],
+      ['Uno', 'Fundas', 100, 'F', 'Funda', 'Color', 'Negro', '', ''],
+      ['Dos', 'Otra', 100, 'F', 'Funda', 'Color', 'Rojo', '', ''],
+      ['Tres', 'Fundas', 100, 'F', '', 'Color', 'Azul', '', ''],
+      ['Cuatro', 'Fundas', 100, 'F', 'Funda', 'Color', 'Negro', 'color', 'Azul'],
+    ] })
+    expect(result.products).toHaveLength(2)
+    expect(result.errors.join(' ')).toMatch(/mismo nombre de familia, categoría y atributos/)
+    expect(result.errors.filter((error) => error.includes('completá familia_codigo'))).toHaveLength(2)
+  })
   it('rejects excessive decimal precision in numeric Excel cells instead of rounding it', () => {
     const result = parseImportSheets({ Productos: [['nombre', 'categoria', 'precio'], ['Uno', 'Cat', 1.234], ['Dos', 'Cat', '1,234.56']] })
     expect(result.products).toHaveLength(0)

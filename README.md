@@ -1,6 +1,6 @@
 # Mozzi Menu
 
-Menú digital multi-restaurante con paneles administrativos, checkout por WhatsApp e historial de pedidos en Supabase. La aplicación principal es una SPA estática; una Vercel Function genera únicamente la vista previa Open Graph de cada restaurante. Supabase concentra Auth, PostgreSQL, RLS, Storage, Edge Functions, RPC y Realtime.
+Menú digital y tienda online para múltiples comercios, con catálogo compartido, variantes, inventario, pedidos por WhatsApp y Checkout Pro de Mercado Pago. El menú conserva `/r/:slug` y la tienda usa `/t/:slug`. La aplicación principal es una SPA estática; una Vercel Function genera las vistas previas Open Graph. Supabase concentra Auth, PostgreSQL, RLS, Storage, Edge Functions, RPC y Realtime. Ver [configuración y operación de la tienda](docs/commerce.md).
 
 El diseño parte de tres reglas:
 

@@ -1,3 +1,4 @@
+import { commercePath, useCommerceChannel, type CommerceChannel } from '../../lib/commerce-channel'
 import { CheckCircle2, Clipboard, ExternalLink } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
@@ -11,16 +12,17 @@ import { useCart } from '../cart/CartProvider'
 
 export function OrderGeneratedPage() {
   const { restaurantSlug = '' } = useParams()
-  return <OrderConfirmation key={restaurantSlug} slug={restaurantSlug} />
+  const channel = useCommerceChannel()
+  return <OrderConfirmation key={`${restaurantSlug}:${channel}`} slug={restaurantSlug} channel={channel} />
 }
 
-function OrderConfirmation({ slug }: { slug: string }) {
+function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceChannel }) {
   const location = useLocation()
   const navigate = useNavigate()
   const cart = useCart()
   const [initial] = useState(() => generatedOrderSchema.safeParse(location.state))
   const [generated, setGenerated] = useState(() => initial.success ? initial.data : null)
-  const [reference] = useState(() => readOrderRecovery(slug))
+  const [reference] = useState(() => readOrderRecovery(slug, Date.now(), channel))
   const [recovering, setRecovering] = useState(!initial.success && Boolean(reference))
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [recoverable, setRecoverable] = useState(Boolean(reference))
@@ -49,8 +51,8 @@ function OrderConfirmation({ slug }: { slug: string }) {
   useEffect(() => { if (!initial.success && reference) void recover() }, [initial.success, reference, recover])
   useEffect(() => {
     if (!generated) return
-    setRecoverable(saveOrderRecovery(slug, generated))
-  }, [generated, slug])
+    setRecoverable(saveOrderRecovery(slug, generated, channel))
+  }, [generated, slug, channel])
   useEffect(() => {
     if (!generated) return
     // Recovery may happen after the customer started another cart; preserve it.
@@ -59,7 +61,7 @@ function OrderConfirmation({ slug }: { slug: string }) {
   }, [cart, generated, initial.success, location.pathname, location.state, navigate])
 
   if (recovering && !generated) return <LoadingScreen label="Recuperando la confirmación…" />
-  if (!generated) return <main className="page-shell py-16"><ErrorPanel title="Esta confirmación no está disponible">{recoveryError ?? 'El acceso temporal venció o no está guardado en este dispositivo. Revisá WhatsApp o consultá al comercio antes de generar otro pedido.'}<div className="mt-4 flex flex-wrap gap-3">{reference ? <button className="button-primary" disabled={recovering} onClick={() => void recover()}>Reintentar recuperación</button> : null}<Link className="button-secondary" to={`/r/${slug}`}>Volver al menú</Link></div></ErrorPanel></main>
+  if (!generated) return <main className="page-shell py-16"><ErrorPanel title="Esta confirmación no está disponible">{recoveryError ?? 'El acceso temporal venció o no está guardado en este dispositivo. Revisá WhatsApp o consultá al comercio antes de generar otro pedido.'}<div className="mt-4 flex flex-wrap gap-3">{reference ? <button className="button-primary" disabled={recovering} onClick={() => void recover()}>Reintentar recuperación</button> : null}<Link className="button-secondary" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div></ErrorPanel></main>
   const orderResult = generated
   const stillPending = ['generated', 'whatsapp_opened'].includes(orderResult.order.status)
   const priceChanged = orderResult.estimatedTotalCents !== undefined && orderResult.estimatedTotalCents !== orderResult.order.totalCents
@@ -99,7 +101,7 @@ function OrderConfirmation({ slug }: { slug: string }) {
     <div className="mt-7 grid gap-3">{stillPending ? <div className="grid gap-3 sm:grid-cols-2"><button className="button-primary min-h-14" disabled={opening || !canShare} onClick={() => void openWhatsapp()}>{opening ? 'Abriendo WhatsApp…' : <><ExternalLink className="h-5 w-5" aria-hidden />Abrir WhatsApp</>}</button><a className={`button-secondary min-h-14 ${canShare ? '' : 'pointer-events-none opacity-50'}`} aria-disabled={!canShare} href={canShare ? webUrl : undefined} tabIndex={canShare ? 0 : -1} target="_blank" rel="noopener noreferrer" onClick={() => { if (canShare) void registerWhatsappOpened() }}><ExternalLink className="h-5 w-5" aria-hidden />Abrir WhatsApp Web</a></div> : null}<button className="button-secondary" disabled={!canShare} onClick={() => void copy()}><Clipboard className="h-4 w-4" aria-hidden />{copied ? 'Mensaje copiado' : 'Copiar mensaje'}</button>{copyError ? <p className="form-error" role="alert">No pudimos copiar el mensaje. Abrí WhatsApp para continuar.</p> : null}
       {openingError ? <p className="form-error" role="alert">No pudimos abrir WhatsApp. Podés reintentar, usar WhatsApp Web o copiar el mensaje.</p> : null}
       <p className="text-xs text-stone-500">{recoverable ? 'Podés recuperar esta confirmación en este dispositivo hasta 30 minutos después de generarla. Los datos del pedido no se guardan en el navegador.' : 'La recuperación temporal no está disponible en este dispositivo. Copiá el mensaje antes de cerrar esta pantalla.'}</p>
-      {recoverable ? <button className="text-xs underline" onClick={() => { forgetOrderRecovery(slug); setRecoverable(false) }}>Quitar acceso guardado en este dispositivo</button> : null}
-      <Link className="mt-2 text-sm font-semibold text-stone-600 underline" to={`/r/${slug}`}>Volver al menú</Link></div>
+      {recoverable ? <button className="text-xs underline" onClick={() => { forgetOrderRecovery(slug, channel); setRecoverable(false) }}>Quitar acceso guardado en este dispositivo</button> : null}
+      <Link className="mt-2 text-sm font-semibold text-stone-600 underline" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div>
   </section></main>
 }

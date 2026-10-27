@@ -68,6 +68,7 @@ const productSchema = z.object({
   available: z.boolean(),
   featured: z.boolean(),
   sort_order: z.number().int(),
+  family_id: z.string().nullable().optional(),
 })
 const groupSchema = z.array(
   z.object({
@@ -532,13 +533,14 @@ export function ProductEditorPage() {
             </div>
             <label className="field">
               <span>Categoría</span>
-              <select value={draft.categoryId} onChange={(e) => patch('categoryId', e.target.value)}>
+              <select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={(e) => patch('categoryId', e.target.value)}>
                 {categories.data.map((category) => (
                   <option value={category.id} key={category.id}>
                     {category.name}
                   </option>
                 ))}
               </select>
+              {product.data?.product.family_id ? <small>La categoría se cambia desde la ficha de variantes en Productos.</small> : null}
             </label>
             <label className="field">
               <span>Orden</span>
