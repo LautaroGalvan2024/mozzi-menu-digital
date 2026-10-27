@@ -661,7 +661,7 @@ Deno.test("OAuth initiated in a different environment is rejected before exchang
   });
 });
 
-Deno.test("production deployment reconciles historical test payments using the pinned inactive connection", async () => {
+Deno.test("production reconciliation trusts test payment detail even when search incorrectly reports live mode", async () => {
   await withEnvironment(async () => {
     Deno.env.set("MERCADOPAGO_MODE", "production");
     const stored = { ...await encryptedAccount(false), isCurrent: false };
@@ -673,9 +673,17 @@ Deno.test("production deployment reconciles historical test payments using the p
       return name === "get_online_payment_attempt" ? attempt : true;
     });
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (_input, init) => {
+    const requests: string[] = [];
+    globalThis.fetch = (input, init) => {
+      requests.push(String(input));
       assertEquals(new Headers(init?.headers).get("Authorization"), "Bearer access-token-fixture");
-      return Promise.resolve(Response.json({ results: [providerPayment] }));
+      return Promise.resolve(
+        Response.json(
+          String(input).includes("/payments/search?")
+            ? { results: [{ ...providerPayment, live_mode: true }] }
+            : providerPayment,
+        ),
+      );
     };
     try {
       await reconcileAttempt(client, attempt);
@@ -689,6 +697,193 @@ Deno.test("production deployment reconciles historical test payments using the p
       "mark_online_reconciled",
     ]);
     assertEquals(calls[2]!.args.p_provider_data, { refundedCents: 0, liveMode: false, accountId });
+    assertEquals(requests.length, 2);
+    assertEquals(requests[1], "https://api.mercadopago.com/v1/payments/payment-fixture");
+  });
+});
+
+Deno.test("search cannot disguise a live payment as test when its authoritative detail is live", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount();
+    const { client, calls } = fakeAdmin((name) =>
+      name === "get_payment_account" ? stored : attempt
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (input) =>
+      Promise.resolve(
+        Response.json(
+          String(input).includes("/payments/search?")
+            ? { results: [{ ...providerPayment, live_mode: false }] }
+            : { ...providerPayment, live_mode: true },
+        ),
+      );
+    try {
+      await assertRejects(() => reconcileAttempt(client, attempt));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+  });
+});
+
+Deno.test("all payment details must match canonical order before any search result can credit money", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount();
+    const originalFetch = globalThis.fetch;
+    try {
+      for (
+        const patch of [
+          { transaction_amount: 99.99 },
+          { currency_id: "USD" },
+          { collector_id: "another-merchant" },
+          { external_reference: "31000000-0000-4000-8000-000000000002" },
+          { external_reference: "another-integration" },
+          { id: "wrong-detail-id" },
+          { status: "unsupported-financial-status" },
+          { live_mode: undefined },
+        ]
+      ) {
+        const { client, calls } = fakeAdmin((name) =>
+          name === "get_payment_account" ? stored : attempt
+        );
+        globalThis.fetch = (input) => {
+          const path = new URL(String(input)).pathname;
+          if (path === "/v1/payments/search") {
+            return Promise.resolve(Response.json({
+              results: [{ id: "valid-payment" }, { id: "invalid-payment" }],
+            }));
+          }
+          const detail = { ...providerPayment, id: path.split("/").at(-1)! };
+          return Promise.resolve(
+            Response.json(detail.id === "invalid-payment" ? { ...detail, ...patch } : detail),
+          );
+        };
+        await assertRejects(() => reconcileAttempt(client, attempt));
+        // Even the valid result remains unapplied if any detail in this batch is invalid.
+        assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("reconciliation deduplicates IDs and applies fully fetched details in actual chronological order", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount();
+    const details: Record<string, typeof providerPayment> = {
+      older: {
+        ...providerPayment,
+        id: "older",
+        status: "rejected",
+        date_last_updated: "2026-10-27T12:00:00Z",
+      },
+      newer: {
+        ...providerPayment,
+        id: "newer",
+        status: "approved",
+        date_last_updated: "2026-10-27T10:00:00-03:00",
+      },
+    };
+    const fetched: string[] = [];
+    const { client, calls } = fakeAdmin((name) => {
+      if (name === "get_payment_account") return stored;
+      if (name === "reconcile_online_payment") assertEquals(fetched.length, 2);
+      return name === "get_online_payment_attempt" ? attempt : true;
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/payments/search") {
+        return Promise.resolve(
+          Response.json({ results: [{ id: "newer" }, { id: "older" }, { id: "older" }] }),
+        );
+      }
+      const id = path.split("/").at(-1)!;
+      fetched.push(id);
+      return Promise.resolve(Response.json(details[id]));
+    };
+    try {
+      await reconcileAttempt(client, attempt);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(fetched.sort(), ["newer", "older"]);
+    assertEquals(
+      calls.filter((call) => call.name === "reconcile_online_payment").map((call) =>
+        call.args.p_payment_id
+      ),
+      ["older", "newer"],
+    );
+    assertEquals(calls.at(-1)!.name, "mark_online_reconciled");
+  });
+});
+
+Deno.test("provider pagination and oversized result sets fail before requesting details or changing money", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount();
+    const originalFetch = globalThis.fetch;
+    try {
+      for (
+        const response of [
+          { results: [{ id: "fixture" }], paging: { total: 101 } },
+          {
+            results: Array.from({ length: 101 }, (_, index) => ({ id: String(index) })),
+            paging: { total: 0 },
+          },
+        ]
+      ) {
+        let requests = 0;
+        const { client, calls } = fakeAdmin(() => stored);
+        globalThis.fetch = () => {
+          requests++;
+          return Promise.resolve(Response.json(response));
+        };
+        await assertRejects(() => reconcileAttempt(client, attempt));
+        assertEquals(requests, 1);
+        assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("payment detail requests have bounded concurrency and finish before applying the batch", async () => {
+  await withEnvironment(async () => {
+    const stored = await encryptedAccount();
+    let active = 0;
+    let maximum = 0;
+    let completed = 0;
+    const { client, calls } = fakeAdmin((name) => {
+      if (name === "get_payment_account") return stored;
+      if (name === "reconcile_online_payment") assertEquals(completed, 7);
+      return name === "get_online_payment_attempt" ? attempt : true;
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v1/payments/search") {
+        return Response.json({
+          results: Array.from({ length: 7 }, (_, index) => ({ id: `detail-${index}` })),
+        });
+      }
+      active++;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      completed++;
+      return Response.json({ ...providerPayment, id: path.split("/").at(-1)! });
+    };
+    try {
+      await reconcileAttempt(client, attempt);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(maximum, 3);
+    assertEquals(active, 0);
+    assertEquals(completed, 7);
+    assertEquals(calls.at(-1)!.name, "mark_online_reconciled");
   });
 });
 

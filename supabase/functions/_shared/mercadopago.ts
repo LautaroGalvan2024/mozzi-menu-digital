@@ -506,23 +506,31 @@ export async function beginPaymentCheckout(
   return { account, attempt };
 }
 
-export async function reconcileProviderPayment(
-  admin: SupabaseClient,
-  raw: unknown,
-  account: { accountId: string; restaurantId: string; providerUserId: string; liveMode: boolean },
+type PaymentAccountIdentity = {
+  accountId: string;
+  restaurantId: string;
+  providerUserId: string;
+  liveMode: boolean;
+};
+
+function assertProviderPaymentAccount(
+  payment: z.infer<typeof providerPaymentSchema>,
+  account: PaymentAccountIdentity,
 ) {
-  const payment = providerPaymentSchema.parse(raw);
   if (
     payment.collector_id !== account.providerUserId ||
     payment.live_mode !== account.liveMode
   ) throw new Error("Provider account/environment mismatch");
-  if (!z.string().uuid().safeParse(payment.external_reference).success) return null; // A different integration's payment.
-  const rawAttempt = await rpc(admin, "get_online_payment_attempt", {
-    p_attempt_id: payment.external_reference,
-  });
-  if (!rawAttempt) return null;
-  const attempt = paymentAttemptSchema.parse(rawAttempt);
+}
+
+function canonicalPaymentStatus(
+  payment: z.infer<typeof providerPaymentSchema>,
+  attempt: z.infer<typeof paymentAttemptSchema>,
+  account: PaymentAccountIdentity,
+) {
+  assertProviderPaymentAccount(payment, account);
   if (
+    payment.external_reference !== attempt.attemptId ||
     attempt.restaurantId !== account.restaurantId ||
     attempt.accountId !== account.accountId ||
     attempt.liveMode !== account.liveMode ||
@@ -547,6 +555,23 @@ export async function reconcileProviderPayment(
   if (payment.status === "approved" && (payment.transaction_amount_refunded ?? 0) > 0) {
     status = "partially_refunded";
   }
+  return status;
+}
+
+export async function reconcileProviderPayment(
+  admin: SupabaseClient,
+  raw: unknown,
+  account: PaymentAccountIdentity,
+) {
+  const payment = providerPaymentSchema.parse(raw);
+  assertProviderPaymentAccount(payment, account);
+  if (!z.string().uuid().safeParse(payment.external_reference).success) return null; // A different integration's payment.
+  const rawAttempt = await rpc(admin, "get_online_payment_attempt", {
+    p_attempt_id: payment.external_reference,
+  });
+  if (!rawAttempt) return null;
+  const attempt = paymentAttemptSchema.parse(rawAttempt);
+  const status = canonicalPaymentStatus(payment, attempt, account);
   return await rpc(admin, "reconcile_online_payment", {
     p_attempt_id: attempt.attemptId,
     p_payment_id: payment.id,
@@ -571,8 +596,9 @@ export async function reconcileAttempt(
     throw new Error("Payment attempt account/environment mismatch");
   }
   const search = z.object({
-    results: z.array(providerPaymentSchema),
-    paging: z.object({ total: z.number() }).optional(),
+    // Search is an index only: its live_mode can disagree with the payment detail.
+    results: z.array(z.object({ id: providerPaymentSchema.shape.id })).max(100),
+    paging: z.object({ total: z.number().int().nonnegative() }).optional(),
   }).parse(
     await providerRequest(
       `/v1/payments/search?external_reference=${
@@ -584,10 +610,34 @@ export async function reconcileAttempt(
   if ((search.paging?.total ?? search.results.length) > 100) {
     throw new Error("Payment reconciliation requires pagination");
   }
+  const ids = [...new Set(search.results.map((result) => result.id))];
+  const payments: z.infer<typeof providerPaymentSchema>[] = [];
+  let next = 0;
+  let failed = false;
+  let failure: unknown;
+  await Promise.all(Array.from({ length: Math.min(3, ids.length) }, async () => {
+    while (!failed && next < ids.length) {
+      const id = ids[next++]!;
+      try {
+        const payment = providerPaymentSchema.parse(
+          await providerRequest(`/v1/payments/${encodeURIComponent(id)}`, account.accessToken),
+        );
+        if (payment.id !== id) throw new Error("Provider payment detail ID mismatch");
+        // Validate the whole batch before applying any financial event. A search
+        // result cannot redirect reconciliation to a different order or environment.
+        canonicalPaymentStatus(payment, attempt, account);
+        payments.push(payment);
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+    }
+  }));
+  if (failed) throw failure;
   // Oldest first ensures later financial events are applied after earlier attempts.
   for (
-    const payment of [...search.results].sort((a, b) =>
-      a.date_last_updated.localeCompare(b.date_last_updated)
+    const payment of payments.sort((a, b) =>
+      Date.parse(a.date_last_updated) - Date.parse(b.date_last_updated)
     )
   ) await reconcileProviderPayment(admin, payment, account);
   await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId });

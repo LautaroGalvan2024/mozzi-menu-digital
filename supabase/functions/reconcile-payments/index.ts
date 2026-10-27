@@ -6,6 +6,7 @@ import { jsonResponse, readJson, safeLog } from "../_shared/http.ts";
 import {
   createAdminClient,
   paymentAttemptSchema,
+  providerLiveMode,
   reconcileAttempt,
   rpc,
 } from "../_shared/mercadopago.ts";
@@ -56,10 +57,14 @@ Deno.serve(async (request) => {
       p_before: new Date().toISOString(),
       p_limit: input.limit,
     });
-    safeLog("info", "payment.maintenance", requestId, { reconciled, failed });
+    const environment = providerLiveMode() ? "production" : "test";
+    safeLog("info", "payment.maintenance", requestId, { reconciled, failed, environment });
     // Failed runs remain visible to the scheduler; reservations expire independently,
     // and a subsequently approved late payment must reacquire stock or require refund.
-    return jsonResponse({ reconciled, failed, expired, requestId }, failed ? 503 : 200);
+    return jsonResponse(
+      { reconciled, failed, expired, environment, requestId },
+      failed ? 503 : 200,
+    );
   } catch (error) {
     const failure = toApiError(error);
     safeLog("error", "payment.maintenance_failed", requestId, { code: failure.code });
