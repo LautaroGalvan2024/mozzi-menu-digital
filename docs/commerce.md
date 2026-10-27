@@ -47,6 +47,12 @@ Una aprobación tardía vuelve a intentar reservar; si no hay stock, queda para 
 
 Desactivar nuevos cobros conserva las credenciales privadas necesarias para conciliar compras anteriores. Cambiar de cuenta cobradora después de generar compras requiere revisión; reconectar la misma cuenta está permitido.
 
+## Contacto después del pago
+
+La confirmación de un pago aprobado indica que el comercio se comunicará por WhatsApp al teléfono ingresado en el checkout. Si la compra se realizó fuera del horario de atención, el mensaje aclara que el contacto será al retomar la atención. Los pedidos cancelados, entregados, pendientes de pago o con devoluciones muestran indicaciones propias.
+
+Pedidos incluye una acción de WhatsApp en la tabla, las tarjetas móviles y el detalle. Abre el chat del cliente con el nombre del comercio, el número de pedido y un borrador para revisar y enviar. En pedidos activos con pago online aprobado, el texto informa recepción y preparación; los demás estados usan un contacto neutral. Abrir el enlace no envía el mensaje, no acepta el pedido y no modifica el stock. La acción se oculta si el teléfono no tiene un formato internacional válido.
+
 ## Mantenimiento y activación
 
 Se incluye `.github/workflows/payment-maintenance.yml`, desactivado hasta configurar la variable del repositorio `PAYMENT_MAINTENANCE_ENABLED=true`. Requiere los secretos `MOZZI_SUPABASE_URL` y `MOZZI_MAINTENANCE_SECRET` (el mismo `MAINTENANCE_SECRET` de Edge). Ejecuta conciliación y vencimiento en lotes de 10 cada cinco minutos. Configurar notificaciones de fallos de Actions y verificar una ejecución manual antes de habilitar cobros. La cadencia de GitHub puede demorarse: el backend siempre valida el vencimiento al comprar; el stock se libera al procesar mantenimiento.

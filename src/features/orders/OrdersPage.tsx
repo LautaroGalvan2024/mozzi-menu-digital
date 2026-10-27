@@ -1,4 +1,4 @@
-import { CommerceOrderStatus } from './CommerceOrderStatus'
+import { AdminOrderStatus } from './CommerceOrderStatus'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Eye, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -14,7 +14,7 @@ import { dateInTimeZone, dateRangeForLocalDates } from '../../lib/timezone'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { adminOrderSchema, statusLabel, type AdminOrderRow } from './orderSchemas'
-import { StatusPill } from './OrderStatus'
+import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { orderCommercialReport } from './inventoryOrder'
 
 const PAGE_SIZE = 25
@@ -120,6 +120,7 @@ export function OrdersPage() {
   }
   if (restaurant.isLoading || query.isLoading || !datesReady) return <LoadingScreen />
   const rows = dateError ? [] : (query.data?.rows ?? [])
+  const businessName = restaurant.data?.trade_name || restaurant.data?.name || scope.selected.name
 
   async function exportCsv() {
     if (!scope.selected || !restaurant.data || dateError) return
@@ -181,10 +182,11 @@ export function OrdersPage() {
       <PageHeader
         eyebrow="Tiempo real"
         title="Pedidos"
-        description="Historial de pedidos, entregas, correcciones y devoluciones. El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
+        description="Consultá tus pedidos y contactá a cada cliente."
         actions={
           <button
             className="button-secondary"
+            title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
             disabled={!rows.length || exporting || Boolean(dateError)}
             onClick={() => void exportCsv()}
           >
@@ -198,8 +200,8 @@ export function OrdersPage() {
           {exportError}
         </p>
       ) : null}
-      <FilterBar className="mb-5 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <label className="field min-w-0 md:col-span-2">
+      <FilterBar className="mb-5 grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-6">
+        <label className="field col-span-2 min-w-0">
           <span>Buscar</span>
           <span className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
@@ -291,7 +293,7 @@ export function OrdersPage() {
                   <th>Modalidad</th>
                   <th className="text-right">Total</th>
                   <th>Creado</th>
-                  <th><span className="sr-only">Abrir</span></th>
+                  <th><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -299,11 +301,11 @@ export function OrdersPage() {
                   <tr key={row.id}>
                     <td className="font-display font-bold text-stone-950">{row.display_number}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
-                    <td><StatusPill status={row.status} outcome={row.inventory_outcome} /><CommerceOrderStatus channel={row.channel} checkoutMode={row.checkout_mode} paymentStatus={row.payment_status} pendingPreparation={row.status === 'generated'} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
+                    <td><AdminOrderStatus order={row} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
-                    <td><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></td>
+                    <td><div className="flex items-center justify-end gap-1"><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -311,14 +313,14 @@ export function OrdersPage() {
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:hidden">
             {rows.map((row) => (
-              <Link
-                to={`/admin/pedidos/${row.id}`}
+              <article
                 className="surface-card group block p-4 transition duration-150 hover:border-orange-300 hover:shadow-md active:translate-y-px"
                 key={row.id}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <strong className="font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
-                  <StatusPill status={row.status} outcome={row.inventory_outcome} /><CommerceOrderStatus channel={row.channel} checkoutMode={row.checkout_mode} paymentStatus={row.payment_status} pendingPreparation={row.status === 'generated'} />
+                <Link to={`/admin/pedidos/${row.id}`} className="block" aria-label={`Ver ${row.display_number}`}>
+                <div className="flex flex-col items-start gap-1">
+                  <strong className="whitespace-nowrap font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
+                  <AdminOrderStatus order={row} />
                 </div>
                 <div className="mt-4 min-w-0">
                   {row.replaces_order_id?<p className="mb-1 text-xs text-amber-800">Pedido de reemplazo · misma operación comercial</p>:null}
@@ -334,7 +336,9 @@ export function OrdersPage() {
                     {formatMoney(row.total_cents, row.currency_code)}
                   </strong>
                 </div>
-              </Link>
+                </Link>
+                <div className="mt-3 flex justify-end"><OrderWhatsAppAction order={row} businessName={businessName} showLabel /></div>
+              </article>
             ))}
           </div>
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

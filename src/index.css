@@ -67,6 +67,7 @@ button:disabled { cursor: not-allowed; }
   .choice-card small { @apply mt-0.5 text-stone-500; }
   .choice-card-selected { @apply border-orange-500 bg-orange-50 ring-2 ring-orange-100; }
   .choice-card-selected > svg { @apply text-orange-700; }
+  .choice-card:has(input:focus-visible) { outline: 2px solid #c2410c; outline-offset: 3px; }
   .quantity-button { @apply grid h-12 w-12 place-items-center hover:bg-stone-100; }
   .quantity-button svg { @apply h-4 w-4; }
   .quantity-button-small { @apply grid h-9 w-9 place-items-center hover:bg-stone-100; }
