@@ -72,13 +72,13 @@ export function HoursPage() {
         queryClient.invalidateQueries({queryKey:['hours',restaurantId]}),
         queryClient.invalidateQueries({queryKey:['public-menu']}),
       ])
-      setMessage('Horarios guardados. El servidor usa la zona horaria del restaurante al aceptar pedidos.')
+      setMessage('Horarios guardados. Se aplican según la zona horaria del comercio.')
     }catch{
       setError('No se pudieron guardar todos los horarios. Volvé a cargar antes de reintentar.')
     }finally{setSaving(false)}
   }
   return <>
-    <PageHeader eyebrow="Operación" title="Horarios" description="Admite varios turnos por día, cruces de medianoche y excepciones. El estado abierto/cerrado se decide en el servidor."/>
+    <PageHeader eyebrow="Operación" title="Horarios" description="Definí tus horarios de atención y los cambios para fechas especiales."/>
     <div className="surface-card divide-y divide-stone-200 overflow-hidden" role="region" aria-label="Horario semanal">
       {days.map((day,dayIndex)=>{
         const daySlots=regular.filter((slot)=>slot.day_of_week===dayIndex)

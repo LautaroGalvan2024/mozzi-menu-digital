@@ -1,5 +1,5 @@
 import { AdminOrderStatus } from './CommerceOrderStatus'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Eye, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
@@ -66,6 +66,7 @@ export function OrdersPage() {
       dates.to,
     ],
     enabled: datesReady && !dateError,
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope.selected?.id ? keepPreviousData(previous) : undefined,
     queryFn: async () => {
       const range = dateRangeForLocalDates(
         dates.from,
@@ -114,7 +115,7 @@ export function OrdersPage() {
     }
   }, [client, scope.selected])
 
-  if (!scope.selected) return <ErrorPanel>Falta seleccionar un restaurante.</ErrorPanel>
+  if (!scope.selected) return <ErrorPanel>Falta seleccionar un comercio.</ErrorPanel>
   if (restaurant.error || query.error) {
     return <ErrorPanel>{restaurant.error?.message ?? query.error?.message}</ErrorPanel>
   }
@@ -187,7 +188,7 @@ export function OrdersPage() {
           <button
             className="button-secondary"
             title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
-            disabled={!rows.length || exporting || Boolean(dateError)}
+            disabled={!rows.length || exporting || query.isFetching || Boolean(dateError)}
             onClick={() => void exportCsv()}
           >
             <Download className="h-4 w-4" aria-hidden />
@@ -200,8 +201,8 @@ export function OrdersPage() {
           {exportError}
         </p>
       ) : null}
-      <FilterBar className="mb-5 grid min-w-0 grid-cols-2 gap-3 xl:grid-cols-6">
-        <label className="field col-span-2 min-w-0">
+      <FilterBar className="mb-5 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_14rem]">
+        <label className="field min-w-0">
           <span>Buscar</span>
           <span className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
@@ -233,7 +234,10 @@ export function OrdersPage() {
             ))}
           </select>
         </label>
-        <label className="field min-w-0">
+        <details className="admin-disclosure md:col-span-2" open={Boolean(dateError) || undefined}>
+          <summary className="flex flex-wrap items-center gap-x-3 gap-y-1"><span>Fechas y modalidad</span><span className="text-xs font-normal text-stone-500">{dates.from === dates.to ? dates.from.split('-').reverse().join('/') : `${dates.from.split('-').reverse().join('/')} — ${dates.to.split('-').reverse().join('/')}`}{fulfillment ? ` · ${fulfillment === 'delivery' ? 'Envío' : 'Retiro'}` : ''}</span></summary>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <label className="field col-span-2 min-w-0 sm:col-span-1">
           <span>Modalidad</span>
           <select
             value={fulfillment}
@@ -273,7 +277,10 @@ export function OrdersPage() {
             }}
           />
         </label>
+          </div>
+        </details>
       </FilterBar>
+      {query.isFetching ? <p className="mb-3 text-xs text-stone-500" role="status">Actualizando pedidos…</p> : null}
       {dateError ? (
         <p className="form-error mb-5" role="alert">{dateError}</p>
       ) : rows.length === 0 ? (
@@ -283,7 +290,7 @@ export function OrdersPage() {
         />
       ) : (
         <>
-          <div className="surface-card hidden overflow-hidden xl:block">
+          <div className="admin-table-shell hidden overflow-hidden xl:block" aria-busy={query.isFetching}>
             <table className="data-table orders-table">
               <thead>
                 <tr>
@@ -311,10 +318,10 @@ export function OrdersPage() {
               </tbody>
             </table>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:hidden">
+          <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-busy={query.isFetching}>
             {rows.map((row) => (
               <article
-                className="surface-card group block p-4 transition duration-150 hover:border-orange-300 hover:shadow-md active:translate-y-px"
+                className="surface-card group block p-4 transition duration-150 hover:border-stone-300"
                 key={row.id}
               >
                 <Link to={`/admin/pedidos/${row.id}`} className="block" aria-label={`Ver ${row.display_number}`}>
@@ -344,8 +351,8 @@ export function OrdersPage() {
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-stone-500">{query.data?.count ?? 0} resultados</p>
             <div className="grid grid-cols-2 gap-2 sm:flex">
-              <button className="button-secondary" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Anterior</button>
-              <button className="button-secondary" disabled={(page + 1) * PAGE_SIZE >= (query.data?.count ?? 0)} onClick={() => setPage((value) => value + 1)}>Siguiente</button>
+              <button className="button-secondary" disabled={page === 0 || query.isFetching} onClick={() => setPage((value) => value - 1)}>Anterior</button>
+              <button className="button-secondary" disabled={query.isFetching || (page + 1) * PAGE_SIZE >= (query.data?.count ?? 0)} onClick={() => setPage((value) => value + 1)}>Siguiente</button>
             </div>
           </div>
         </>

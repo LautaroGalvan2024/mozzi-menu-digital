@@ -127,7 +127,7 @@ export function OrderDetailPage() {
     if (running.current) return
     setError(null)
     if (order.restaurant_id !== scope.selected?.id) {
-      setError('El pedido no pertenece al restaurante seleccionado.')
+      setError('El pedido no pertenece al comercio seleccionado.')
       return
     }
     const args = name === 'complete_order'
@@ -199,21 +199,14 @@ export function OrderDetailPage() {
       actions={<Link className="button-secondary" to="/admin/pedidos"><ArrowLeft className="h-4 w-4" />Volver</Link>}
     />
     {error ? <p className="form-error mb-5" role="alert">{error}</p> : null}
-    {order.inventory_tracked || order.replaces_order_id || isReversed(order) ? <section className="form-card mb-6">
-      <h2 className="form-card-title">Entrega e inventario</h2><CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={order.status === 'generated'} />
-      <p className="mt-3">{isReversed(order) ? inventoryOutcomeLabel[order.inventory_outcome] : order.status === 'accepted' ? 'Unidades reservadas. Pendiente de recepción del cliente o retiro.' : order.inventory_outcome === 'delivered' ? 'Entrega vigente: existencia física descontada.' : order.checkout_mode === 'online' ? 'El checkout reserva las unidades antes del pago. La existencia física se descuenta al confirmar recepción o retiro.' : 'La reserva se realiza al aceptar; la existencia física se descuenta al confirmar recepción o retiro.'}</p>
-      {isReversed(order) ? <p className="mt-2 text-sm">Se conserva el pedido original. Su importe no se suma como venta vigente. Esto no registra un reintegro de dinero.</p> : null}
-      <div className="mt-3 flex flex-wrap gap-4 text-sm">
-        {order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.replaces_order_id}`}>Ver pedido reemplazado</Link>:null}
-        {order.root_order_id && order.root_order_id !== order.id && order.root_order_id !== order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.root_order_id}`}>Ver pedido original de la operación</Link>:null}
-        {inventory.replacementOrderId?<Link className="underline" to={`/admin/pedidos/${inventory.replacementOrderId}`}>Ver pedido de reemplazo</Link>:null}
-      </div>
-      {order.replacement_reason?<p className="mt-3 text-sm">Motivo del reemplazo: {order.replacement_reason}</p>:null}
-    </section>:null}
-    {order.checkout_mode === 'online' ? <section className="form-card mb-6"><CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={order.status === 'generated'} /><p className="mt-3 text-sm">Cancelar un pedido no devuelve el pago. Los reintegros se gestionan en Mercado Pago y su estado se actualiza al confirmarse.</p>{order.status === 'generated' && order.payment_status === 'approved' ? <Link className="button-primary mt-4" to={`/admin/pedidos/tomar/${order.action_id}`}>Aceptar para preparar</Link> : null}</section> : null}<div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+    <section className="admin-toolbar mb-5 flex flex-wrap items-center justify-between gap-4" aria-label="Estado del pedido">
+      <div>{!isPaidAwaitingPreparation(order) ? <StatusPill status={order.status} outcome={order.inventory_outcome} /> : null}<CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={isPaidAwaitingPreparation(order)} /></div>
+      {order.status === 'generated' && order.checkout_mode === 'online' && order.payment_status === 'approved' ? <Link className="button-primary" to={`/admin/pedidos/tomar/${order.action_id}`}>Aceptar para preparar</Link> : null}
+    </section>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
       <div className="space-y-6">
         <section className="form-card">
-          <div className="flex justify-between"><h2 className="form-card-title">Productos</h2>{!isPaidAwaitingPreparation(order) ? <StatusPill status={order.status} outcome={order.inventory_outcome} /> : null}</div>
+          <h2 className="form-card-title">Productos</h2>
           <div className="mt-5 divide-y divide-stone-200">
             {items.map((item) => <article className="py-4 first:pt-0" key={item.id}>
               <div className="flex justify-between gap-3">
@@ -234,6 +227,28 @@ export function OrderDetailPage() {
             <div className="flex justify-between pt-2 text-xl font-bold"><dt>Total</dt><dd>{formatMoney(order.total_cents, order.currency_code)}</dd></div>
           </dl>
         </section>
+        {isAdmin && order.status === 'completed' && order.inventory_outcome === 'delivered' ? <details className="admin-disclosure" open={Boolean(pendingReverse) || undefined}>
+          <summary>Devolución o corrección completa</summary><div className="mt-4">
+          <p className="mt-3 text-sm">Se conserva el historial del pedido. Esta operación no registra cobros ni reintegros.</p>
+          {pendingReverse?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">Hay un intento pendiente de confirmación. Reintentá estos mismos datos para recuperar su resultado.</p>:null}
+          <label className="field mt-4"><span>Qué ocurrió</span><select disabled={busy||!!pendingReverse} value={reverseKind} onChange={(event)=>{setReverseKind(event.target.value as typeof reverseKind);setRestock('');setReverseConfirmed(false)}}><option value="return">Se recibió la devolución de todo el pedido</option><option value="correction">La entrega se marcó por error y no ocurrió</option></select></label>
+          <label className="field mt-4"><span>Motivo</span><textarea disabled={busy||!!pendingReverse} value={reverseReason} maxLength={500} onChange={(event)=>setReverseReason(event.target.value)}/></label>
+          <label className="field mt-4"><span>Mercadería que queda vendible</span><select disabled={busy||!!pendingReverse} value={restock} onChange={(event)=>setRestock(event.target.value as typeof restock)}><option value="">Seleccioná el destino</option><option value="yes">Todo vuelve a estar disponible para vender</option>{reverseKind==='return'?<><option value="no">Nada vuelve al stock vendible</option><option value="partial">Sólo una parte vuelve al stock vendible</option></>:null}</select></label>
+          {restock==='partial'?<div className="mt-4 space-y-3"><p className="text-sm">Se recibió el pedido completo. Indicá solamente las unidades vendibles que se reponen.</p>{[...deliveredProducts].map(([productId,product])=><label key={productId} className="field"><span>{product.name} · recibidas {product.quantity}</span><input type="number" min={0} max={product.quantity} step={1} disabled={busy||!!pendingReverse} value={quantities[productId]??''} onChange={(event)=>setQuantities((value)=>({...value,[productId]:event.target.value}))}/></label>)}</div>:null}
+          <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" disabled={busy} checked={reverseConfirmed} onChange={(event)=>setReverseConfirmed(event.target.checked)}/>{reverseKind==='return'?'Confirmo que se recibió la devolución completa y revisé la cantidad vendible.':'Confirmo que no hubo entrega real y toda la mercadería sigue disponible.'}</label>
+          <button className="button-danger mt-4" disabled={busy||!reverseConfirmed} onClick={()=>void reverse()}>{pendingReverse?'Reintentar misma operación':reverseKind==='return'?'Registrar devolución completa':'Corregir entrega marcada por error'}</button>
+        </div></details>:null}
+        {isAdmin && isReversed(order) && !inventory.replacementOrderId ? <section className="form-card">
+          <h2 className="form-card-title">Vincular un pedido de reemplazo</h2>
+          <p className="mt-3 text-sm">Seleccioná un pedido nuevo todavía pendiente. Quedará en la misma operación comercial; una compra nueva e independiente debe conservarse separada.</p>
+          <label className="field mt-4"><span>Buscar por número de pedido</span><input value={replacementSearch} disabled={busy} onChange={(event)=>setReplacementSearch(event.target.value)} placeholder="PED-…"/></label>
+          <label className="field mt-4"><span>Pedido pendiente</span><select value={replacementId} disabled={busy||replacements.isLoading} onChange={(event)=>setReplacementId(event.target.value)}><option value="">Seleccioná un pedido</option>{replacements.data?.map((candidate)=><option key={candidate.id} value={candidate.id}>{candidate.display_number} · {candidate.customer_name}</option>)}</select></label>
+          {replacements.error?<p role="alert" className="form-error mt-3">{replacements.error.message}</p>:<p className="mt-2 text-xs text-stone-500">Hasta 25 pedidos recientes; buscá el número para encontrar otro.</p>}
+          <label className="field mt-4"><span>Motivo del reemplazo</span><textarea maxLength={500} value={replacementReason} disabled={busy} onChange={(event)=>setReplacementReason(event.target.value)}/></label>
+          <button className="button-secondary mt-4" disabled={busy||!replacementId} onClick={()=>void linkReplacement()}>Vincular como reemplazo</button>
+        </section>:null}
+      </div>
+      <aside className="space-y-4">
         <section className="form-card">
           <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="form-card-title">Cliente y entrega</h2><OrderWhatsAppAction order={order} businessName={scope.selected?.name ?? ''} showLabel /></div>
           <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
@@ -258,33 +273,25 @@ export function OrderDetailPage() {
           <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" checked={received} disabled={busy} onChange={(event)=>setReceived(event.target.checked)}/>Confirmo que el cliente {order.fulfillment_type==='delivery'?'recibió':'retiró'} todo el pedido.</label>
           <div className="mt-4 flex flex-col gap-3 sm:flex-row">
             <button className="button-primary" disabled={busy||!received} onClick={() => void mutate('complete_order')}><CheckCircle2 className="h-4 w-4" />{order.fulfillment_type==='delivery'?'Confirmar recepción':'Confirmar retiro'}</button>
+          </div>
+          <details className="admin-disclosure mt-5"><summary>Cancelar pedido</summary><div className="mt-4 flex flex-col gap-3">
             <input aria-label="Motivo de cancelación" disabled={busy} className="h-11 flex-1 rounded-xl border border-stone-300 px-3" placeholder="Motivo de cancelación" maxLength={300} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
             <button className="button-danger" disabled={busy} onClick={() => void mutate('cancel_order')}><XCircle className="h-4 w-4" />Cancelar{order.inventory_tracked?' y liberar reserva':''}</button>
-          </div>
+          </div>{order.checkout_mode === 'online' ? <p className="mt-3 text-xs text-stone-500">Cancelar un pedido no devuelve el pago. Los reintegros se gestionan en Mercado Pago.</p> : null}</details>
         </section> : null}
-        {isAdmin && order.status === 'completed' && order.inventory_outcome === 'delivered' ? <section className="form-card">
-          <h2 className="form-card-title">Devolución o corrección completa</h2>
-          <p className="mt-3 text-sm">Se conserva el historial del pedido. Esta operación no registra cobros ni reintegros.</p>
-          {pendingReverse?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">Hay un intento pendiente de confirmación. Reintentá estos mismos datos para recuperar su resultado.</p>:null}
-          <label className="field mt-4"><span>Qué ocurrió</span><select disabled={busy||!!pendingReverse} value={reverseKind} onChange={(event)=>{setReverseKind(event.target.value as typeof reverseKind);setRestock('');setReverseConfirmed(false)}}><option value="return">Se recibió la devolución de todo el pedido</option><option value="correction">La entrega se marcó por error y no ocurrió</option></select></label>
-          <label className="field mt-4"><span>Motivo</span><textarea disabled={busy||!!pendingReverse} value={reverseReason} maxLength={500} onChange={(event)=>setReverseReason(event.target.value)}/></label>
-          <label className="field mt-4"><span>Mercadería que queda vendible</span><select disabled={busy||!!pendingReverse} value={restock} onChange={(event)=>setRestock(event.target.value as typeof restock)}><option value="">Seleccioná el destino</option><option value="yes">Todo vuelve a estar disponible para vender</option>{reverseKind==='return'?<><option value="no">Nada vuelve al stock vendible</option><option value="partial">Sólo una parte vuelve al stock vendible</option></>:null}</select></label>
-          {restock==='partial'?<div className="mt-4 space-y-3"><p className="text-sm">Se recibió el pedido completo. Indicá solamente las unidades vendibles que se reponen.</p>{[...deliveredProducts].map(([productId,product])=><label key={productId} className="field"><span>{product.name} · recibidas {product.quantity}</span><input type="number" min={0} max={product.quantity} step={1} disabled={busy||!!pendingReverse} value={quantities[productId]??''} onChange={(event)=>setQuantities((value)=>({...value,[productId]:event.target.value}))}/></label>)}</div>:null}
-          <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" disabled={busy} checked={reverseConfirmed} onChange={(event)=>setReverseConfirmed(event.target.checked)}/>{reverseKind==='return'?'Confirmo que se recibió la devolución completa y revisé la cantidad vendible.':'Confirmo que no hubo entrega real y toda la mercadería sigue disponible.'}</label>
-          <button className="button-danger mt-4" disabled={busy||!reverseConfirmed} onClick={()=>void reverse()}>{pendingReverse?'Reintentar misma operación':reverseKind==='return'?'Registrar devolución completa':'Corregir entrega marcada por error'}</button>
-        </section>:null}
-        {isAdmin && isReversed(order) && !inventory.replacementOrderId ? <section className="form-card">
-          <h2 className="form-card-title">Vincular un pedido de reemplazo</h2>
-          <p className="mt-3 text-sm">Seleccioná un pedido nuevo todavía pendiente. Quedará en la misma operación comercial; una compra nueva e independiente debe conservarse separada.</p>
-          <label className="field mt-4"><span>Buscar por número de pedido</span><input value={replacementSearch} disabled={busy} onChange={(event)=>setReplacementSearch(event.target.value)} placeholder="PED-…"/></label>
-          <label className="field mt-4"><span>Pedido pendiente</span><select value={replacementId} disabled={busy||replacements.isLoading} onChange={(event)=>setReplacementId(event.target.value)}><option value="">Seleccioná un pedido</option>{replacements.data?.map((candidate)=><option key={candidate.id} value={candidate.id}>{candidate.display_number} · {candidate.customer_name}</option>)}</select></label>
-          {replacements.error?<p role="alert" className="form-error mt-3">{replacements.error.message}</p>:<p className="mt-2 text-xs text-stone-500">Hasta 25 pedidos recientes; buscá el número para encontrar otro.</p>}
-          <label className="field mt-4"><span>Motivo del reemplazo</span><textarea maxLength={500} value={replacementReason} disabled={busy} onChange={(event)=>setReplacementReason(event.target.value)}/></label>
-          <button className="button-secondary mt-4" disabled={busy||!replacementId} onClick={()=>void linkReplacement()}>Vincular como reemplazo</button>
-        </section>:null}
+
+    {order.inventory_tracked || order.replaces_order_id || isReversed(order) ? <details className="admin-disclosure" open={isReversed(order) || undefined}>
+      <summary>Entrega e inventario</summary><div className="text-sm leading-6 text-stone-600">
+      <p className="mt-3">{isReversed(order) ? inventoryOutcomeLabel[order.inventory_outcome] : order.status === 'accepted' ? 'Unidades reservadas. Pendiente de recepción del cliente o retiro.' : order.inventory_outcome === 'delivered' ? 'Entrega vigente: existencia física descontada.' : order.checkout_mode === 'online' ? 'El checkout reserva las unidades antes del pago. La existencia física se descuenta al confirmar recepción o retiro.' : 'La reserva se realiza al aceptar; la existencia física se descuenta al confirmar recepción o retiro.'}</p>
+      {isReversed(order) ? <p className="mt-2 text-sm">Se conserva el pedido original. Su importe no se suma como venta vigente. Esto no registra un reintegro de dinero.</p> : null}
+      <div className="mt-3 flex flex-wrap gap-4 text-sm">
+        {order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.replaces_order_id}`}>Ver pedido reemplazado</Link>:null}
+        {order.root_order_id && order.root_order_id !== order.id && order.root_order_id !== order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.root_order_id}`}>Ver pedido original de la operación</Link>:null}
+        {inventory.replacementOrderId?<Link className="underline" to={`/admin/pedidos/${inventory.replacementOrderId}`}>Ver pedido de reemplazo</Link>:null}
       </div>
-      <aside className="form-card h-fit">
-        <h2 className="form-card-title">Línea de tiempo</h2>
+      {order.replacement_reason?<p className="mt-3 text-sm">Motivo del reemplazo: {order.replacement_reason}</p>:null}
+    </div></details>:null}
+        <details className="admin-disclosure"><summary>Línea de tiempo</summary>
         <ol className="mt-5 space-y-5 border-l-2 border-stone-200 pl-5">
           {events.map((event) => <li className="relative" key={event.id}>
             <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full bg-orange-600 ring-4 ring-white" />
@@ -294,6 +301,7 @@ export function OrderDetailPage() {
           </li>)}
         </ol>
         {inventory.inventoryOperations.length?<><h3 className="mt-6 font-semibold">Movimientos de inventario</h3><ol className="mt-4 space-y-4">{inventory.inventoryOperations.map((operation)=><li key={operation.id} className="text-sm"><strong>{{reserve:'Reserva confirmada',payment_hold:'Reserva temporal de pago',payment_release:'Reserva de pago liberada',delivery:'Entrega confirmada',release:'Reserva liberada',correction:'Entrega corregida',return:'Devolución completa'}[operation.kind]??operation.kind}</strong><p className="text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString('es-AR')}{operation.actorUserId?` · Usuario …${operation.actorUserId.slice(-8)}`:''}</p>{operation.reason?<p>{operation.reason}</p>:null}{operation.result.restockQuantities?.map((part)=><p key={part.productId}>{deliveredProducts.get(part.productId)?.name??'Producto'}: {part.quantity} unidades repuestas como vendibles.</p>)}{operation.result.restocked!==undefined?<p>{operation.result.restocked?'Con reposición de unidades vendibles.':'Sin reposición al stock vendible.'}</p>:null}</li>)}</ol></>:null}
+        </details>
       </aside>
     </div>
   </>
@@ -305,5 +313,5 @@ function Total({ label, value, currency }: { label: string; value: number | stri
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div><dt className="text-xs font-bold uppercase tracking-wide text-stone-400">{label}</dt><dd className="mt-1 leading-6">{value}</dd></div>
+  return <div><dt className="text-xs font-medium text-stone-500">{label}</dt><dd className="mt-1 leading-6">{value}</dd></div>
 }

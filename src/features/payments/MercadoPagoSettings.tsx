@@ -73,10 +73,10 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
       <h2 id="mp-title" className="form-card-title">Mercado Pago para tu tienda</h2>
       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${environment === 'test' ? 'bg-amber-50 text-amber-900' : 'bg-stone-100 text-stone-700'}`}>{environmentLabel}</span>
     </div>
-    <p className="mt-2 text-sm leading-6 text-stone-600">Cada comercio autoriza su propia cuenta de Mercado Pago y recibe allí sus ventas. Iniciá sesión con la cuenta de tu comercio y autorizá a Mozzi; no necesitás copiar claves.</p>
-    <div className="mt-4 rounded-xl border border-stone-200 bg-stone-50 p-4">
+    <p className="mt-2 text-sm leading-6 text-stone-600">Recibí los pagos en la cuenta de tu comercio. Autorizá a Mozzi desde Mercado Pago; no necesitás copiar claves.</p>
+    <div className="mt-5 border-l-2 border-stone-200 pl-4">
       <p className={`text-sm font-semibold ${ready && environment === 'production' ? 'text-emerald-800' : ready ? 'text-sky-900' : 'text-stone-800'}`} role="status">{statusLabel}</p>
-      {hasAccount ? <p className="mt-1 text-xs leading-6 text-stone-600">{connection.data?.connection?.providerUserId ? <>Cuenta: {connection.data.connection.providerUserId} · </> : null}Autorización actual: {accountEnvironment === 'production' ? 'cobros reales' : accountEnvironment === 'test' ? 'prueba' : 'ambiente sin verificar'}.</p> : null}
+      {hasAccount ? <p className="mt-1 text-xs leading-6 text-stone-600">Autorización actual: {accountEnvironment === 'production' ? 'cobros reales' : accountEnvironment === 'test' ? 'prueba' : 'ambiente sin verificar'}.</p> : null}
       {environment ? <p className="mt-1 text-xs leading-6 text-stone-600">{environment === 'test' ? 'Este entorno está en modo prueba. Las compras de prueba no generan cobros reales.' : 'Este entorno utiliza cobros reales. El dinero se acredita en la cuenta autorizada del comercio.'}</p> : null}
       {connection.data && !environment ? <p className="mt-1 text-xs leading-6 text-stone-600">La conexión no informa su ambiente. Actualizá el estado antes de habilitar cobros.</p> : null}
     </div>
@@ -95,16 +95,26 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
     {connection.isError ? <p className="form-error mt-3" role="alert">{connection.error.message}</p> : null}
     {error ? <p className="form-error mt-3" role="alert">{error}</p> : null}
     <div className="mt-4 flex flex-wrap gap-3">
-      <button type="button" className="button-primary" aria-busy={busy} disabled={busy || connection.isPending || !canConnect} onClick={() => void act('connect')}>{busy ? 'Procesando…' : connectLabel}</button>
-      {connected ? <button type="button" className="button-secondary" disabled={busy} onClick={() => void act('disconnect')}>Desactivar nuevos cobros</button> : null}
+      {ready ? <a className="button-primary" href="/admin/tienda">Configurar pagos en la tienda</a> : <button type="button" className="button-primary" aria-busy={busy} disabled={busy || connection.isPending || !canConnect} onClick={() => void act('connect')}>{busy ? 'Procesando…' : connectLabel}</button>}
       <button type="button" className="button-quiet" disabled={busy || connection.isFetching} onClick={() => void connection.refetch()}>Actualizar estado</button>
     </div>
-    <ol className="mt-5 list-decimal space-y-2 border-t border-stone-200 pl-5 pt-4 text-sm leading-6 text-stone-600" aria-label="Pasos para habilitar pagos online">
+    {ready ? <p className="mt-3 text-xs leading-5 text-stone-600">Para ofrecer pagos online, activá también el stock y la opción de cobro en tu tienda.</p> : null}
+    <details className="admin-disclosure mt-5">
+      <summary>Cómo habilitar los cobros online</summary>
+    <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm leading-6 text-stone-600" aria-label="Pasos para habilitar pagos online">
       <li>Autorizá la cuenta de tu comercio para {environment === 'production' ? 'cobros reales' : environment === 'test' ? 'pruebas' : 'el ambiente configurado'}.</li>
       <li>Cargá las cantidades al crear o editar tus productos y variantes. Activá el control desde Stock si aún está sin activar.</li>
       <li>En Tienda online, marcá <strong>Publicar mi tienda online</strong>, habilitá <strong>Pagos online con Mercado Pago</strong> y guardá los cambios.</li>
     </ol>
-    {ready ? <p className="mt-3 text-xs leading-5 text-stone-600">La cuenta está autorizada. Para que aparezca el pago online en tu tienda, también deben estar activos el inventario y la opción de cobro.</p> : null}
-    {connected ? <p className="mt-3 text-xs text-stone-500">Desactivar nuevos cobros conserva la conciliación de compras anteriores. Los reintegros se realizan desde Mercado Pago.</p> : null}
+    </details>
+    {hasAccount ? <details className="admin-disclosure mt-3">
+      <summary>Administrar conexión</summary>
+      {connection.data?.connection?.providerUserId ? <p className="mt-4 text-sm text-stone-600">Cuenta de Mercado Pago: <span className="font-mono">{connection.data.connection.providerUserId}</span></p> : null}
+      <div className="mt-4 flex flex-wrap gap-3">
+        {ready ? <button type="button" className="button-secondary" aria-busy={busy} disabled={busy || !canConnect} onClick={() => void act('connect')}>{busy ? 'Procesando…' : connectLabel}</button> : null}
+        {connected ? <button type="button" className="button-secondary" disabled={busy} onClick={() => void act('disconnect')}>Desactivar nuevos cobros</button> : null}
+      </div>
+      <p className="mt-3 text-xs leading-5 text-stone-500">Desactivar nuevos cobros conserva la conciliación de compras anteriores. Los reintegros se realizan desde Mercado Pago.</p>
+    </details> : null}
   </section>
 }

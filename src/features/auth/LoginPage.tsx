@@ -86,7 +86,7 @@ export function LoginPage() {
   return (
     <AuthShell
       title="Ingresá al panel"
-      subtitle="El acceso es únicamente por invitación. Tu sesión y permisos se validan con Supabase Auth."
+      subtitle="Accedé con la cuenta que recibió la invitación a tu comercio."
       footer={
         <Link className="text-sm font-semibold text-orange-700 hover:text-orange-900" to="/auth/forgot-password">
           ¿Olvidaste tu contraseña?

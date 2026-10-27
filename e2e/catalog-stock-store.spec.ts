@@ -8,7 +8,7 @@ const blackId = '45000000-0000-4000-8000-000000000001'
 const redId = '45000000-0000-4000-8000-000000000002'
 const category = { id: categoryId, name: 'Fundas' }
 
-async function adminFixture(page: Page, stockReady = true) {
+async function adminFixture(page: Page, stockReady = true, role: 'restaurant_admin' | 'order_manager' = 'restaurant_admin') {
   const restaurant = {
     id: restaurantId, name: 'Casa Móvil', trade_name: 'Casa Móvil', slug: 'casa-movil', description: '', status: 'active',
     whatsapp_phone_e164: '+5493492123456', address: 'San Martín 123', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', currency_code: 'ARS', locale: 'es-AR',
@@ -48,9 +48,16 @@ async function adminFixture(page: Page, stockReady = true) {
     let body: unknown
     if (request.method() === 'GET' && path === '/auth/v1/user') body = user
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración Casa Móvil', email: user.email, active: true }
-    else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '46000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
-    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
+    else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '46000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role, status: 'active', restaurants: restaurant }]
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role, status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_metrics') body = {
+      generated: 8, whatsappOpened: 4, accepted: 5, completed: 3, cancelled: 1, expired: 0,
+      corrected: 1, returned: 1, acceptedAmountCents: '1250000', completedAmountCents: '1000000',
+      byFulfillment: { delivery: 5, pickup: 3 }, byPaymentMethod: [{ name: 'Efectivo', count: 3, amountCents: '1000000' }],
+      validDeliveredCommercialCases: 3, physicalDispatches: 4, receivedReturnUnits: '2', sellableRestockedReturnUnits: '1',
+    }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
+    else if (request.method() === 'GET' && path === '/rest/v1/orders') body = []
     else if (request.method() === 'GET' && path === '/rest/v1/categories') body = [category]
     else if (request.method() === 'GET' && path === '/rest/v1/products') body = url.searchParams.has('id') ? products.find(product => `eq.${product.id}` === url.searchParams.get('id')) : products
     else if (request.method() === 'GET' && ['/rest/v1/product_option_groups', '/rest/v1/product_quantity_prices'].includes(path)) body = []
@@ -93,7 +100,86 @@ async function adminFixture(page: Page, stockReady = true) {
 test.describe('catalog stock and store setup', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'This suite uses only the isolated e2e.invalid mock environment.')
 
+  test('mobile navigation contains keyboard focus, closes with Escape and exposes secondary settings', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const requests = await adminFixture(page)
+    await page.goto('/admin')
+    await expect(page.getByRole('heading', { name: 'Resumen', exact: true })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Administración' })).not.toBeVisible()
+    const trigger = page.getByRole('button', { name: 'Abrir navegación' })
+    await trigger.click()
+    const drawer = page.getByRole('dialog', { name: 'Navegación del panel' })
+    await expect(drawer).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Cerrar navegación' })).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(drawer.getByRole('button', { name: 'Salir', exact: true })).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(drawer.getByRole('button', { name: 'Cerrar navegación' })).toBeFocused()
+    await expect(page.locator('.admin-workspace')).toHaveAttribute('inert', '')
+    await drawer.locator('summary').filter({ hasText: 'Configuración' }).click()
+    await expect(drawer.getByRole('link', { name: 'Medios de pago', exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('navigation-mobile.png') })
+    await page.keyboard.press('Escape')
+    await expect(drawer).not.toBeVisible()
+    await expect(trigger).toBeFocused()
+    await trigger.click()
+    await page.getByRole('link', { name: 'Productos', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Productos', exact: true })).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(requests.unexpected).toEqual([])
+  })
+
+  test('order managers only see permitted navigation and cannot open store administration', async ({ page }) => {
+    const requests = await adminFixture(page, true, 'order_manager')
+    await page.goto('/admin')
+    const nav = page.getByRole('navigation', { name: 'Administración' })
+    await expect(nav.getByRole('link', { name: 'Pedidos', exact: true })).toBeVisible()
+    await expect(nav.getByRole('link', { name: 'Stock', exact: true })).toBeVisible()
+    await expect(nav.getByRole('link', { name: 'Productos', exact: true })).toHaveCount(0)
+    await expect(nav.getByRole('link', { name: 'Tienda online', exact: true })).toHaveCount(0)
+    await expect(nav.locator('summary')).toHaveCount(0)
+    await page.goto('/admin/tienda')
+    await expect(page).toHaveURL(/\/admin\/pedidos$/)
+    await expect(page.getByRole('heading', { name: 'Pedidos', exact: true })).toBeVisible()
+    expect(requests.storeSaves).toEqual([])
+  })
+
   for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 1000 }]) {
+    test(`${viewport.name} keeps the overview focused while detailed reports remain accessible`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      const requests = await adminFixture(page)
+      await page.goto('/admin')
+      await expect(page.getByRole('heading', { name: 'Resumen', level: 1 })).toBeVisible()
+      await expect(page.getByRole('region', { name: 'Resumen del día' }).getByRole('heading', { level: 2 })).toHaveCount(4)
+      await expect(page.getByText('Casos comerciales entregados vigentes')).not.toBeVisible()
+      await expect(page.getByRole('img', { name: /Código QR/ })).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`overview-${viewport.name}.png`), fullPage: true })
+      await page.getByText('Ver detalle del día', { exact: true }).click()
+      await expect(page.getByText('Casos comerciales entregados vigentes')).toBeVisible()
+      expect(requests.unexpected).toEqual([])
+    })
+
+    test(`${viewport.name} separates commerce settings from store publication and keeps advanced fields optional`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      const requests = await adminFixture(page)
+      await page.goto('/admin/configuracion')
+      await expect(page.getByRole('heading', { name: 'Configuración general', level: 1 })).toBeVisible()
+      await expect(page.getByLabel('Nombre comercial', { exact: true })).toBeVisible()
+      await expect(page.getByLabel('Nombre interno', { exact: true })).not.toBeVisible()
+      await expect(page.getByRole('link', { name: 'Configurar tienda online' })).toHaveAttribute('href', '/admin/tienda')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`commerce-settings-${viewport.name}.png`), fullPage: true })
+      await page.getByText('Configuración regional e interna', { exact: true }).click()
+      await expect(page.getByLabel('Nombre interno', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: 'Guardar cambios' }).click()
+      await expect(page.getByRole('status')).toContainText('Configuración guardada.')
+      expect(requests.storeSaves).toHaveLength(1)
+      expect(requests.storeSaves[0]).not.toHaveProperty('store_enabled')
+      expect(requests.storeSaves[0]).not.toHaveProperty('store_checkout_online_enabled')
+      expect(requests.unexpected).toEqual([])
+    })
+
     test(`${viewport.name} edits an absolute product quantity together with its catalog fields`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
       const requests = await adminFixture(page)
@@ -117,6 +203,8 @@ test.describe('catalog stock and store setup', () => {
       await page.setViewportSize(viewport)
       const requests = await adminFixture(page)
       await page.goto('/admin/catalogo/productos')
+      await expect(page.getByRole('heading', { name: 'Productos', exact: true })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`catalog-list-${viewport.name}.png`), fullPage: true })
       await page.getByRole('button', { name: /Productos con variantes/ }).click()
       await page.getByRole('button', { name: 'Fundas de silicona', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: 'Ficha con variantes' })
@@ -150,7 +238,10 @@ test.describe('catalog stock and store setup', () => {
       const storeLink = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Tienda online', level: 3 }) })
       await expect(storeLink.getByText('Publicado', { exact: true })).toBeVisible()
       await expect(storeLink.getByRole('link', { name: 'Abrir', exact: true })).toHaveAttribute('href', 'http://127.0.0.1:4173/t/casa-movil')
+      await expect(storeLink.getByRole('img', { name: 'Código QR de Tienda online' })).toHaveCount(0)
+      await storeLink.getByRole('button', { name: 'Ver QR' }).click()
       await expect(storeLink.getByRole('img', { name: 'Código QR de Tienda online' })).toBeVisible()
+      await storeLink.getByRole('button', { name: 'Ocultar QR' }).click()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await page.screenshot({ path: testInfo.outputPath(`store-settings-${viewport.name}.png`), fullPage: true })
       expect(requests.storeSaves).toEqual([{ store_enabled: true, store_ordering_policy: 'business_hours', store_checkout_whatsapp_enabled: true, store_checkout_online_enabled: true }])

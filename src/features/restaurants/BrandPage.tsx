@@ -69,7 +69,7 @@ export function BrandPage() {
   }
 
   const logo = publicAssetUrl(query.data.logo_path); const cover = publicAssetUrl(query.data.cover_path)
-  return <><PageHeader eyebrow="Marca" title="Logo y portada" description="Las imágenes se redimensionan, se re-codifican a WebP y pierden los metadatos EXIF antes de subir. No se aceptan SVG." /><div className="grid gap-6 lg:grid-cols-2"><ImageCard label="Logo" description="Formato cuadrado recomendado." image={logo} busy={busy==='logo'} inputId="logo-upload" onChange={(event)=>void upload('logo',event)} onRemove={()=>void remove('logo')} /><ImageCard label="Portada" description="Formato horizontal recomendado." image={cover} busy={busy==='cover'} inputId="cover-upload" onChange={(event)=>void upload('cover',event)} onRemove={()=>void remove('cover')} /></div>{error ? <p className="form-error mt-5" role="alert">{error}</p> : null}</>
+  return <><PageHeader eyebrow="Marca" title="Logo y portada" description="Personalizá la imagen que tus clientes ven en el menú y la tienda." /><div className="grid gap-6 lg:grid-cols-2"><ImageCard label="Logo" description="Usá una imagen cuadrada y reconocible." image={logo} busy={busy==='logo'} inputId="logo-upload" onChange={(event)=>void upload('logo',event)} onRemove={()=>void remove('logo')} /><ImageCard label="Portada" description="Elegí una foto horizontal que represente tu comercio." image={cover} busy={busy==='cover'} inputId="cover-upload" onChange={(event)=>void upload('cover',event)} onRemove={()=>void remove('cover')} /></div>{error ? <p className="form-error mt-5" role="alert">{error}</p> : null}</>
 }
 
 async function removeAsset(path: string, restaurantId: string) {

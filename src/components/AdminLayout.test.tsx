@@ -46,7 +46,7 @@ describe('restaurant administrator navigation', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('link', { name: 'Marca' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Logo y portada' })).toHaveAttribute(
       'href',
       '/admin/marca',
     )

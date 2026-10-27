@@ -35,6 +35,7 @@ function historyFixture() {
 }
 async function fillExternalSale(user: ReturnType<typeof userEvent.setup>, note = 'Entrega completa en mostrador') {
   await screen.findByText('Arroz')
+  await user.click(screen.getByText('Ingresos, ajustes y ventas externas'))
   await user.selectOptions(screen.getByLabelText('Acción'), 'external_sale')
   await user.type(screen.getByLabelText('Canal y referencia de la venta'), 'Mostrador 123')
   if (note) await user.type(screen.getByLabelText('Nota (opcional)'), note)
@@ -66,12 +67,14 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   it('shows automated payment holds without requiring a human actor', async () => {
     mocks.inventory = { ...fixture(), operations: [{ id: externalOperation, kind: 'payment_hold', orderId: null, sourceOperationId: null, reason: 'Mercado Pago: payment_hold', actorUserId: null, actorName: null, createdAt: '2026-10-27T12:00:00Z', result: {}, movements: [] }] }
     view()
+    await userEvent.click(await screen.findByText('Historial de movimientos'))
     expect(await screen.findByText('Reserva temporal de pago')).toBeVisible()
     expect(screen.getByText('Sistema de pagos')).toBeVisible()
     expect(screen.getByText('Arroz')).toBeVisible()
   })
   it('shows the external-sale reference separately from its default reason using a tenant-scoped bounded read', async () => {
     mocks.inventory = historyFixture(); mocks.role = 'order_manager'; view()
+    await userEvent.click(await screen.findByText('Historial de movimientos'))
     expect(await screen.findByText('Mostrador, comprobante 123')).toBeVisible()
     expect(screen.getByText('Venta fuera de la app')).toBeVisible()
     expect(screen.getByText('Ingreso de proveedor')).toBeVisible()
@@ -90,6 +93,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('No se pudieron cargar las referencias de las ventas externas')
     expect(screen.queryByRole('heading', { name: /Últimos .* movimientos/ })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Reintentar carga' }))
+    await user.click(await screen.findByText('Historial de movimientos'))
     expect(await screen.findByText('Mostrador, comprobante 123')).toBeVisible()
     expect(mocks.mutate).not.toHaveBeenCalled()
   })
@@ -110,6 +114,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   it('retains an uncertain operation and retries the same payload and UUID', async () => {
     const user = userEvent.setup(); mocks.mutate.mockRejectedValueOnce(new Error('Lost response'))
     view(); await screen.findByText('Arroz')
+    await user.click(screen.getByText('Ingresos, ajustes y ventas externas'))
     await user.selectOptions(screen.getByLabelText('Producto'), product)
     await user.type(screen.getByLabelText('Cantidad'), '3')
     await user.type(screen.getByLabelText('Motivo del movimiento'), 'Ingreso proveedor')
@@ -270,6 +275,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
       return { data: null, error: { code: '40001', message: 'INVENTORY_VERSION_CONFLICT' } }
     })
     view(); await screen.findByText('Arroz')
+    await user.click(screen.getByText('Ingresos, ajustes y ventas externas'))
     await user.selectOptions(screen.getByLabelText('Producto'), product)
     await user.type(screen.getByLabelText('Cantidad'), '1')
     await user.type(screen.getByLabelText('Motivo del movimiento'), 'Ingreso nuevo')

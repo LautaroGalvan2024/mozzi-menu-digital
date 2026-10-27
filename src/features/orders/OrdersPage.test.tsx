@@ -124,6 +124,26 @@ describe('customer WhatsApp actions', () => {
 })
 
 describe('order date range', () => {
+  it('keeps the search field mounted and focused while a new filter loads', async () => {
+    renderOrders([order])
+    await screen.findByRole('table')
+    let finish!: (value: { data: unknown[]; error: null; count: number }) => void
+    const response = new Promise<{ data: unknown[]; error: null; count: number }>(resolve => { finish = resolve })
+    const request = emptyOrdersRequest()
+    request.then = (resolve, reject) => response.then(resolve, reject)
+    mocks.from.mockReturnValue(request)
+    const search = screen.getByLabelText('Buscar')
+    search.focus()
+    fireEvent.change(search, { target: { value: 'Lucía' } })
+    expect(await screen.findByText('Actualizando pedidos…')).toBeVisible()
+    expect(screen.getByLabelText('Buscar')).toBe(search)
+    expect(search).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Exportar resultados' })).toBeDisabled()
+    finish({ data: [order], error: null, count: 1 })
+    await waitFor(() => expect(screen.queryByText('Actualizando pedidos…')).not.toBeInTheDocument())
+    expect(search).toHaveFocus()
+  })
+
   it('validates an inverted local-date range', () => {
     expect(orderDateRangeError('2026-09-30', '2026-09-29')).toBe(
       'La fecha Desde no puede ser posterior a la fecha Hasta.',

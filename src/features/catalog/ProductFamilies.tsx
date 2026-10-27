@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Layers, Plus, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
 import { parsePriceCents } from '../../lib/money'
@@ -44,6 +44,26 @@ export function ProductFamilies() {
   const [attempt, setAttempt] = useState<FamilyAttempt | null>(null)
   const [stockNeedsReview, setStockNeedsReview] = useState(false)
   const savingRef = useRef(false)
+  const dialogRef = useRef<HTMLElement>(null)
+  const dialogOpen = Boolean(draft)
+  useEffect(() => {
+    if (!dialogOpen || !dialogRef.current) return
+    const dialog = dialogRef.current
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialog.querySelector<HTMLButtonElement>('button')?.focus()
+    return () => { if (previous?.isConnected) previous.focus() }
+  }, [dialogOpen])
+  function onDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+      if (event.key === 'Escape' && !savingRef.current) { event.preventDefault(); setDraft(null); return }
+      if (event.key !== 'Tab') return
+      const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary')].filter(element => {
+        const closed = element.closest('details:not([open])')
+        return !closed || closed.querySelector('summary')?.contains(element)
+      }).sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
+      const first = controls[0]; const last = controls.at(-1)
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+  }
   useEffect(() => {
     setDraft(null); setAttempt(null); setError(null); setMessage(null); setStockNeedsReview(false)
     if (!restaurantId) return
@@ -149,30 +169,35 @@ export function ProductFamilies() {
       } else setError('No pudimos confirmar el guardado. Reintentá el mismo envío; no volverá a cargar las cantidades ni duplicará productos.')
     } finally { savingRef.current = false; setSaving(false) }
   }
-  return <section className="mb-5 rounded-2xl border border-stone-200 bg-white p-4">
-    <button type="button" className="flex w-full items-center justify-between gap-3 text-left font-semibold" onClick={() => setOpen((value) => !value)} aria-expanded={open}><span className="flex items-center gap-2"><Layers className="h-5 w-5" aria-hidden />Productos con variantes</span><span className="text-sm text-orange-700">{open ? 'Cerrar' : 'Administrar'}</span></button>
-    <p className="mt-2 text-sm text-stone-600">Agrupá modelos, colores o talles en una ficha. Cada variante tiene su código, precio, imagen y stock.</p>
+  return <section className="mb-4 rounded-xl border border-stone-200 bg-white px-4 py-3">
+    <button type="button" className="flex min-h-8 w-full items-center justify-between gap-3 text-left text-sm font-medium" onClick={() => setOpen((value) => !value)} aria-expanded={open}><span className="flex items-center gap-2 text-stone-700"><Layers className="h-4 w-4 text-stone-400" aria-hidden />Productos con variantes</span><span className="text-xs text-stone-500">{open ? 'Cerrar' : 'Administrar'}</span></button>
     {open && <div className="mt-4 space-y-3">
+      <p className="text-sm text-stone-500">Agrupá modelos, colores o talles. Cada combinación tiene su precio y stock.</p>
       {catalog.isLoading ? <p role="status">Cargando variantes…</p> : null}
       {catalog.error ? <p className="form-error" role="alert">{catalog.error.message}</p> : null}
       {catalog.data ? <><div className="flex flex-wrap gap-2">{catalog.data.families.map((family) => <button key={family.id} type="button" className="button-secondary" onClick={() => edit(family)}>{family.name}{!family.active ? ' · Oculta' : ''}</button>)}</div><button type="button" className="button-secondary" disabled={!catalog.data.categories.length} onClick={() => edit()}><Plus className="h-4 w-4" aria-hidden />Nueva ficha con variantes</button></> : null}
       {message ? <p className="form-success" role="status">{message}</p> : null}
       {attempt && !draft ? <button type="button" className="button-primary" onClick={() => setDraft(attempt.draft)}>Recuperar guardado pendiente</button> : null}
     </div>}
-    {draft ? <div className="modal-backdrop"><section className="modal-card max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="family-title">
-      <div className="flex items-center justify-between"><h2 id="family-title" className="font-display text-2xl font-bold">Ficha con variantes</h2><button type="button" className="icon-button" aria-label="Cerrar ficha" disabled={saving} onClick={() => setDraft(null)}><X /></button></div>
+    {draft ? <div className="modal-backdrop"><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="modal-card max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="family-title">
+      <div className="flex items-center justify-between"><h2 id="family-title" className="text-xl font-semibold">Ficha con variantes</h2><button type="button" className="icon-button" aria-label="Cerrar ficha" disabled={saving} onClick={() => setDraft(null)}><X /></button></div>
       {attempt ? <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Este envío está pendiente de confirmar. Conservamos sus datos para que puedas reintentarlo sin volver a aplicar el stock.</p> : null}
       <fieldset disabled={saving || Boolean(attempt)} className="mt-5 space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="field"><span>Nombre de la ficha</span><input maxLength={120} value={draft.name} onChange={(e) => change('name', e.target.value)} placeholder="Funda de silicona" /></label>
-          <label className="field"><span>Código de familia (opcional)</span><input maxLength={80} value={draft.code} onChange={(e) => change('code', e.target.value)} placeholder="FUNDAS-SILICONA" /></label>
           <label className="field"><span>Categoría de todas las variantes</span><select value={draft.categoryId} onChange={(e) => change('categoryId', e.target.value)}>{catalog.data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-          <label className="field"><span>Atributos, separados por comas</span><input value={draft.axesText} onChange={(e) => change('axesText', e.target.value)} placeholder="Modelo, Color" /></label>
+          <label className="field sm:col-span-2"><span>Atributos, separados por comas</span><input value={draft.axesText} onChange={(e) => change('axesText', e.target.value)} placeholder="Modelo, Color" /><p className="text-xs font-normal text-stone-500">Por ejemplo: Modelo, Color o Talle. Después completás los valores de cada variante.</p></label>
+        </div>
+        <details className="admin-disclosure" open={Boolean(error && error.includes('código')) || undefined}>
+          <summary>Descripción y presentación</summary>
+          <div className="grid gap-4 sm:grid-cols-2">
+          <label className="field"><span>Código de familia (opcional)</span><input maxLength={80} value={draft.code} onChange={(e) => change('code', e.target.value)} placeholder="FUNDAS-SILICONA" /></label>
           <label className="field sm:col-span-2"><span>Descripción de la ficha</span><textarea maxLength={2000} rows={2} value={draft.description} onChange={(e) => change('description', e.target.value)} /></label>
           <label className="field"><span>Foto de portada</span><select value={draft.imagePath} onChange={(e) => change('imagePath', e.target.value)}><option value="">Usar la foto de una variante</option>{catalog.data?.products.filter((p) => p.image_path && draft.variants.some((v) => v.productId === p.id)).map((p) => <option key={p.id} value={p.image_path!}>{p.name}</option>)}</select></label>
           <label className="check-field"><input type="checkbox" checked={draft.active} onChange={(e) => change('active', e.target.checked)} />Ficha visible</label>
-        </div>
-        <p className="text-sm text-stone-600">Cargá la cantidad total de cada variante, incluidas las unidades reservadas. Si dejás el campo vacío, se conserva su stock. Editá fotos, promociones y extras desde cada producto.</p>
+          </div>
+        </details>
+        <div className="border-t border-stone-100 pt-4"><h3 className="font-semibold text-stone-900">Variantes</h3><p className="mt-1 text-xs text-stone-500">El stock es la cantidad total, incluidas las reservas. Vacío conserva el saldo.</p></div>
         {catalog.data?.stock.policy.mode === 'never_enabled' ? <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Podés cargar las cantidades ahora. El control de stock todavía no está activo.</p> : null}
         {stockLocked && !stockNeedsReview ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">El stock está pausado o tiene una actualización en curso. Podés editar los otros datos de la ficha.</p> : null}
         {draft.variants.map((row, index) => <div key={`${row.isNew ? row.productId : index}`} className="rounded-xl border border-stone-200 p-3">
