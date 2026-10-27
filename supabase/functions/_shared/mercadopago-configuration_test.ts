@@ -146,6 +146,7 @@ Deno.test("valid numeric application IDs stay lossless and produce one encrypted
     assertEquals(payload.restaurantId, actor.restaurantId);
     assertEquals(payload.actorId, actor.actorId);
     assertEquals(payload.superAdminAal2, false);
+    assertEquals(payload.liveMode, Deno.env.get("MERCADOPAGO_MODE") !== "test");
     assert(typeof payload.verifier === "string");
     assert(!String(calls[0]!.args.p_encrypted_payload).includes(actor.actorId));
   });

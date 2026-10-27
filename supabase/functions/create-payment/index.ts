@@ -5,9 +5,10 @@ import { ApiError } from "../_shared/errors.ts";
 import { readJson, safeLog, serve } from "../_shared/http.ts";
 import { assertCheckoutUrl } from "../_shared/mercadopago-core.ts";
 import {
+  beginPaymentCheckout,
   createAdminClient,
-  paymentAccount,
   paymentReturnUrl,
+  providerLiveMode,
   providerRequest,
   rpc,
 } from "../_shared/mercadopago.ts";
@@ -20,6 +21,8 @@ const beginSchema = z.object({
   orderId: z.string().uuid(),
   actionId: z.string().uuid(),
   restaurantId: z.string().uuid(),
+  accountId: z.string().uuid(),
+  liveMode: z.boolean(),
   attemptId: z.string().uuid(),
   totalCents: z.coerce.number().int().positive(),
   currencyCode: z.literal("ARS"),
@@ -60,15 +63,15 @@ serve({
     const recoveryToken = randomToken(32);
     const statusHash = await sha256Hex(recoveryToken);
     const { antiSpam: _antiSpam, ...business } = input;
-    const attempt = beginSchema.parse(
-      await rpc(admin, "begin_online_checkout", {
-        p_request: business,
-        p_ip_hash: ipHash,
-        p_phone_hash: phoneHash,
-        p_client_event_token_hash: await sha256Hex(randomToken(32)),
-        p_status_token_hash: statusHash,
-      }),
-    );
+    const checkout = await beginPaymentCheckout(admin, {
+      request: business,
+      ipHash,
+      phoneHash,
+      clientEventTokenHash: await sha256Hex(randomToken(32)),
+      statusTokenHash: statusHash,
+    });
+    const attempt = beginSchema.parse(checkout.attempt);
+    const account = checkout.account;
     if (!attempt.checkoutUrl && Date.parse(attempt.expiresAt) > Date.now()) {
       if (!attempt.preferenceLeaseAcquired || !attempt.preferenceLeaseId) {
         throw new ApiError(
@@ -77,7 +80,6 @@ serve({
           "Estamos preparando este pago. Esperá unos segundos y reintentá la misma compra.",
         );
       }
-      const account = await paymentAccount(admin, { restaurantId: attempt.restaurantId }, true);
       const returnUrl = paymentReturnUrl(input.restaurantSlug, attempt.actionId);
       const preference = z.object({
         id: z.string(),
@@ -108,7 +110,7 @@ serve({
         throw new Error("Preference merchant mismatch");
       }
       const checkoutUrl = assertCheckoutUrl(
-        Deno.env.get("MERCADOPAGO_MODE") === "test"
+        !attempt.liveMode
           ? preference.sandbox_init_point ?? preference.init_point
           : preference.init_point,
       );
@@ -123,6 +125,7 @@ serve({
       await rpc(admin, "get_online_checkout_status", {
         p_action_id: attempt.actionId,
         p_token_hash: statusHash,
+        p_live_mode: providerLiveMode(),
       }),
     );
     safeLog("info", "payment.checkout_created", context.requestId, { actionId: attempt.actionId });

@@ -1604,8 +1604,23 @@ export type Database = {
           p_provider_user_id: string
           p_encrypted_credentials: string
           p_expires_at: string
-          p_activate?: boolean
+          p_live_mode: boolean
         }
+        Returns: Json
+      }
+      refresh_payment_account: {
+        Args: {
+          p_account_id: string
+          p_provider_user_id: string
+          p_encrypted_credentials: string
+          p_expires_at: string
+          p_live_mode: boolean
+          p_expected_expires_at: string
+        }
+        Returns: Json
+      }
+      backfill_payment_account_environment: {
+        Args: { p_account_id: string; p_live_mode: boolean }
         Returns: Json
       }
       reconcile_online_payment: {
@@ -1649,6 +1664,8 @@ export type Database = {
         Args: {
           p_restaurant_id?: string
           p_provider_user_id?: string
+          p_account_id?: string
+          p_live_mode?: boolean
         }
         Returns: Json
       }
@@ -1662,6 +1679,7 @@ export type Database = {
         Args: {
           p_action_id: string
           p_token_hash: string
+          p_live_mode: boolean
         }
         Returns: Json
       }
@@ -1691,12 +1709,14 @@ export type Database = {
           p_phone_hash: string
           p_client_event_token_hash: string
           p_status_token_hash: string
+          p_live_mode: boolean
+          p_expected_account_id: string
         }
         Returns: Json
       }
       acquire_payment_account_refresh: {
         Args: {
-          p_restaurant_id: string
+          p_account_id: string
           p_expected_expires_at: string
         }
         Returns: boolean

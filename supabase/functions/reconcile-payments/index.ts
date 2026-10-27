@@ -6,6 +6,7 @@ import { jsonResponse, readJson, safeLog } from "../_shared/http.ts";
 import {
   createAdminClient,
   paymentAttemptSchema,
+  providerLiveMode,
   reconcileAttempt,
   rpc,
 } from "../_shared/mercadopago.ts";
@@ -25,7 +26,7 @@ Deno.serve(async (request) => {
       await readJson(request, 2048),
     );
     const admin = createAdminClient();
-    const attempts = z.array(paymentAttemptSchema).parse(
+    const attempts = z.array(z.unknown()).parse(
       await rpc(admin, "list_online_reconciliation", { p_limit: input.limit }),
     );
     let reconciled = 0;
@@ -33,19 +34,22 @@ Deno.serve(async (request) => {
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(3, attempts.length) }, async () => {
       while (next < attempts.length) {
-        const attempt = attempts[next++];
-        if (!attempt) break;
+        const raw = attempts[next++];
+        const reference = z.object({ attemptId: z.string().uuid() }).safeParse(raw);
         try {
+          const attempt = paymentAttemptSchema.parse(raw);
           await reconcileAttempt(admin, attempt);
           reconciled++;
         } catch {
           failed++;
           safeLog("error", "payment.reconciliation_failed", requestId, {
-            attemptId: attempt.attemptId,
+            ...(reference.success ? { attemptId: reference.data.attemptId } : {}),
           });
           // Rotate failed attempts too: one disconnected seller must not starve
           // every other merchant's reconciliation queue. This never changes money.
-          await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId });
+          if (reference.success) {
+            await rpc(admin, "mark_online_reconciled", { p_attempt_id: reference.data.attemptId });
+          }
         }
       }
     }));
@@ -53,10 +57,14 @@ Deno.serve(async (request) => {
       p_before: new Date().toISOString(),
       p_limit: input.limit,
     });
-    safeLog("info", "payment.maintenance", requestId, { reconciled, failed });
+    const environment = providerLiveMode() ? "production" : "test";
+    safeLog("info", "payment.maintenance", requestId, { reconciled, failed, environment });
     // Failed runs remain visible to the scheduler; reservations expire independently,
     // and a subsequently approved late payment must reacquire stock or require refund.
-    return jsonResponse({ reconciled, failed, expired, requestId }, failed ? 503 : 200);
+    return jsonResponse(
+      { reconciled, failed, expired, environment, requestId },
+      failed ? 503 : 200,
+    );
   } catch (error) {
     const failure = toApiError(error);
     safeLog("error", "payment.maintenance_failed", requestId, { code: failure.code });

@@ -3,7 +3,7 @@ import { hmacSha256Hex, sha256Hex } from "../_shared/crypto.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError } from "../_shared/errors.ts";
 import { readJson, serve } from "../_shared/http.ts";
-import { createAdminClient, rpc } from "../_shared/mercadopago.ts";
+import { createAdminClient, providerLiveMode, rpc } from "../_shared/mercadopago.ts";
 import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
 import { clientIp } from "../_shared/request-meta.ts";
 import { parseInput } from "../_shared/schemas.ts";
@@ -30,6 +30,7 @@ serve({
     const summary = await rpc(admin, "get_online_checkout_status", {
       p_action_id: input.actionId,
       p_token_hash: await sha256Hex(input.recoveryToken),
+      p_live_mode: providerLiveMode(),
     });
     if (!summary) {
       throw new ApiError(

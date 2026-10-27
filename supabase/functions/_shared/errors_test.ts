@@ -91,3 +91,32 @@ Deno.test("membership validation failures map to safe actionable responses", () 
     assertEquals(mapped.details, undefined);
   }
 });
+
+Deno.test("payment environment and account changes return safe actionable conflicts", () => {
+  for (
+    const code of [
+      "PAYMENT_ENVIRONMENT_MISMATCH",
+      "PAYMENT_ACCOUNT_ALREADY_CONNECTED",
+      "PAYMENT_ACCOUNT_RECONNECT_REQUIRED",
+      "PAYMENT_ACCOUNT_NOT_CURRENT",
+      "PAYMENT_ACCOUNT_NOT_FOUND",
+      "PAYMENT_ACCOUNT_LOOKUP_AMBIGUOUS",
+    ]
+  ) {
+    const mapped = databaseApiError({
+      code: "22023",
+      message: code,
+      details: "private account IDs and encrypted credentials",
+      hint: "internal SQL",
+    });
+    assertEquals(mapped.status, 409);
+    assertEquals(mapped.message.includes("private"), false);
+    assertEquals(mapped.details, undefined);
+  }
+  for (const code of ["PAYMENT_ACCOUNT_IDENTITY_IMMUTABLE", "PAYMENT_ATTEMPT_ACCOUNT_IMMUTABLE"]) {
+    const mapped = databaseApiError({ code: "22023", message: code });
+    assertEquals(mapped.code, "DATABASE_ERROR");
+    assertEquals(mapped.details, undefined);
+    assertEquals(mapped.message.includes(code), false);
+  }
+});

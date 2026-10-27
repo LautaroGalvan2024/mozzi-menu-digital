@@ -92,11 +92,14 @@ export function normalizeOAuthTokenResponse(
   return token;
 }
 const accountSchema = z.object({
+  accountId: z.string().uuid(),
   restaurantId: z.string().uuid(),
   providerUserId: z.string(),
   encryptedCredentials: z.string(),
   expiresAt: z.string(),
   active: z.boolean(),
+  isCurrent: z.boolean(),
+  liveMode: z.boolean().nullable(),
 });
 const credentialsSchema = z.object({
   accessToken: z.string().min(8),
@@ -107,6 +110,8 @@ export const paymentAttemptSchema = z.object({
   attemptId: z.string().uuid(),
   orderId: z.string().uuid(),
   restaurantId: z.string().uuid(),
+  accountId: z.string().uuid(),
+  liveMode: z.boolean(),
   providerPreferenceId: z.string().nullable(),
   providerPaymentId: z.string().nullable(),
   totalCents: z.coerce.number().int().positive(),
@@ -142,14 +147,16 @@ export function mpEncryptionKey(): string {
 export function oauthRedirectUri(): string {
   return `${getSupabaseUrl()}/functions/v1/mercadopago-callback`;
 }
-function providerLiveMode(): boolean {
+export function providerLiveMode(): boolean {
   return Deno.env.get("MERCADOPAGO_MODE") !== "test";
 }
 export async function exchangeAuthorizationCode(
   code: string,
   verifier: string,
+  requestedLiveMode = providerLiveMode(),
 ): Promise<{ rawToken: unknown; requestedLiveMode: boolean }> {
-  const requestedLiveMode = providerLiveMode();
+  // The browser's OAuth round trip must finish in the environment it authorized.
+  assertPaymentEnvironment(requestedLiveMode, providerLiveMode());
   const rawToken = await providerRequest("/oauth/token", undefined, {
     grant_type: "authorization_code",
     client_id: requireMercadoPagoClientId(),
@@ -177,7 +184,7 @@ export async function beginPaymentConnection(
   const verifier = randomToken(48);
   const stateHash = await sha256Hex(state);
   const encryptedPayload = await encryptCredentials(
-    { ...actor, verifier },
+    { ...actor, verifier, liveMode: providerLiveMode() },
     encryptionKey,
     stateHash,
   );
@@ -263,7 +270,6 @@ export async function saveProviderAccount(
   admin: SupabaseClient,
   restaurantId: string,
   raw: unknown,
-  activate = true,
 ): Promise<void> {
   const token = validateProviderToken(raw);
   assertPaymentEnvironment(token.live_mode, providerLiveMode());
@@ -280,45 +286,120 @@ export async function saveProviderAccount(
       restaurantId,
     ),
     p_expires_at: new Date(Date.now() + token.expires_in * 1000).toISOString(),
-    p_activate: activate,
+    p_live_mode: token.live_mode,
   });
 }
 
-export async function paymentAccount(
-  admin: SupabaseClient,
-  lookup: { restaurantId: string } | { providerUserId: string },
-  requireActive = false,
-) {
-  const raw = await rpc(
-    admin,
-    "get_payment_account",
-    "restaurantId" in lookup
-      ? { p_restaurant_id: lookup.restaurantId }
-      : { p_provider_user_id: lookup.providerUserId },
-  );
-  if (!raw) {
-    throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
-  }
-  const account = accountSchema.parse(raw);
-  if (requireActive && !account.active) {
-    throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
-  }
-  const parsedCredentials = credentialsSchema.safeParse(
+type AccountLookup = { restaurantId: string } | { accountId: string } | {
+  providerUserId: string;
+  liveMode?: boolean;
+};
+
+function accountLookupArguments(lookup: AccountLookup): Record<string, unknown> {
+  if ("accountId" in lookup) return { p_account_id: lookup.accountId };
+  if ("restaurantId" in lookup) return { p_restaurant_id: lookup.restaurantId };
+  return {
+    p_provider_user_id: lookup.providerUserId,
+    ...(lookup.liveMode === undefined ? {} : { p_live_mode: lookup.liveMode }),
+  };
+}
+
+async function accountCredentials(account: z.infer<typeof accountSchema>) {
+  const parsed = credentialsSchema.safeParse(
     await decryptCredentials(account.encryptedCredentials, mpEncryptionKey(), account.restaurantId),
   );
-  if (!parsedCredentials.success) {
+  if (!parsed.success || account.liveMode === null) {
     throw new ApiError(
       409,
       "PAYMENT_ACCOUNT_RECONNECT_REQUIRED",
       "La conexión guardada de Mercado Pago necesita renovarse. Reconectá la cuenta desde el panel del comercio.",
     );
   }
-  let credentials = parsedCredentials.data;
-  assertPaymentEnvironment(credentials.liveMode, providerLiveMode());
+  // Both metadata used to route payments and authenticated encrypted credentials must agree.
+  assertPaymentEnvironment(parsed.data.liveMode, account.liveMode);
+  return parsed.data;
+}
+
+/** Read only after authorization; never return encrypted credentials or contact the provider. */
+export async function paymentConnectionStatus(admin: SupabaseClient, restaurantId: string) {
+  const configuration = paymentConnectionConfiguration();
+  const environment = providerLiveMode() ? "production" : "test";
+  const raw = await rpc(admin, "get_payment_account", { p_restaurant_id: restaurantId });
+  const state = {
+    ...configuration,
+    environment,
+    connectionEnvironment: null as "test" | "production" | null,
+    readyForPayments: false,
+    connectionIssue: "not_connected" as
+      | "not_connected"
+      | "inactive"
+      | "different_environment"
+      | "reconnect_required"
+      | null,
+    connection: { connected: false } as {
+      connected: boolean;
+      providerUserId?: string;
+      expiresAt?: string;
+    },
+  };
+  if (!raw) return state;
+  const parsed = accountSchema.safeParse(raw);
+  if (!parsed.success || parsed.data.restaurantId !== restaurantId || !parsed.data.isCurrent) {
+    return { ...state, connectionIssue: "reconnect_required" as const };
+  }
+  const account = parsed.data;
+  state.connection = {
+    connected: account.active,
+    providerUserId: account.providerUserId,
+    expiresAt: account.expiresAt,
+  };
+  try {
+    const credentials = await accountCredentials(account);
+    state.connectionEnvironment = credentials.liveMode ? "production" : "test";
+    state.connectionIssue = credentials.liveMode !== providerLiveMode()
+      ? "different_environment"
+      : account.active
+      ? null
+      : "inactive";
+    state.readyForPayments = configuration.configured && state.connectionIssue === null;
+  } catch {
+    state.connectionIssue = "reconnect_required";
+  }
+  return state;
+}
+
+export async function paymentAccount(
+  admin: SupabaseClient,
+  lookup: AccountLookup,
+  requireActive = false,
+) {
+  const raw = await rpc(
+    admin,
+    "get_payment_account",
+    accountLookupArguments(lookup),
+  );
+  if (!raw) {
+    throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
+  }
+  const account = accountSchema.parse(raw);
+  if (
+    ("accountId" in lookup && account.accountId !== lookup.accountId) ||
+    ("restaurantId" in lookup && account.restaurantId !== lookup.restaurantId) ||
+    ("providerUserId" in lookup && account.providerUserId !== lookup.providerUserId)
+  ) throw new Error("Payment account lookup mismatch");
+  if (requireActive && (!account.active || !account.isCurrent)) {
+    throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
+  }
+  let credentials = await accountCredentials(account);
+  if ("providerUserId" in lookup && lookup.liveMode !== undefined) {
+    assertPaymentEnvironment(credentials.liveMode, lookup.liveMode);
+  }
+  // Historical attempts reconcile with their pinned account, even after a deployment mode change.
+  if (requireActive) assertPaymentEnvironment(credentials.liveMode, providerLiveMode());
   if (Date.parse(account.expiresAt) <= Date.now() + 60_000) {
     const clientId = requireMercadoPagoClientId();
     const acquired = await rpc(admin, "acquire_payment_account_refresh", {
-      p_restaurant_id: account.restaurantId,
+      p_account_id: account.accountId,
       p_expected_expires_at: account.expiresAt,
     });
     if (acquired !== true) {
@@ -342,34 +423,117 @@ export async function paymentAccount(
     if (refresh.user_id !== account.providerUserId) {
       throw new Error("Provider refresh account mismatch");
     }
-    await saveProviderAccount(admin, account.restaurantId, refresh, false);
+    await rpc(admin, "refresh_payment_account", {
+      p_account_id: account.accountId,
+      p_expected_expires_at: account.expiresAt,
+      p_provider_user_id: account.providerUserId,
+      p_encrypted_credentials: await encryptCredentials(
+        {
+          accessToken: refresh.access_token,
+          refreshToken: refresh.refresh_token,
+          liveMode: refresh.live_mode,
+        },
+        mpEncryptionKey(),
+        account.restaurantId,
+      ),
+      p_expires_at: new Date(Date.now() + refresh.expires_in * 1000).toISOString(),
+      p_live_mode: refresh.live_mode,
+    });
     credentials = {
       accessToken: refresh.access_token,
       refreshToken: refresh.refresh_token,
       liveMode: refresh.live_mode,
     };
   }
-  return { ...account, accessToken: credentials.accessToken };
+  // A deployment can change while the provider refresh request is in flight.
+  if (requireActive) assertPaymentEnvironment(credentials.liveMode, providerLiveMode());
+  return { ...account, liveMode: credentials.liveMode, accessToken: credentials.accessToken };
 }
 
-export async function reconcileProviderPayment(
+/** Validate the current encrypted account before the transaction can reserve any stock. */
+export async function beginPaymentCheckout(
   admin: SupabaseClient,
-  raw: unknown,
-  account: { restaurantId: string; providerUserId: string },
+  input: {
+    request: Record<string, unknown> & { restaurantSlug: string };
+    ipHash: string;
+    phoneHash: string;
+    clientEventTokenHash: string;
+    statusTokenHash: string;
+  },
 ) {
-  const payment = providerPaymentSchema.parse(raw);
+  if (!paymentConnectionConfiguration().configured) {
+    throw new ApiError(
+      503,
+      "PAYMENT_CONFIGURATION_ERROR",
+      "La plataforma debe completar la configuración de cobros. Reintentá en unos minutos.",
+    );
+  }
+  const { data: commerce, error } = await admin.from("restaurants").select("id").eq(
+    "slug",
+    input.request.restaurantSlug.trim().toLowerCase(),
+  ).maybeSingle();
+  const restaurantId = z.string().uuid().safeParse(commerce?.id);
+  if (error || !restaurantId.success) {
+    throw new ApiError(
+      409,
+      "ONLINE_CHECKOUT_NOT_READY",
+      "El comercio no puede recibir pagos online.",
+    );
+  }
+  const account = await paymentAccount(admin, { restaurantId: restaurantId.data }, true);
+  const attempt = await rpc(admin, "begin_online_checkout", {
+    p_request: input.request,
+    p_ip_hash: input.ipHash,
+    p_phone_hash: input.phoneHash,
+    p_client_event_token_hash: input.clientEventTokenHash,
+    p_status_token_hash: input.statusTokenHash,
+    p_live_mode: account.liveMode,
+    // The transaction rejects a concurrent change instead of reserving for an unchecked account.
+    p_expected_account_id: account.accountId,
+  });
+  const pinned = z.object({
+    accountId: z.string().uuid(),
+    restaurantId: z.string().uuid(),
+    liveMode: z.boolean(),
+    checkoutUrl: z.string().nullable(),
+  }).parse(attempt);
+  if (
+    pinned.restaurantId !== account.restaurantId || pinned.liveMode !== account.liveMode ||
+    (pinned.checkoutUrl === null && pinned.accountId !== account.accountId)
+  ) throw new Error("Checkout account/environment mismatch");
+  // A replay with an existing preference keeps its original connection. Creating
+  // a preference requires the exact connection validated before stock reservation.
+  return { account, attempt };
+}
+
+type PaymentAccountIdentity = {
+  accountId: string;
+  restaurantId: string;
+  providerUserId: string;
+  liveMode: boolean;
+};
+
+function assertProviderPaymentAccount(
+  payment: z.infer<typeof providerPaymentSchema>,
+  account: PaymentAccountIdentity,
+) {
   if (
     payment.collector_id !== account.providerUserId ||
-    payment.live_mode !== providerLiveMode()
+    payment.live_mode !== account.liveMode
   ) throw new Error("Provider account/environment mismatch");
-  if (!z.string().uuid().safeParse(payment.external_reference).success) return null; // A different integration's payment.
-  const rawAttempt = await rpc(admin, "get_online_payment_attempt", {
-    p_attempt_id: payment.external_reference,
-  });
-  if (!rawAttempt) return null;
-  const attempt = paymentAttemptSchema.parse(rawAttempt);
+}
+
+function canonicalPaymentStatus(
+  payment: z.infer<typeof providerPaymentSchema>,
+  attempt: z.infer<typeof paymentAttemptSchema>,
+  account: PaymentAccountIdentity,
+) {
+  assertProviderPaymentAccount(payment, account);
   if (
+    payment.external_reference !== attempt.attemptId ||
     attempt.restaurantId !== account.restaurantId ||
+    attempt.accountId !== account.accountId ||
+    attempt.liveMode !== account.liveMode ||
     attempt.totalCents !== paymentAmountCents(payment.transaction_amount) ||
     attempt.currencyCode !== payment.currency_id
   ) {
@@ -391,6 +555,23 @@ export async function reconcileProviderPayment(
   if (payment.status === "approved" && (payment.transaction_amount_refunded ?? 0) > 0) {
     status = "partially_refunded";
   }
+  return status;
+}
+
+export async function reconcileProviderPayment(
+  admin: SupabaseClient,
+  raw: unknown,
+  account: PaymentAccountIdentity,
+) {
+  const payment = providerPaymentSchema.parse(raw);
+  assertProviderPaymentAccount(payment, account);
+  if (!z.string().uuid().safeParse(payment.external_reference).success) return null; // A different integration's payment.
+  const rawAttempt = await rpc(admin, "get_online_payment_attempt", {
+    p_attempt_id: payment.external_reference,
+  });
+  if (!rawAttempt) return null;
+  const attempt = paymentAttemptSchema.parse(rawAttempt);
+  const status = canonicalPaymentStatus(payment, attempt, account);
   return await rpc(admin, "reconcile_online_payment", {
     p_attempt_id: attempt.attemptId,
     p_payment_id: payment.id,
@@ -400,6 +581,8 @@ export async function reconcileProviderPayment(
     p_provider_updated_at: payment.date_last_updated,
     p_provider_data: {
       refundedCents: paymentAmountCents(payment.transaction_amount_refunded ?? 0),
+      liveMode: payment.live_mode,
+      accountId: account.accountId,
     },
   });
 }
@@ -408,10 +591,14 @@ export async function reconcileAttempt(
   admin: SupabaseClient,
   attempt: z.infer<typeof paymentAttemptSchema>,
 ): Promise<void> {
-  const account = await paymentAccount(admin, { restaurantId: attempt.restaurantId });
+  const account = await paymentAccount(admin, { accountId: attempt.accountId });
+  if (account.restaurantId !== attempt.restaurantId || account.liveMode !== attempt.liveMode) {
+    throw new Error("Payment attempt account/environment mismatch");
+  }
   const search = z.object({
-    results: z.array(providerPaymentSchema),
-    paging: z.object({ total: z.number() }).optional(),
+    // Search is an index only: its live_mode can disagree with the payment detail.
+    results: z.array(z.object({ id: providerPaymentSchema.shape.id })).max(100),
+    paging: z.object({ total: z.number().int().nonnegative() }).optional(),
   }).parse(
     await providerRequest(
       `/v1/payments/search?external_reference=${
@@ -423,13 +610,59 @@ export async function reconcileAttempt(
   if ((search.paging?.total ?? search.results.length) > 100) {
     throw new Error("Payment reconciliation requires pagination");
   }
+  const ids = [...new Set(search.results.map((result) => result.id))];
+  const payments: z.infer<typeof providerPaymentSchema>[] = [];
+  let next = 0;
+  let failed = false;
+  let failure: unknown;
+  await Promise.all(Array.from({ length: Math.min(3, ids.length) }, async () => {
+    while (!failed && next < ids.length) {
+      const id = ids[next++]!;
+      try {
+        const payment = providerPaymentSchema.parse(
+          await providerRequest(`/v1/payments/${encodeURIComponent(id)}`, account.accessToken),
+        );
+        if (payment.id !== id) throw new Error("Provider payment detail ID mismatch");
+        // Validate the whole batch before applying any financial event. A search
+        // result cannot redirect reconciliation to a different order or environment.
+        canonicalPaymentStatus(payment, attempt, account);
+        payments.push(payment);
+      } catch (error) {
+        failed = true;
+        failure = error;
+      }
+    }
+  }));
+  if (failed) throw failure;
   // Oldest first ensures later financial events are applied after earlier attempts.
   for (
-    const payment of [...search.results].sort((a, b) =>
-      a.date_last_updated.localeCompare(b.date_last_updated)
+    const payment of payments.sort((a, b) =>
+      Date.parse(a.date_last_updated) - Date.parse(b.date_last_updated)
     )
   ) await reconcileProviderPayment(admin, payment, account);
   await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId });
+}
+
+/** The caller must verify the webhook signature before selecting a stored connection. */
+export async function reconcilePaymentNotification(
+  admin: SupabaseClient,
+  event: { providerUserId: string; paymentId: string; liveMode?: boolean },
+) {
+  // A missing legacy mode is allowed only when the database has a single unambiguous account.
+  const account = await paymentAccount(admin, {
+    providerUserId: event.providerUserId,
+    ...(event.liveMode === undefined ? {} : { liveMode: event.liveMode }),
+  });
+  const payment = await providerRequest(
+    `/v1/payments/${encodeURIComponent(event.paymentId)}`,
+    account.accessToken,
+  );
+  if (providerPaymentSchema.parse(payment).id !== event.paymentId) {
+    throw new Error("Provider notification payment mismatch");
+  }
+  // Neither the notification body nor browser parameters can establish financial facts.
+  await reconcileProviderPayment(admin, payment, account);
+  return { restaurantId: account.restaurantId };
 }
 
 export { createAdminClient };

@@ -20,11 +20,11 @@ select throws_ok($$update public.restaurants set store_checkout_online_enabled=t
  '22023','ONLINE_CHECKOUT_NOT_READY','online activation requires both inventory and a connected account');
 update public.restaurants set inventory_mode='enforced',inventory_activated_at=now(),inventory_business_policy='{}'
 where id='28000000-0000-4000-8000-000000000002';
-select lives_ok($$select public.save_payment_account('28000000-0000-4000-8000-000000000002','synthetic-merchant','encrypted-synthetic',now()+interval '1 day')$$,'server stores encrypted merchant credentials');
+select lives_ok($$select public.save_payment_account('28000000-0000-4000-8000-000000000002','synthetic-merchant','encrypted-synthetic',now()+interval '1 day',false)$$,'server stores encrypted merchant credentials');
 update public.restaurants set store_checkout_online_enabled=true where id='28000000-0000-4000-8000-000000000002';
 select is(public.get_payment_account('28000000-0000-4000-8000-000000000002')->>'active','true','new connection is active');
 select ok(not has_table_privilege('service_role','private.payment_accounts','select'),'credentials are exposed only through explicit service RPC');
-select ok(not has_function_privilege('authenticated','public.begin_online_checkout(jsonb,text,text,text,text)','execute'),'anonymous customer cannot invoke trusted payment transaction directly');
+select ok(not has_function_privilege('authenticated','public.begin_online_checkout(jsonb,text,text,text,text,boolean,uuid)','execute'),'anonymous customer cannot invoke trusted payment transaction directly');
 select ok(not has_function_privilege('service_role','private.create_commerce_order(jsonb,text,text,text)','execute'),'service cannot bypass the reservation wrapper through PostgREST');
 
 create temporary table payment_test_results(label text primary key,response jsonb,key uuid);
@@ -35,7 +35,8 @@ begin
   result:=public.begin_online_checkout(jsonb_build_object('restaurantSlug','commerce-payments','idempotencyKey',p_key,
     'customer',jsonb_build_object('name','Synthetic customer','phone','+5491111111111'),'fulfillment',jsonb_build_object('type','pickup'),
     'paymentMethodId','00000000-0000-4000-8000-000000000000',
-    'items',jsonb_build_array(jsonb_build_object('productId',p_product,'quantity',1,'optionIds','[]'::jsonb))),repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64));
+    'items',jsonb_build_array(jsonb_build_object('productId',p_product,'quantity',1,'optionIds','[]'::jsonb))),repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64),false,
+    (public.get_payment_account('28000000-0000-4000-8000-000000000002')->>'accountId')::uuid);
   insert into pg_temp.payment_test_results values(p_label,result,p_key);
   return result;
 end $$;
@@ -51,10 +52,10 @@ select is((select count(*) from public.orders where restaurant_id='28000000-0000
 select throws_ok($$select public.set_online_checkout_preference((select (response->>'attemptId')::uuid from payment_test_results where label='first'),'synthetic-pref','https://www.mercadopago.com.ar/checkout/test',extensions.gen_random_uuid())$$,
  '40001','PAYMENT_LEASE_CONFLICT','stale preference writer is fenced');
 select lives_ok($$select public.set_online_checkout_preference((select (response->>'attemptId')::uuid from payment_test_results where label='first'),'synthetic-pref','https://www.mercadopago.com.ar/checkout/test',(select (response->>'preferenceLeaseId')::uuid from payment_test_results where label='first'))$$,'lease holder attaches provider preference');
-select throws_ok($$select public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('e',64))$$,
+select throws_ok($$select public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('e',64),false)$$,
  '42501','PAYMENT_STATUS_FORBIDDEN','action ID alone cannot disclose payment result');
-select is(public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('d',64))#>>'{payment,status}','pending','status bearer shows only verified pending state');
-select ok(not (public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('d',64))->'order' ? 'customerPhone'),'public payment status excludes customer phone');
+select is(public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('d',64),false)#>>'{payment,status}','pending','status bearer shows only verified pending state');
+select ok(not (public.get_online_checkout_status((select (response->>'actionId')::uuid from payment_test_results where label='first'),repeat('d',64),false)->'order' ? 'customerPhone'),'public payment status excludes customer phone');
 select set_config('request.jwt.claim.sub','28000000-0000-4000-8000-000000000001',true);
 select set_config('request.jwt.claims','{"sub":"28000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',true);
 select throws_ok($$select public.claim_order((select (response->>'actionId')::uuid from payment_test_results where label='first'))$$,
@@ -140,7 +141,7 @@ select public.save_payment_oauth_state(repeat('f',64),'encrypted-pkce-fixture');
 select is(public.consume_payment_oauth_state(repeat('f',64))->>'encryptedPayload','encrypted-pkce-fixture','OAuth state recovers encrypted verifier once');
 select throws_ok($$select public.consume_payment_oauth_state(repeat('f',64))$$,'22023','OAUTH_STATE_INVALID','OAuth state is single-use');
 select public.disconnect_payment_account('28000000-0000-4000-8000-000000000002');
-select public.save_payment_account('28000000-0000-4000-8000-000000000002','synthetic-merchant','refreshed-encrypted',now()+interval '2 days',false);
+select public.refresh_payment_account((public.get_payment_account('28000000-0000-4000-8000-000000000002')->>'accountId')::uuid,'synthetic-merchant','refreshed-encrypted',now()+interval '2 days',false,now()+interval '1 day');
 select is(public.get_payment_account('28000000-0000-4000-8000-000000000002')->>'active','false','background token refresh does not reactivate disconnected payments');
 select is(public.get_payment_account('28000000-0000-4000-8000-000000000002')->>'encryptedCredentials','refreshed-encrypted','disconnected accounts retain credentials for reconciliation');
 select throws_ok($$select pg_temp.payment_fixture('disconnected','28000000-0000-4000-8000-000000000005')$$,
