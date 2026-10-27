@@ -3,12 +3,7 @@ import { z } from "../_shared/deps.ts";
 import { ApiError, toApiError } from "../_shared/errors.ts";
 import { jsonResponse, readJson, safeLog } from "../_shared/http.ts";
 import { verifyPaymentSignature } from "../_shared/mercadopago-core.ts";
-import {
-  createAdminClient,
-  paymentAccount,
-  providerRequest,
-  reconcileProviderPayment,
-} from "../_shared/mercadopago.ts";
+import { createAdminClient, reconcilePaymentNotification } from "../_shared/mercadopago.ts";
 
 Deno.serve(async (request) => {
   const requestId = crypto.randomUUID();
@@ -22,20 +17,19 @@ Deno.serve(async (request) => {
       type: z.string(),
       data: z.object({ id: z.union([z.string(), z.number()]).transform(String) }),
       user_id: z.union([z.string(), z.number()]).transform(String),
+      live_mode: z.boolean().optional(),
     }).parse(await readJson(request, 16 * 1024));
     if (event.data.id.toLowerCase() !== dataId.toLowerCase()) {
       throw new ApiError(400, "INVALID_EVENT", "Notificación inválida.");
     }
     if (event.type !== "payment") return jsonResponse({ received: true });
     const admin = createAdminClient();
-    const account = await paymentAccount(admin, { providerUserId: event.user_id });
-    // Only provider-fetched fields can authorize fulfillment, never webhook body fields.
-    const payment = await providerRequest(
-      `/v1/payments/${encodeURIComponent(dataId)}`,
-      account.accessToken,
-    );
-    await reconcileProviderPayment(admin, payment, account);
-    safeLog("info", "payment.reconciled", requestId, { restaurantId: account.restaurantId });
+    const result = await reconcilePaymentNotification(admin, {
+      providerUserId: event.user_id,
+      paymentId: dataId,
+      ...(event.live_mode === undefined ? {} : { liveMode: event.live_mode }),
+    });
+    safeLog("info", "payment.reconciled", requestId, result);
     return jsonResponse({ received: true });
   } catch (error) {
     const failure = toApiError(error);

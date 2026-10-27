@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(148);
+select plan(154);
 
 with expected(signature, access) as (
   values
@@ -10,15 +10,17 @@ with expected(signature, access) as (
     ('public.save_product_family(uuid,jsonb,jsonb)', 'authenticated'),
     ('public.get_payment_connection(uuid)', 'authenticated'),
     ('public.save_payment_account(uuid,text,text,timestamptz,boolean)', 'service'),
-    ('public.get_payment_account(uuid,text)', 'service'),
+    ('public.refresh_payment_account(uuid,text,text,timestamptz,boolean,timestamptz)', 'service'),
+    ('public.backfill_payment_account_environment(uuid,boolean)', 'service'),
+    ('public.get_payment_account(uuid,text,uuid,boolean)', 'service'),
     ('public.disconnect_payment_account(uuid)', 'service'),
     ('public.acquire_payment_account_refresh(uuid,timestamptz)', 'service'),
     ('public.save_payment_oauth_state(text,text)', 'service'),
     ('public.consume_payment_oauth_state(text)', 'service'),
-    ('public.begin_online_checkout(jsonb,text,text,text,text)', 'service'),
+    ('public.begin_online_checkout(jsonb,text,text,text,text,boolean,uuid)', 'service'),
     ('public.set_online_checkout_preference(uuid,text,text,uuid)', 'service'),
     ('public.get_online_payment_attempt(uuid)', 'service'),
-    ('public.get_online_checkout_status(uuid,text)', 'service'),
+    ('public.get_online_checkout_status(uuid,text,boolean)', 'service'),
     ('public.reconcile_online_payment(uuid,text,text,bigint,text,timestamptz,jsonb)', 'service'),
     ('public.list_online_reconciliation(integer)', 'service'),
     ('public.mark_online_reconciled(uuid)', 'service'),
@@ -82,7 +84,7 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  48::bigint,
+  50::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 

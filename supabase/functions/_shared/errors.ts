@@ -58,6 +58,44 @@ const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
     message:
       "Hay compras vinculadas a la cuenta anterior. Reconectá esa cuenta para conservar la conciliación.",
   },
+  PAYMENT_ENVIRONMENT_MISMATCH: {
+    status: 409,
+    code: "PAYMENT_ENVIRONMENT_MISMATCH",
+    message:
+      "La configuración de cobros cambió. Volvé a la tienda y revisá el estado de esta compra antes de iniciar otra.",
+  },
+  PAYMENT_ACCOUNT_ALREADY_CONNECTED: {
+    status: 409,
+    code: "PAYMENT_ACCOUNT_ALREADY_CONNECTED",
+    message:
+      "Esta cuenta de Mercado Pago ya está conectada a otro comercio. Conectá la cuenta que corresponde a este comercio.",
+  },
+  PAYMENT_ACCOUNT_RECONNECT_REQUIRED: {
+    status: 409,
+    code: "PAYMENT_ACCOUNT_RECONNECT_REQUIRED",
+    message: "Reconectá Mercado Pago desde Medios de pago del comercio para habilitar los cobros.",
+  },
+  PAYMENT_ACCOUNT_NOT_CURRENT: {
+    status: 409,
+    code: "PAYMENT_ACCOUNT_NOT_CURRENT",
+    message:
+      "El comercio cambió su cuenta de cobro. Volvé a la tienda y revisá el estado de esta compra antes de iniciar otra.",
+  },
+  PAYMENT_ACCOUNT_NOT_FOUND: {
+    status: 409,
+    code: "PAYMENT_NOT_CONNECTED",
+    message: "El comercio debe conectar Mercado Pago antes de recibir pagos online.",
+  },
+  PAYMENT_ACCOUNT_LOOKUP_AMBIGUOUS: {
+    status: 409,
+    code: "PAYMENT_ACCOUNT_REVIEW_REQUIRED",
+    message: "No pudimos identificar la conexión de este pago. La plataforma debe revisar el caso.",
+  },
+  PAYMENT_ENVIRONMENT_REQUIRED: {
+    status: 503,
+    code: "PAYMENT_CONFIGURATION_ERROR",
+    message: "La plataforma debe completar la configuración de cobros. Reintentá en unos minutos.",
+  },
   PAYMENT_LEASE_CONFLICT: {
     status: 503,
     code: "PAYMENT_PREPARING",

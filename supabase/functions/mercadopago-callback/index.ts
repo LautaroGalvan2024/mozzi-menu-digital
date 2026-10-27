@@ -48,6 +48,7 @@ Deno.serve(async (request) => {
       actorId: z.string().uuid(),
       superAdminAal2: z.boolean(),
       verifier: z.string(),
+      liveMode: z.boolean(),
     }).parse(await decryptCredentials(stored.encryptedPayload, mpEncryptionKey(), stateHash));
     // Recheck current permissions after the browser's round trip.
     stage = "authorization_check";
@@ -76,7 +77,7 @@ Deno.serve(async (request) => {
     else {
       const code = z.string().min(1).max(2048).parse(url.searchParams.get("code"));
       stage = "token_exchange";
-      const exchange = await exchangeAuthorizationCode(code, payload.verifier);
+      const exchange = await exchangeAuthorizationCode(code, payload.verifier, payload.liveMode);
       stage = "token_validation";
       const validatedToken = normalizeOAuthTokenResponse(
         exchange.rawToken,

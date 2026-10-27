@@ -4,7 +4,7 @@ import {
   authorizePaymentAdmin,
   beginPaymentConnection,
   createAdminClient,
-  paymentConnectionConfiguration,
+  paymentConnectionStatus,
   rpc,
 } from "../_shared/mercadopago.ts";
 import { parseInput } from "../_shared/schemas.ts";
@@ -22,10 +22,7 @@ serve({
     const actor = await authorizePaymentAdmin(request, input.restaurantId);
     const admin = createAdminClient();
     if (input.action === "status") {
-      const connection = await rpc(actor.client, "get_payment_connection", {
-        p_restaurant_id: input.restaurantId,
-      });
-      return { connection, ...paymentConnectionConfiguration() };
+      return await paymentConnectionStatus(admin, input.restaurantId);
     }
     if (input.action === "disconnect") {
       await rpc(admin, "disconnect_payment_account", { p_restaurant_id: input.restaurantId });

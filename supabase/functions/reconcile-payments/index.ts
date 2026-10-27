@@ -25,7 +25,7 @@ Deno.serve(async (request) => {
       await readJson(request, 2048),
     );
     const admin = createAdminClient();
-    const attempts = z.array(paymentAttemptSchema).parse(
+    const attempts = z.array(z.unknown()).parse(
       await rpc(admin, "list_online_reconciliation", { p_limit: input.limit }),
     );
     let reconciled = 0;
@@ -33,19 +33,22 @@ Deno.serve(async (request) => {
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(3, attempts.length) }, async () => {
       while (next < attempts.length) {
-        const attempt = attempts[next++];
-        if (!attempt) break;
+        const raw = attempts[next++];
+        const reference = z.object({ attemptId: z.string().uuid() }).safeParse(raw);
         try {
+          const attempt = paymentAttemptSchema.parse(raw);
           await reconcileAttempt(admin, attempt);
           reconciled++;
         } catch {
           failed++;
           safeLog("error", "payment.reconciliation_failed", requestId, {
-            attemptId: attempt.attemptId,
+            ...(reference.success ? { attemptId: reference.data.attemptId } : {}),
           });
           // Rotate failed attempts too: one disconnected seller must not starve
           // every other merchant's reconciliation queue. This never changes money.
-          await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId });
+          if (reference.success) {
+            await rpc(admin, "mark_online_reconciled", { p_attempt_id: reference.data.attemptId });
+          }
         }
       }
     }));

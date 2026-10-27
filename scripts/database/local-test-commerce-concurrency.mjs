@@ -71,16 +71,16 @@ function fixture() {
     insert into public.products(id,restaurant_id,category_id,code,name,base_price_cents)
     values(${literal(product)},${literal(tenant)},${literal(category)},'LAST','Last case',1000);
     insert into public.inventory_balances(restaurant_id,product_id,on_hand) values(${literal(tenant)},${literal(product)},1);
-    select public.save_payment_account(${literal(tenant)},${literal(tenant)},'encrypted-synthetic',now()+interval '1 day');
+    select public.save_payment_account(${literal(tenant)},${literal(tenant)},'encrypted-synthetic',now()+interval '1 day',false);
     update public.restaurants set store_checkout_online_enabled=true where id=${literal(tenant)};
     commit;`)
   return { tenant, product, slug }
 }
-function beginCheckout(f, key) {
+function beginCheckout(f, key, liveMode = false) {
   const request = { restaurantSlug: f.slug, idempotencyKey: key, channel: 'store', checkoutMode: 'online',
     customer: { name: 'Synthetic Buyer', phone: '+5491111111111' }, fulfillment: { type: 'pickup' },
     paymentMethodId: '00000000-0000-4000-8000-000000000000', items: [{ productId: f.product, quantity: 1, optionIds: [] }] }
-  return `select 'RESULT:'||public.begin_online_checkout(${literal(JSON.stringify(request))}::jsonb,repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64))::text;`
+  return `select 'RESULT:'||public.begin_online_checkout(${literal(JSON.stringify(request))}::jsonb,repeat('a',64),repeat('b',64),repeat('c',64),repeat('d',64),${liveMode},(public.get_payment_account(p_restaurant_id=>${literal(f.tenant)})->>'accountId')::uuid)::text;`
 }
 async function race(firstSql, secondSql, expectedError) {
   const name = `commerce_${randomUUID().slice(0, 8)}`
@@ -120,8 +120,24 @@ const [, expirationResult] = await race(approval, "select 'RESULT:'||public.expi
 assert.equal(result(expirationResult), 0)
 assert.equal(query(`select payment_status from public.orders where id=${literal(created.orderId)};`), 'approved')
 assert.equal(query(`select reserved from public.inventory_balances where product_id=${literal(expiry.product)};`), '1')
-console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 3, scenarios: [
+
+const transition = fixture(); const transitionKey = randomUUID()
+const switchAccount = `select 'RESULT:'||public.save_payment_account(${literal(transition.tenant)},${literal(transition.tenant)},'encrypted-production-synthetic',now()+interval '1 day',true)::text;`
+const [testCheckout, productionConnection] = await race(beginCheckout(transition, transitionKey), switchAccount)
+assert.notEqual(result(testCheckout).accountId, result(productionConnection).accountId)
+assert.equal(query(`select public.get_online_payment_attempt(${literal(result(testCheckout).attemptId)})->>'accountId';`), result(testCheckout).accountId)
+assert.equal(query(`select public.get_online_payment_attempt(${literal(result(testCheckout).attemptId)})->>'liveMode';`), 'false')
+assert.equal(query(`select public.get_payment_account(p_restaurant_id=>${literal(transition.tenant)})->>'liveMode';`), 'true')
+assert.equal(query(`select store_checkout_online_enabled from public.restaurants where id=${literal(transition.tenant)};`), 'f')
+assert.equal(query(`select reserved from public.inventory_balances where product_id=${literal(transition.product)};`), '1')
+query(`update public.restaurants set store_checkout_online_enabled=true where id=${literal(transition.tenant)};`)
+assert.throws(() => query(beginCheckout(transition, transitionKey, true)), /PAYMENT_ENVIRONMENT_MISMATCH/)
+assert.equal(query(`select count(*) from public.orders where restaurant_id=${literal(transition.tenant)};`), '1')
+assert.equal(query(`select reserved from public.inventory_balances where product_id=${literal(transition.product)};`), '1')
+
+console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 4, scenarios: [
   'concurrent retry: one order, one stock hold, one preference creator',
   'different buyers: only one can reserve last unit; losing order rolls back',
   'approval racing expiration: approved reservation remains held',
+  'account transition racing checkout: attempt remains bound to test connection and cross-environment retry changes no stock',
 ], fixtures: 'synthetic only; retained with immutable history' }))

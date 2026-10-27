@@ -2,11 +2,14 @@ import type { SupabaseClient } from "./deps.ts";
 import { ApiError } from "./errors.ts";
 import { base64url, decryptCredentials, encryptCredentials } from "./mercadopago-core.ts";
 import {
+  beginPaymentCheckout,
   exchangeAuthorizationCode,
   normalizeOAuthTokenResponse,
   paymentAccount,
+  paymentConnectionStatus,
   paymentReturnUrl,
   reconcileAttempt,
+  reconcilePaymentNotification,
   reconcileProviderPayment,
   saveProviderAccount,
 } from "./mercadopago.ts";
@@ -15,11 +18,14 @@ import { assert, assertEquals, assertRejects } from "./test-assert.ts";
 const restaurantId = "21000000-0000-4000-8000-000000000001";
 const attemptId = "31000000-0000-4000-8000-000000000001";
 const orderId = "41000000-0000-4000-8000-000000000001";
-const account = { restaurantId, providerUserId: "123456" };
+const accountId = "51000000-0000-4000-8000-000000000001";
+const account = { accountId, restaurantId, providerUserId: "123456", liveMode: false };
 const attempt = {
   attemptId,
   orderId,
   restaurantId,
+  accountId,
+  liveMode: false,
   providerPreferenceId: "preference-fixture",
   providerPaymentId: null,
   totalCents: 10000,
@@ -65,6 +71,7 @@ async function withEnvironment(action: () => Promise<void>) {
     MERCADOPAGO_ENCRYPTION_KEY: key,
     MERCADOPAGO_CLIENT_ID: "1234567890123456",
     MERCADOPAGO_CLIENT_SECRET: "client-secret-fixture",
+    MERCADOPAGO_WEBHOOK_SECRET: "webhook-secret-fixture",
     APP_BASE_URL: "https://mozzi.example.test",
     SUPABASE_URL: "https://supabase.example.test",
   };
@@ -87,6 +94,8 @@ async function encryptedAccount(
 ) {
   return {
     ...account,
+    liveMode: liveMode === "legacy" ? null : liveMode,
+    isCurrent: true,
     encryptedCredentials: await encryptCredentials(
       {
         accessToken: "access-token-fixture",
@@ -166,7 +175,7 @@ Deno.test("OAuth credentials require the configured live_mode before any account
       await saveProviderAccount(client, restaurantId, { ...token, live_mode: expectedLiveMode });
       assertEquals(calls.length, 1);
       assertEquals(calls[0]!.name, "save_payment_account");
-      assertEquals(calls[0]!.args.p_activate, true);
+      assertEquals(calls[0]!.args.p_live_mode, expectedLiveMode);
       assertEquals(
         await decryptCredentials(String(calls[0]!.args.p_encrypted_credentials), key, restaurantId),
         {
@@ -310,8 +319,10 @@ Deno.test("refresh omission preserves each encrypted account mode and inactive s
         const result = await paymentAccount(client, { restaurantId });
         assertEquals(result.accessToken, "new-access-token-fixture");
         assertEquals(Object.hasOwn(requestBody, "test_token"), false);
-        const saved = calls.find((call) => call.name === "save_payment_account")!;
-        assertEquals(saved.args.p_activate, false);
+        const saved = calls.find((call) => call.name === "refresh_payment_account")!;
+        assertEquals(saved.args.p_account_id, accountId);
+        assertEquals(saved.args.p_expected_expires_at, stored.expiresAt);
+        assertEquals(saved.args.p_live_mode, liveMode);
         assertEquals(
           await decryptCredentials(String(saved.args.p_encrypted_credentials), key, restaurantId),
           {
@@ -327,7 +338,7 @@ Deno.test("refresh omission preserves each encrypted account mode and inactive s
   });
 });
 
-Deno.test("refresh cannot substitute the current deployment mode for persisted account context", async () => {
+Deno.test("historical refresh preserves the pinned mode when the deployment changes during refresh", async () => {
   await withEnvironment(async () => {
     const stored = await encryptedAccount(true, true, false);
     const { client, calls } = fakeAdmin((name) => name === "get_payment_account" ? stored : true);
@@ -342,16 +353,16 @@ Deno.test("refresh cannot substitute the current deployment mode for persisted a
       }));
     };
     try {
-      await assertRejects(
-        () => paymentAccount(client, { restaurantId }),
-        (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
-      );
+      const result = await paymentAccount(client, { accountId });
+      assertEquals(result.liveMode, false);
+      assertEquals(result.accessToken, "new-access-token-fixture");
     } finally {
       globalThis.fetch = originalFetch;
     }
     assertEquals(calls.map((call) => call.name), [
       "get_payment_account",
       "acquire_payment_account_refresh",
+      "refresh_payment_account",
     ]);
   });
 });
@@ -449,7 +460,7 @@ Deno.test("verified provider statuses map to distinct payment events including r
         p_amount_cents: 10000,
         p_currency: "ARS",
         p_provider_updated_at: providerPayment.date_last_updated,
-        p_provider_data: { refundedCents: value.refunded * 100 },
+        p_provider_data: { refundedCents: value.refunded * 100, liveMode: false, accountId },
       });
     }
   });
@@ -529,9 +540,9 @@ Deno.test("refreshing a disconnected account preserves inactive state for pendin
       client_secret: "client-secret-fixture",
       refresh_token: "refresh-token-fixture",
     });
-    const saved = calls.find((call) => call.name === "save_payment_account");
+    const saved = calls.find((call) => call.name === "refresh_payment_account");
     assert(saved);
-    assertEquals(saved.args.p_activate, false);
+    assertEquals(saved.args.p_account_id, accountId);
     assertEquals(
       await decryptCredentials(String(saved.args.p_encrypted_credentials), key, restaurantId),
       {
@@ -613,7 +624,7 @@ Deno.test("refresh lease allows only one concurrent request to rotate account cr
     ) as PromiseRejectedResult;
     assert(rejected.reason instanceof ApiError && rejected.reason.code === "PAYMENT_PREPARING");
     assertEquals(fetchCount, 1);
-    assertEquals(calls.filter((call) => call.name === "save_payment_account").length, 1);
+    assertEquals(calls.filter((call) => call.name === "refresh_payment_account").length, 1);
   });
 });
 
@@ -626,5 +637,301 @@ Deno.test("inactive accounts cannot start a new checkout even if stored credenti
       (error) => error instanceof ApiError && error.code === "PAYMENT_NOT_CONNECTED",
     );
     assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+  });
+});
+
+Deno.test("OAuth initiated in a different environment is rejected before exchanging the code", async () => {
+  await withEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    let requested = false;
+    globalThis.fetch = () => {
+      requested = true;
+      throw new Error("Unexpected provider request");
+    };
+    try {
+      Deno.env.set("MERCADOPAGO_MODE", "production");
+      await assertRejects(
+        () => exchangeAuthorizationCode("code-fixture", "verifier-fixture", false),
+        (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
+      );
+      assertEquals(requested, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("production deployment reconciles historical test payments using the pinned inactive connection", async () => {
+  await withEnvironment(async () => {
+    Deno.env.set("MERCADOPAGO_MODE", "production");
+    const stored = { ...await encryptedAccount(false), isCurrent: false };
+    const { client, calls } = fakeAdmin((name, args) => {
+      if (name === "get_payment_account") {
+        assertEquals(args, { p_account_id: accountId });
+        return stored;
+      }
+      return name === "get_online_payment_attempt" ? attempt : true;
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (_input, init) => {
+      assertEquals(new Headers(init?.headers).get("Authorization"), "Bearer access-token-fixture");
+      return Promise.resolve(Response.json({ results: [providerPayment] }));
+    };
+    try {
+      await reconcileAttempt(client, attempt);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assertEquals(calls.map((call) => call.name), [
+      "get_payment_account",
+      "get_online_payment_attempt",
+      "reconcile_online_payment",
+      "mark_online_reconciled",
+    ]);
+    assertEquals(calls[2]!.args.p_provider_data, { refundedCents: 0, liveMode: false, accountId });
+  });
+});
+
+Deno.test("a payment cannot credit an attempt pinned to another connection or mode of the same seller", async () => {
+  await withEnvironment(async () => {
+    for (
+      const patch of [
+        { accountId: "51000000-0000-4000-8000-000000000002" },
+        { liveMode: true },
+      ]
+    ) {
+      const { client, calls } = fakeAdmin(() => ({ ...attempt, ...patch }));
+      await assertRejects(() => reconcileProviderPayment(client, providerPayment, account));
+      assertEquals(calls.map((call) => call.name), ["get_online_payment_attempt"]);
+    }
+  });
+});
+
+Deno.test("inconsistent account metadata and encrypted mode fail before any provider request", async () => {
+  await withEnvironment(async () => {
+    const stored = { ...await encryptedAccount(), liveMode: true };
+    const { client, calls } = fakeAdmin(() => stored);
+    await assertRejects(
+      () => paymentAccount(client, { accountId }),
+      (error) => error instanceof ApiError && error.code === "PAYMENT_ENVIRONMENT_MISMATCH",
+    );
+    assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+    const status = await paymentConnectionStatus(client, restaurantId);
+    assertEquals(status.readyForPayments, false);
+    assertEquals(status.connectionIssue, "reconnect_required");
+  });
+});
+
+Deno.test("account status distinguishes production readiness without returning or refreshing credentials", async () => {
+  await withEnvironment(async () => {
+    Deno.env.set("MERCADOPAGO_MODE", "production");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => {
+      throw new Error("Status must not contact the provider");
+    };
+    try {
+      const cases = [
+        { stored: null, issue: "not_connected", mode: null, ready: false },
+        {
+          stored: await encryptedAccount(true, true, false),
+          issue: "different_environment",
+          mode: "test",
+          ready: false,
+        },
+        {
+          stored: await encryptedAccount(false, true, true),
+          issue: "inactive",
+          mode: "production",
+          ready: false,
+        },
+        {
+          stored: await encryptedAccount(true, true, true),
+          issue: null,
+          mode: "production",
+          ready: true,
+        },
+        {
+          stored: await encryptedAccount(true, false, "legacy"),
+          issue: "reconnect_required",
+          mode: null,
+          ready: false,
+        },
+      ];
+      for (const value of cases) {
+        const { client, calls } = fakeAdmin(() => value.stored);
+        const status = await paymentConnectionStatus(client, restaurantId);
+        assertEquals(status.environment, "production");
+        assertEquals(status.connectionEnvironment, value.mode);
+        assertEquals(status.connectionIssue, value.issue);
+        assertEquals(status.readyForPayments, value.ready);
+        const serialized = JSON.stringify(status);
+        for (
+          const forbidden of [
+            "access-token-fixture",
+            "refresh-token-fixture",
+            "encryptedCredentials",
+            "accessToken",
+            "refreshToken",
+          ]
+        ) {
+          assert(!serialized.includes(forbidden));
+        }
+        assertEquals(calls.map((call) => call.name), ["get_payment_account"]);
+      }
+      Deno.env.delete("MERCADOPAGO_WEBHOOK_SECRET");
+      const { client } = fakeAdmin(() => cases[3]!.stored);
+      assertEquals((await paymentConnectionStatus(client, restaurantId)).readyForPayments, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("webhook routes by seller and mode but trusts only provider-fetched payment and pinned attempt", async () => {
+  await withEnvironment(async () => {
+    Deno.env.set("MERCADOPAGO_MODE", "production");
+    const stored = { ...await encryptedAccount(false), isCurrent: false };
+    const { client, calls } = fakeAdmin((name) =>
+      name === "get_payment_account" ? stored : attempt
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (input) => {
+      assert(String(input).startsWith("https://api.mercadopago.com/v1/payments/"));
+      return Promise.resolve(Response.json(providerPayment));
+    };
+    try {
+      await reconcilePaymentNotification(client, {
+        providerUserId: account.providerUserId,
+        paymentId: providerPayment.id,
+        liveMode: false,
+      });
+      assertEquals(calls[0]!.args, {
+        p_provider_user_id: account.providerUserId,
+        p_live_mode: false,
+      });
+      assertEquals(calls.at(-1)!.name, "reconcile_online_payment");
+
+      const wrongMode = fakeAdmin(() => stored);
+      await assertRejects(() =>
+        reconcilePaymentNotification(wrongMode.client, {
+          providerUserId: account.providerUserId,
+          paymentId: providerPayment.id,
+          liveMode: true,
+        })
+      );
+      assertEquals(wrongMode.calls.map((call) => call.name), ["get_payment_account"]);
+
+      const wrongPayment = fakeAdmin(() => stored);
+      await assertRejects(
+        () =>
+          reconcilePaymentNotification(wrongPayment.client, {
+            providerUserId: account.providerUserId,
+            paymentId: "different-payment",
+            liveMode: false,
+          }),
+        (error) =>
+          error instanceof Error && error.message === "Provider notification payment mismatch",
+      );
+      assertEquals(wrongPayment.calls.map((call) => call.name), ["get_payment_account"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+Deno.test("checkout validates encrypted account before reserving and pins the exact preflight connection", async () => {
+  await withEnvironment(async () => {
+    const validAccount = await encryptedAccount();
+    const checkoutAttempt = { ...attempt, checkoutUrl: null };
+    function checkoutClient(stored: unknown, savedAttempt: unknown = checkoutAttempt) {
+      const admin = fakeAdmin((name) => name === "get_payment_account" ? stored : savedAttempt);
+      const builder = {
+        select(column: string) {
+          assertEquals(column, "id");
+          return builder;
+        },
+        eq(column: string, value: string) {
+          assertEquals([column, value], ["slug", "demo"]);
+          return builder;
+        },
+        maybeSingle: () => Promise.resolve({ data: { id: restaurantId }, error: null }),
+      };
+      (admin.client as unknown as Record<string, unknown>).from = (table: string) => {
+        assertEquals(table, "restaurants");
+        return builder;
+      };
+      return admin;
+    }
+    const input = {
+      request: { restaurantSlug: " Demo " },
+      ipHash: "ip-fixture",
+      phoneHash: "phone-fixture",
+      clientEventTokenHash: "event-hash-fixture",
+      statusTokenHash: "status-hash-fixture",
+    };
+    for (
+      const stored of [
+        null,
+        { ...validAccount, encryptedCredentials: "invalid-envelope" },
+        { ...validAccount, liveMode: true },
+        { ...validAccount, active: false },
+        { ...validAccount, isCurrent: false },
+        await encryptedAccount(true, false, "legacy"),
+      ]
+    ) {
+      const admin = checkoutClient(stored);
+      await assertRejects(() => beginPaymentCheckout(admin.client, input));
+      assertEquals(admin.calls.map((call) => call.name), ["get_payment_account"]);
+    }
+    const admin = checkoutClient(validAccount);
+    const result = await beginPaymentCheckout(admin.client, input);
+    assertEquals(result.attempt, checkoutAttempt);
+    assertEquals(admin.calls.map((call) => call.name), [
+      "get_payment_account",
+      "begin_online_checkout",
+    ]);
+    assertEquals(admin.calls[1]!.args, {
+      p_request: input.request,
+      p_ip_hash: input.ipHash,
+      p_phone_hash: input.phoneHash,
+      p_client_event_token_hash: input.clientEventTokenHash,
+      p_status_token_hash: input.statusTokenHash,
+      p_live_mode: false,
+      p_expected_account_id: accountId,
+    });
+    const previousConnection = "51000000-0000-4000-8000-000000000002";
+    const replay = {
+      ...checkoutAttempt,
+      accountId: previousConnection,
+      checkoutUrl: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=historical-fixture",
+    };
+    const replayAdmin = checkoutClient(validAccount, replay);
+    assertEquals((await beginPaymentCheckout(replayAdmin.client, input)).attempt, replay);
+    for (
+      const rejectedReplay of [
+        { ...replay, checkoutUrl: null },
+        { ...replay, liveMode: true },
+        { ...replay, restaurantId: "21000000-0000-4000-8000-000000000002" },
+      ]
+    ) {
+      const replayAdmin = checkoutClient(validAccount, rejectedReplay);
+      await assertRejects(() => beginPaymentCheckout(replayAdmin.client, input));
+    }
+  });
+});
+
+Deno.test("legacy webhook without mode cannot use an ambiguous account or default to the deployment mode", async () => {
+  await withEnvironment(async () => {
+    const { client, calls } = fakeAdmin(() => null);
+    await assertRejects(() =>
+      reconcilePaymentNotification(client, {
+        providerUserId: account.providerUserId,
+        paymentId: providerPayment.id,
+      })
+    );
+    assertEquals(calls, [{
+      name: "get_payment_account",
+      args: { p_provider_user_id: account.providerUserId },
+    }]);
   });
 });
