@@ -107,7 +107,7 @@ export function AdminLayout() {
         <div className="flex h-20 items-center justify-between px-5">
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 place-items-center rounded-2xl bg-orange-600 text-white shadow-lg shadow-orange-950/20"><Store className="h-5 w-5" aria-hidden /></span>
-            <div><p className="font-display text-xl font-bold tracking-tight">Mozzi</p><p className="text-[11px] font-medium text-stone-400">Gestión gastronómica</p></div>
+            <div><p className="font-display text-xl font-bold tracking-tight">Mozzi</p><p className="text-[11px] font-medium text-stone-400">Gestión de comercios</p></div>
           </div>
           <button className="icon-button-dark lg:hidden" onClick={() => setOpen(false)} aria-label="Cerrar navegación"><X className="h-5 w-5" aria-hidden /></button>
         </div>
@@ -141,7 +141,7 @@ export function AdminLayout() {
         <div className="border-t border-stone-800 p-3">
           <div className="flex items-center gap-3 rounded-2xl bg-stone-900/70 p-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-stone-800 text-xs font-bold text-orange-200">{userInitials(auth.profile?.fullName ?? auth.user?.email)}</span>
-            <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{auth.profile?.fullName ?? auth.user?.email}</p><p className="truncate text-[11px] capitalize text-stone-400">{scope.selected?.role.replace('_', ' ')}</p></div>
+            <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{auth.profile?.fullName ?? auth.user?.email}</p><p className="truncate text-[11px] text-stone-400">{scope.selected?.role === 'order_manager' ? 'Gestor de pedidos' : scope.selected?.role === 'super_admin' ? 'Superadministrador' : 'Administrador del comercio'}</p></div>
             <button className="icon-button-dark !h-9 !w-9" onClick={() => void auth.signOut()} aria-label="Cerrar sesión"><LogOut className="h-4 w-4" aria-hidden /></button>
           </div>
         </div>

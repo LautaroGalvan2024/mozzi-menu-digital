@@ -1,5 +1,5 @@
-import { Minus, Plus, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Minus, Package, Plus, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { formatMoney, currentProductPrice } from '../../lib/money'
 import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import { publicAssetUrl } from '../../lib/supabase/client'
@@ -7,18 +7,19 @@ import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/doma
 import { cartProductName, variantLabel } from '../../lib/catalog-presentation'
 
 type ProductDialogProps = { product: PublicProduct; variants?: PublicProduct[]; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }
+type ProductDraft = { quantity: number; notes: string; setQuantity: Dispatch<SetStateAction<number>>; setNotes: Dispatch<SetStateAction<string>> }
 
 export function ProductDialog(props: ProductDialogProps) {
   const variants = props.variants ?? [props.product]
   const [selectedId, setSelectedId] = useState(props.initialLine?.productId ?? props.product.id)
+  const [quantity, setQuantity] = useState(props.initialLine?.quantity ?? 1)
+  const [notes, setNotes] = useState(props.initialLine?.notes ?? '')
   const selected = variants.find(product => product.id === selectedId) ?? props.product
-  return <ProductConfiguration key={selected.id} {...props} product={selected} variants={variants} onVariantChange={setSelectedId} />
+  return <ProductConfiguration key={selected.id} {...props} product={selected} variants={variants} onVariantChange={setSelectedId} quantity={quantity} setQuantity={setQuantity} notes={notes} setNotes={setNotes} />
 }
 
-function ProductConfiguration({ product, variants, onVariantChange, restaurant, onClose, onAdd, initialLine }: ProductDialogProps & { variants: PublicProduct[]; onVariantChange: (id: string) => void }) {
+function ProductConfiguration({ product, variants, onVariantChange, restaurant, onClose, onAdd, initialLine, quantity, setQuantity, notes, setNotes }: ProductDialogProps & ProductDraft & { variants: PublicProduct[]; onVariantChange: (id: string) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const [quantity, setQuantity] = useState(initialLine?.quantity ?? 1)
-  const [notes, setNotes] = useState(initialLine?.notes ?? '')
   const [selections, setSelections] = useState<Record<string, string[]>>(() => Object.fromEntries(product.optionGroups.map(group => [group.id, group.options.filter(option => initialLine?.selectedOptions.some(selected => selected.id === option.id)).map(option => option.id)])))
   const [removedOptions, setRemovedOptions] = useState<Set<string>>(new Set())
   const knownOptionIds = new Set(product.optionGroups.flatMap(group => group.options.map(option => option.id)))
@@ -113,13 +114,15 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
           </button>
           {imageUrl ? (
             <img src={imageUrl} className="h-52 w-full object-cover sm:h-64" alt={product.name} />
+          ) : restaurant.channel === 'store' ? (
+            <div className="grid h-32 place-items-center bg-stone-100 sm:h-44"><Package className="h-14 w-14 text-stone-400" aria-hidden /><span className="sr-only">Producto sin foto</span></div>
           ) : (
             <div className="grid h-44 place-items-center bg-orange-50 text-5xl sm:h-56" role="img" aria-label="Sin imagen">🍽️</div>
           )}
           <div className="p-5 pb-6 sm:p-7 sm:pb-8">
             <div className="pr-10">
               <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.family?.name ?? product.name}</h2>
-              {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name}{!variant.available ? ' · Sin stock' : ''}</option>)}</select></label> : null}
+              {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name} · {formatMoney(currentProductPrice(variant), restaurant.currencyCode, restaurant.locale)}{!variant.available ? ' · No disponible' : ''}</option>)}</select></label> : null}
               <p className="mt-2 text-sm leading-6 text-stone-600">{product.family?.description ?? product.description}</p>
               <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
               {advertisedQuantityPrices.length > 0 ? (
@@ -176,7 +179,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
             <span className="w-8 text-center font-bold text-stone-950 sm:w-10" aria-live="polite">{quantity}</span>
             <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(initialLine ? 100 : 20, value + 1))}><Plus aria-hidden /></button>
           </div>
-          <button type="button" className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
+          <button type="button" disabled={!product.available} className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
             <span className="truncate">{initialLine ? 'Guardar cambios' : 'Agregar'} · {formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</span>
           </button>
         </div>

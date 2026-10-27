@@ -63,6 +63,62 @@ describe('shared catalog storefront', () => {
     expect(localStorage.getItem('mozzi:cart:fundas')).toBe('[]')
   })
 
+  it('combines category and variant search and clears both filters from the empty state', async () => {
+    const chargers = '20000000-0000-4000-8000-000000000002'
+    mocks.menu.categories.push({ id: chargers, name: 'Cargadores', slug: 'cargadores', description: '', imagePath: null, sortOrder: 1, products: [{ ...black, id: '10000000-0000-4000-8000-000000000003', categoryId: chargers, name: 'Cargador USB', family: null, variantAttributes: {} }] })
+    page()
+    expect(await screen.findByRole('status')).toHaveTextContent('2 productos')
+    await userEvent.click(screen.getByRole('button', { name: 'Cargadores' }))
+    expect(screen.getByRole('button', { name: 'Cargadores' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('heading', { name: 'Funda de silicona' })).not.toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'Rojo')
+    expect(screen.getByRole('heading', { name: 'No encontramos productos' })).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('0 productos')
+    await userEvent.click(screen.getByRole('button', { name: 'Ver todos los productos' }))
+    expect(screen.getByRole('textbox', { name: 'Buscar productos' })).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Cargador USB' })).toBeVisible()
+  })
+
+  it('clears only the search while retaining the selected category', async () => {
+    page()
+    await userEvent.click(await screen.findByRole('button', { name: 'Fundas' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'no existe')
+    await userEvent.click(screen.getByRole('button', { name: 'Limpiar búsqueda' }))
+    expect(screen.getByRole('button', { name: 'Fundas' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
+  })
+
+  it.each(['paused', 'sold-out'] as const)('keeps %s products visible and disables ordering in the detail', async state => {
+    if (state === 'paused') mocks.menu.restaurant.acceptsOrders = false
+    else mocks.menu.categories[0]!.products = [black, red].map(product => ({ ...product, available: false }))
+    page(`/t/fundas/producto/${FAMILY}`)
+    expect(await screen.findByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Elegir variante' })).toBeDisabled()
+    expect(screen.getByText(state === 'paused' ? 'Pedidos pausados' : 'Agotado')).toBeVisible()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('shows an unpublished catalog empty state without a misleading filter reset', async () => {
+    mocks.menu.categories = []
+    page()
+    expect(await screen.findByRole('heading', { name: 'El catálogo está en preparación' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Ver todos los productos' })).not.toBeInTheDocument()
+  })
+
+  it('shows recovery only for the current commerce and links to its protected payment result', async () => {
+    const reference = JSON.stringify({ actionId: FAMILY, token: 'a'.repeat(43), expiresAt: new Date(Date.now() + 60_000).toISOString() })
+    localStorage.setItem(commerceStorageKey('payment-confirmation', 'otro-comercio', 'store'), reference)
+    const initial = page()
+    await screen.findByRole('heading', { name: 'Funda de silicona' })
+    expect(screen.queryByRole('link', { name: /Consultar mi última compra/ })).not.toBeInTheDocument()
+    initial.unmount()
+    localStorage.setItem(commerceStorageKey('payment-confirmation', 'fundas', 'store'), reference)
+    page()
+    expect(await screen.findByRole('link', { name: /Consultar mi última compra/ })).toHaveAttribute('href', '/t/fundas/pago')
+  })
+
   it('retains legacy attempt keys and distinguishes both channel and checkout mode', async () => {
     const values = { customerName: 'Ana Pérez', customerPhone: '+5493492123456', fulfillmentType: 'pickup' as const, paymentMethodId: FAMILY }
     const menu = checkoutBusinessRequest('fundas', values, [])

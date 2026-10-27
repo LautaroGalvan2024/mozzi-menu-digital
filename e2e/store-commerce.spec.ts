@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type TestInfo } from '@playwright/test'
 
 const restaurantId = '11000000-0000-4000-8000-000000000001'
 const categoryId = '12000000-0000-4000-8000-000000000001'
@@ -27,15 +27,18 @@ async function fixture(page: Page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(catalog) })
   })
 }
-async function addRedVariant(page: Page) {
+async function addRedVariant(page: Page, testInfo?: TestInfo) {
   await page.goto('/t/casa-movil')
   await expect(page.getByRole('heading', { name: 'Funda de silicona' })).toHaveCount(1)
   await page.getByRole('link', { name: /Funda de silicona/ }).click()
+  if (testInfo) await page.screenshot({ path: testInfo.outputPath('store-detail.png'), fullPage: true })
   await page.getByRole('button', { name: 'Elegir variante' }).click()
   await page.getByLabel('Elegí tu variante').selectOption(redId)
+  if (testInfo) await page.screenshot({ path: testInfo.outputPath('store-variant.png'), fullPage: true })
   await page.getByRole('dialog').getByRole('button', { name: /Agregar/ }).click()
   await page.getByRole('link', { name: /Ver carrito · 1/ }).click()
   await expect(page).toHaveURL(/\/t\/casa-movil\/carrito$/)
+  if (testInfo) await page.screenshot({ path: testInfo.outputPath('store-cart.png'), fullPage: true })
   await page.getByRole('link', { name: 'Continuar' }).click()
   await page.getByLabel('Nombre y apellido').fill('Ana Pérez')
   await page.getByLabel('Teléfono').fill('+5493492123456')
@@ -54,7 +57,9 @@ test('store variants and WhatsApp checkout share catalog while keeping menu cart
   await expect(page.getByText('Recibimos pedidos')).toBeVisible()
   await expect(page.getByText('Atención: fuera de horario')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('store-mobile.png'), fullPage: true })
-  await addRedVariant(page)
+  await addRedVariant(page, testInfo)
+  await expect(page.getByLabel('Teléfono')).toHaveAccessibleDescription(/WhatsApp con código de país/)
+  await page.screenshot({ path: testInfo.outputPath('store-checkout-mobile.png'), fullPage: true })
   await page.getByRole('button', { name: 'Generar pedido' }).click()
   await expect(page).toHaveURL(/\/t\/casa-movil\/pedido-generado$/)
   await expect(page.getByRole('button', { name: 'Abrir WhatsApp', exact: true })).toBeVisible()
@@ -66,23 +71,33 @@ test('store variants and WhatsApp checkout share catalog while keeping menu cart
 test('store online checkout confirms server total and ignores forged provider success query', async ({ page }, testInfo) => {
   await fixture(page)
   let received: Record<string, unknown> | null = null
+  let approved = false
   await page.route('**/functions/v1/create-payment', async route => {
     received = route.request().postDataJSON()
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(summary) })
   })
   await page.route('**/functions/v1/payment-status', async route => {
     expect(route.request().postDataJSON()).toEqual({ actionId, recoveryToken: token })
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(summary) })
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(approved ? { ...summary, payment: { ...summary.payment, status: 'approved' } } : summary) })
   })
   await addRedVariant(page)
   await page.getByRole('radio', { name: /Pagar online/ }).check()
   await page.screenshot({ path: testInfo.outputPath('store-checkout-desktop.png'), fullPage: true })
   await page.getByRole('button', { name: 'Continuar al pago' }).click()
-  await expect(page.getByRole('heading', { name: 'Pago pendiente' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Pago pendiente de confirmación' })).toBeVisible()
   expect(received).toMatchObject({ channel: 'store', checkoutMode: 'online', items: [{ productId: redId, quantity: 1 }] })
-  await expect(page.getByRole('link', { name: 'Pagar en Mercado Pago' })).toHaveAttribute('href', summary.payment.checkoutUrl)
+  await expect(page.getByRole('link', { name: 'Continuar en Mercado Pago' })).toHaveAttribute('href', summary.payment.checkoutUrl)
   await page.goto(`/t/casa-movil/pago?status=approved&payment_id=untrusted&order=${actionId}`)
-  await expect(page.getByRole('heading', { name: 'Pago pendiente' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Pago pendiente de confirmación' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Pago aprobado' })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('store-payment-pending.png'), fullPage: true })
+  approved = true
+  await page.getByRole('button', { name: 'Actualizar estado' }).click()
+  await expect(page.getByRole('heading', { name: 'Pago aprobado' })).toBeVisible()
+  await expect(page.getByText(/En breve, el comercio se comunicará por WhatsApp/)).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Continuar en Mercado Pago' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('store-payment-approved-desktop.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('store-payment-approved-mobile.png'), fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })

@@ -101,4 +101,28 @@ describe('cart validation and deliberate reconfiguration', () => {
     expect(stored()[0]?.notes).toBe(line.notes)
     expect(stored()[0]?.selectedOptions).toEqual(line.selectedOptions)
   })
+
+  it('lets a store customer change a variant from the cart while preserving quantity and notes', async () => {
+    const family = { id: '50000000-0000-4000-8000-000000000001', name: 'Funda', description: '', imagePath: null, axes: ['Color'] }
+    const black: PublicProduct = { ...product, name: 'Negro', family, variantAttributes: { Color: 'Negro' }, optionGroups: [] }
+    const blue: PublicProduct = { ...black, id: '50000000-0000-4000-8000-000000000002', name: 'Azul', basePriceCents: 1500, variantAttributes: { Color: 'Azul' } }
+    mocks.menu = fixture([black, blue])
+    mocks.menu.restaurant.channel = 'store'
+    localStorage.setItem('mozzi:cart:store:mozzi', JSON.stringify([{ ...line, productName: 'Funda · Negro', selectedOptions: [] }]))
+    render(<MemoryRouter initialEntries={['/t/mozzi/carrito']}><CartProvider><Routes><Route path="/t/:restaurantSlug/carrito" element={<CartPage />} /></Routes></CartProvider></MemoryRouter>)
+    await userEvent.click(await screen.findByRole('button', { name: /Editar Funda/ }))
+    const selector = screen.getByLabelText('Elegí tu variante')
+    expect(within(selector).getAllByRole('option')).toHaveLength(2)
+    await userEvent.click(screen.getByRole('button', { name: 'Sumar uno' }))
+    await userEvent.clear(screen.getByLabelText('Observaciones para este producto'))
+    await userEvent.type(screen.getByLabelText('Observaciones para este producto'), 'Para regalo')
+    await userEvent.selectOptions(selector, blue.id)
+    expect(screen.getByLabelText('Observaciones para este producto')).toHaveValue('Para regalo')
+    await userEvent.click(screen.getByRole('button', { name: /Guardar cambios/ }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const saved: CartLine[] = JSON.parse(localStorage.getItem('mozzi:cart:store:mozzi')!)
+    expect(saved[0]).toMatchObject({ productId: blue.id, quantity: 3, notes: 'Para regalo', unitPriceCents: 1500 })
+    expect(saved[0]?.productName).toContain('Azul')
+    expect(stored()).toEqual([line])
+  })
 })

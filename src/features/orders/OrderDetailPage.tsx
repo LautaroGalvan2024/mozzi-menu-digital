@@ -1,4 +1,4 @@
-import { CommerceOrderStatus, paymentStatusLabel } from './CommerceOrderStatus'
+import { CommerceOrderStatus, isPaidAwaitingPreparation, paymentStatusLabel } from './CommerceOrderStatus'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { adminOrderSchema, eventSchema, itemOptionSchema, itemSchema } from './orderSchemas'
 import { StatusPill } from './OrderStatus'
+import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { clearReverseAttempt, inventoryDetailSchema, inventoryOrderError, inventoryOutcomeLabel, isReversed, loadReverseAttempt, saveReverseAttempt, type ReverseAttempt } from './inventoryOrder'
 
 export function OrderDetailPage() {
@@ -212,7 +213,7 @@ export function OrderDetailPage() {
     {order.checkout_mode === 'online' ? <section className="form-card mb-6"><CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={order.status === 'generated'} /><p className="mt-3 text-sm">Cancelar un pedido no devuelve el pago. Los reintegros se gestionan en Mercado Pago y su estado se actualiza al confirmarse.</p>{order.status === 'generated' && order.payment_status === 'approved' ? <Link className="button-primary mt-4" to={`/admin/pedidos/tomar/${order.action_id}`}>Aceptar para preparar</Link> : null}</section> : null}<div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
       <div className="space-y-6">
         <section className="form-card">
-          <div className="flex justify-between"><h2 className="form-card-title">Productos</h2><StatusPill status={order.status} outcome={order.inventory_outcome} /></div>
+          <div className="flex justify-between"><h2 className="form-card-title">Productos</h2>{!isPaidAwaitingPreparation(order) ? <StatusPill status={order.status} outcome={order.inventory_outcome} /> : null}</div>
           <div className="mt-5 divide-y divide-stone-200">
             {items.map((item) => <article className="py-4 first:pt-0" key={item.id}>
               <div className="flex justify-between gap-3">
@@ -234,7 +235,7 @@ export function OrderDetailPage() {
           </dl>
         </section>
         <section className="form-card">
-          <h2 className="form-card-title">Cliente y entrega</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="form-card-title">Cliente y entrega</h2><OrderWhatsAppAction order={order} businessName={scope.selected?.name ?? ''} showLabel /></div>
           <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
             <Info label="Cliente" value={order.customer_name} />
             <Info label="Teléfono" value={order.customer_phone} />
