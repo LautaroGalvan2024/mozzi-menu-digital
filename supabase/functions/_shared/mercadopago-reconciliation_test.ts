@@ -62,7 +62,7 @@ async function withEnvironment(action: () => Promise<void>) {
   const values = {
     MERCADOPAGO_MODE: "test",
     MERCADOPAGO_ENCRYPTION_KEY: key,
-    MERCADOPAGO_CLIENT_ID: "client-fixture",
+    MERCADOPAGO_CLIENT_ID: "1234567890123456",
     MERCADOPAGO_CLIENT_SECRET: "client-secret-fixture",
     APP_BASE_URL: "https://mozzi.example.test",
     SUPABASE_URL: "https://supabase.example.test",
@@ -117,7 +117,7 @@ Deno.test("OAuth code exchange requests sandbox tokens only in test mode and pre
           method: "POST",
           body: {
             grant_type: "authorization_code",
-            client_id: "client-fixture",
+            client_id: "1234567890123456",
             client_secret: "client-secret-fixture",
             code: "authorization-code-fixture",
             redirect_uri: "https://supabase.example.test/functions/v1/mercadopago-callback",
@@ -332,7 +332,7 @@ Deno.test("refreshing a disconnected account preserves inactive state for pendin
     }
     assertEquals(refreshBody, {
       grant_type: "refresh_token",
-      client_id: "client-fixture",
+      client_id: "1234567890123456",
       client_secret: "client-secret-fixture",
       refresh_token: "refresh-token-fixture",
     });

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase/client'
 
 const connectionSchema = z.object({
   configured: z.boolean(),
+  configurationIssue: z.enum(['invalid_client_id', 'missing_configuration']).nullable().optional(),
   connection: z.object({ connected: z.boolean().optional(), active: z.boolean().optional(), providerUserId: z.string().nullable().optional() }).passthrough().nullable(),
 })
 
@@ -21,9 +22,10 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
     },
   })
   const connected = connection.data?.connection?.connected ?? connection.data?.connection?.active ?? false
+  const canConnect = connection.data?.configured === true && connection.data.configurationIssue == null
 
   async function act(action: 'connect' | 'disconnect') {
-    if (busy) return
+    if (busy || (action === 'connect' && !canConnect)) return
     setBusy(true); setError(null)
     try {
       const result = await supabase.functions.invoke('mercadopago-connect', { body: { restaurantId, action } })
@@ -47,11 +49,13 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
     </div>
     <p className="mt-2 text-sm text-stone-600">Recibí las ventas directamente en tu cuenta. Para habilitar el pago online, activá el inventario y la opción de cobro en la configuración de la tienda.</p>
     {connected && connection.data?.connection?.providerUserId ? <p className="mt-2 text-sm">Cuenta: {connection.data.connection.providerUserId}</p> : null}
-    {connection.data && !connection.data.configured ? <p className="mt-3 text-sm text-amber-800">La conexión de pagos todavía no está configurada en la plataforma. Podés seguir recibiendo pedidos por WhatsApp.</p> : null}
+    {connection.data && !canConnect ? <p className="mt-3 text-sm text-amber-800" role="alert">{connection.data.configurationIssue === 'invalid_client_id'
+      ? 'El ID de la aplicación de Mercado Pago debe ser numérico. El administrador de Mozzi debe corregirlo para conectar la cuenta. Podés seguir recibiendo pedidos por WhatsApp.'
+      : 'La conexión de pagos todavía no está configurada en la plataforma. Podés seguir recibiendo pedidos por WhatsApp.'}</p> : null}
     {connection.isError ? <p className="form-error mt-3" role="alert">{connection.error.message}</p> : null}
     {error ? <p className="form-error mt-3" role="alert">{error}</p> : null}
     <div className="mt-4 flex flex-wrap gap-3">
-      <button type="button" className="button-primary" disabled={busy || connection.isPending || !connection.data?.configured} onClick={() => void act('connect')}>{busy ? 'Procesando…' : connected ? 'Reconectar Mercado Pago' : 'Conectar Mercado Pago'}</button>
+      <button type="button" className="button-primary" disabled={busy || connection.isPending || !canConnect} onClick={() => void act('connect')}>{busy ? 'Procesando…' : connected ? 'Reconectar Mercado Pago' : 'Conectar Mercado Pago'}</button>
       {connected ? <button type="button" className="button-secondary" disabled={busy} onClick={() => void act('disconnect')}>Desactivar nuevos cobros</button> : null}
     </div>
     {connected ? <p className="mt-3 text-xs text-stone-500">Desactivar nuevos cobros conserva la conciliación de compras anteriores. Los reintegros se realizan desde Mercado Pago.</p> : null}

@@ -1,9 +1,50 @@
 import { activeRestaurantRole, requireAal2, verifyActor } from "./auth.ts";
 import { createAdminClient } from "./clients.ts";
 import { getAppBaseUrl, getSupabaseUrl, requireEnv } from "./config.ts";
+import { randomToken, sha256Hex } from "./crypto.ts";
 import { type SupabaseClient, z } from "./deps.ts";
 import { ApiError, databaseApiError } from "./errors.ts";
-import { decryptCredentials, encryptCredentials, paymentAmountCents } from "./mercadopago-core.ts";
+import {
+  decryptCredentials,
+  encryptCredentials,
+  paymentAmountCents,
+  pkceChallenge,
+} from "./mercadopago-core.ts";
+import { invalidTokenResponse, oauthProviderFailure } from "./mercadopago-errors.ts";
+
+// OAuth client_id is the application's numeric APP_ID, not its Public Key or Access Token.
+// Keep it as a string; the upper bound is defensive, not an assumed provider ID length.
+const CLIENT_ID_PATTERN = /^[1-9][0-9]{0,31}$/;
+
+export function paymentConnectionConfiguration(): {
+  configured: boolean;
+  configurationIssue: "invalid_client_id" | "missing_configuration" | null;
+} {
+  const clientId = Deno.env.get("MERCADOPAGO_CLIENT_ID")?.trim();
+  if (clientId && !CLIENT_ID_PATTERN.test(clientId)) {
+    return { configured: false, configurationIssue: "invalid_client_id" };
+  }
+  const complete = clientId && [
+    "MERCADOPAGO_CLIENT_SECRET",
+    "MERCADOPAGO_ENCRYPTION_KEY",
+    "MERCADOPAGO_WEBHOOK_SECRET",
+  ].every((name) => Boolean(Deno.env.get(name)?.trim()));
+  return complete
+    ? { configured: true, configurationIssue: null }
+    : { configured: false, configurationIssue: "missing_configuration" };
+}
+
+export function requireMercadoPagoClientId(): string {
+  const clientId = Deno.env.get("MERCADOPAGO_CLIENT_ID")?.trim();
+  if (!clientId || !CLIENT_ID_PATTERN.test(clientId)) {
+    throw new ApiError(
+      500,
+      "PAYMENT_CONFIGURATION_ERROR",
+      "La plataforma debe configurar el Client ID numérico de la aplicación de Mercado Pago.",
+    );
+  }
+  return clientId;
+}
 
 export const providerTokenSchema = z.object({
   access_token: z.string().min(8),
@@ -12,6 +53,16 @@ export const providerTokenSchema = z.object({
   expires_in: z.number().positive(),
   live_mode: z.boolean(),
 });
+export function validateProviderToken(raw: unknown): z.infer<typeof providerTokenSchema> {
+  const result = providerTokenSchema.safeParse(raw);
+  if (!result.success) {
+    throw invalidTokenResponse(
+      raw,
+      result.error.issues.flatMap((issue) => issue.path.length ? [issue.path[0]!] : []),
+    );
+  }
+  return result.data;
+}
 const accountSchema = z.object({
   restaurantId: z.string().uuid(),
   providerUserId: z.string(),
@@ -68,13 +119,49 @@ function providerLiveMode(): boolean {
 export async function exchangeAuthorizationCode(code: string, verifier: string): Promise<unknown> {
   return await providerRequest("/oauth/token", undefined, {
     grant_type: "authorization_code",
-    client_id: requireEnv("MERCADOPAGO_CLIENT_ID"),
+    client_id: requireMercadoPagoClientId(),
     client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
     code,
     redirect_uri: oauthRedirectUri(),
     code_verifier: verifier,
     ...(!providerLiveMode() ? { test_token: true } : {}),
   });
+}
+
+/** Call only after authorizing the administrator; deployment errors never create OAuth state. */
+export async function beginPaymentConnection(
+  admin: SupabaseClient,
+  actor: { restaurantId: string; actorId: string; superAdminAal2: boolean },
+): Promise<{ authorizationUrl: string }> {
+  const clientId = requireMercadoPagoClientId();
+  requireEnv("MERCADOPAGO_CLIENT_SECRET");
+  requireEnv("MERCADOPAGO_WEBHOOK_SECRET");
+  getAppBaseUrl();
+  const redirectUri = oauthRedirectUri();
+  const encryptionKey = mpEncryptionKey();
+  const state = randomToken(32);
+  const verifier = randomToken(48);
+  const stateHash = await sha256Hex(state);
+  const encryptedPayload = await encryptCredentials(
+    { ...actor, verifier },
+    encryptionKey,
+    stateHash,
+  );
+  const url = new URL("https://auth.mercadopago.com/authorization");
+  url.search = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    platform_id: "mp",
+    state,
+    redirect_uri: redirectUri,
+    code_challenge: await pkceChallenge(verifier),
+    code_challenge_method: "S256",
+  }).toString();
+  await rpc(admin, "save_payment_oauth_state", {
+    p_state_hash: stateHash,
+    p_encrypted_payload: encryptedPayload,
+  });
+  return { authorizationUrl: url.href };
 }
 export function paymentReturnUrl(slug: string, actionId: string): string {
   return `${getAppBaseUrl()}/t/${encodeURIComponent(slug)}/pago?order=${
@@ -122,6 +209,7 @@ export async function providerRequest(
     );
   }
   if (!response.ok) {
+    if (path === "/oauth/token") throw await oauthProviderFailure(response);
     await response.body?.cancel();
     throw new ApiError(
       response.status >= 500 ? 503 : 409,
@@ -129,7 +217,12 @@ export async function providerRequest(
       "Mercado Pago no pudo completar la operación. Revisá la conexión del comercio o reintentá.",
     );
   }
-  return await response.json();
+  try {
+    return await response.json();
+  } catch (error) {
+    if (path === "/oauth/token") throw invalidTokenResponse(undefined, []);
+    throw error;
+  }
 }
 
 export async function saveProviderAccount(
@@ -138,7 +231,7 @@ export async function saveProviderAccount(
   raw: unknown,
   activate = true,
 ): Promise<void> {
-  const token = providerTokenSchema.parse(raw);
+  const token = validateProviderToken(raw);
   if (token.live_mode !== providerLiveMode()) {
     throw new ApiError(
       409,
@@ -182,6 +275,7 @@ export async function paymentAccount(
     await decryptCredentials(account.encryptedCredentials, mpEncryptionKey(), account.restaurantId),
   );
   if (Date.parse(account.expiresAt) <= Date.now() + 60_000) {
+    const clientId = requireMercadoPagoClientId();
     const acquired = await rpc(admin, "acquire_payment_account_refresh", {
       p_restaurant_id: account.restaurantId,
       p_expected_expires_at: account.expiresAt,
@@ -195,10 +289,10 @@ export async function paymentAccount(
     }
     // Refresh inherits the original token's environment; test_token belongs to initial authorization.
     // https://www.mercadopago.com.ar/developers/es/docs/split-payments/additional-content/security/oauth/renewal
-    const refresh = providerTokenSchema.parse(
+    const refresh = validateProviderToken(
       await providerRequest("/oauth/token", undefined, {
         grant_type: "refresh_token",
-        client_id: requireEnv("MERCADOPAGO_CLIENT_ID"),
+        client_id: clientId,
         client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
         refresh_token: credentials.refreshToken,
       }),

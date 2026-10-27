@@ -16,8 +16,8 @@ Configurar estas variables **solo en Edge**, mediante el almacén de secretos de
 
 | Variable | Valor |
 | --- | --- |
-| `MERCADOPAGO_CLIENT_ID` | ID de la aplicación de Mercado Pago |
-| `MERCADOPAGO_CLIENT_SECRET` | Secreto de esa aplicación |
+| `MERCADOPAGO_CLIENT_ID` | Client ID / APP_ID numérico de la aplicación; no es la Public Key |
+| `MERCADOPAGO_CLIENT_SECRET` | Client Secret de esa aplicación; no es el Access Token |
 | `MERCADOPAGO_ENCRYPTION_KEY` | 32 bytes aleatorios en base64url sin padding; guardar también en el respaldo privado |
 | `MERCADOPAGO_WEBHOOK_SECRET` | Firma secreta de Webhooks de la aplicación |
 | `MERCADOPAGO_MODE` | `test` para pruebas o `production` para cobros reales; producción es el default |

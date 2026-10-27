@@ -5,15 +5,29 @@ import { ApiError, toApiError } from "../_shared/errors.ts";
 import { jsonResponse, safeLog } from "../_shared/http.ts";
 import { decryptCredentials } from "../_shared/mercadopago-core.ts";
 import {
+  oauthCallbackMessage,
+  safeOAuthProviderMetadata,
+  safeTokenResponseMetadata,
+} from "../_shared/mercadopago-errors.ts";
+import {
   createAdminClient,
   exchangeAuthorizationCode,
   mpEncryptionKey,
   rpc,
   saveProviderAccount,
+  validateProviderToken,
 } from "../_shared/mercadopago.ts";
 
 Deno.serve(async (request) => {
   const requestId = crypto.randomUUID();
+  let stage:
+    | "request_validation"
+    | "state_consumption"
+    | "state_decryption"
+    | "authorization_check"
+    | "token_exchange"
+    | "token_validation"
+    | "account_save" = "request_validation";
   try {
     if (request.method !== "GET") {
       throw new ApiError(405, "METHOD_NOT_ALLOWED", "Método no permitido.");
@@ -23,10 +37,12 @@ Deno.serve(async (request) => {
       url.searchParams.get("state"),
     );
     const stateHash = await sha256Hex(state);
+    stage = "state_consumption";
     const admin = createAdminClient();
     const stored = z.object({ encryptedPayload: z.string() }).parse(
       await rpc(admin, "consume_payment_oauth_state", { p_state_hash: stateHash }),
     );
+    stage = "state_decryption";
     const payload = z.object({
       restaurantId: z.string().uuid(),
       actorId: z.string().uuid(),
@@ -34,6 +50,7 @@ Deno.serve(async (request) => {
       verifier: z.string(),
     }).parse(await decryptCredentials(stored.encryptedPayload, mpEncryptionKey(), stateHash));
     // Recheck current permissions after the browser's round trip.
+    stage = "authorization_check";
     const [
       { data: profile, error: profileError },
       { data: member, error: memberError },
@@ -58,8 +75,12 @@ Deno.serve(async (request) => {
     if (url.searchParams.has("error")) resultUrl.searchParams.set("mp", "cancelled");
     else {
       const code = z.string().min(1).max(2048).parse(url.searchParams.get("code"));
+      stage = "token_exchange";
       const token = await exchangeAuthorizationCode(code, payload.verifier);
-      await saveProviderAccount(admin, payload.restaurantId, token);
+      stage = "token_validation";
+      const validatedToken = validateProviderToken(token);
+      stage = "account_save";
+      await saveProviderAccount(admin, payload.restaurantId, validatedToken);
       resultUrl.searchParams.set("mp", "connected");
       safeLog("info", "payment.account_connected", requestId, {
         restaurantId: payload.restaurantId,
@@ -75,12 +96,20 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     const failure = toApiError(error);
-    safeLog("error", "payment.connection_failed", requestId);
+    const providerMetadata = {
+      ...safeOAuthProviderMetadata(failure),
+      ...safeTokenResponseMetadata(failure),
+    };
+    safeLog("error", "payment.connection_failed", requestId, {
+      errorCode: failure.code,
+      stage,
+      ...providerMetadata,
+    });
     return jsonResponse({
       error: {
         code: failure.code,
-        message:
-          "No se pudo conectar Mercado Pago. Volvé al panel e iniciá la conexión nuevamente.",
+        message: oauthCallbackMessage(failure),
+        details: { stage, ...providerMetadata },
       },
       requestId,
     }, failure.status);
