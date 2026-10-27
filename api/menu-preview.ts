@@ -20,6 +20,7 @@ interface RestaurantPreview {
   slug: string
   logoPath: string | null
   coverPath: string | null
+  product?: { name: string; description: string; imagePath: string | null }
 }
 
 interface PreviewConfiguration {
@@ -80,16 +81,18 @@ export function renderMenuPreviewHtml({
   canonicalUrl,
   imageUrl,
   faviconUrl,
+  channel = 'menu',
 }: {
   restaurant: RestaurantPreview
   canonicalUrl: string
   imageUrl: string
   faviconUrl: string
+  channel?: 'menu' | 'store'
 }): string {
-  const title = `${restaurant.tradeName} · Menú digital`
+  const title = restaurant.product ? `${restaurant.product.name} · ${restaurant.tradeName}` : `${restaurant.tradeName} · ${channel === 'store' ? 'Tienda online' : 'Menú digital'}`
   const description =
-    restaurant.description.trim().slice(0, 300) ||
-    `Mirá el menú digital de ${restaurant.tradeName} y hacé tu pedido por WhatsApp.`
+    (restaurant.product?.description ?? restaurant.description).trim().slice(0, 300) ||
+    (channel === 'store' ? `Descubrí los productos de ${restaurant.tradeName} y comprá online.` : `Mirá el menú digital de ${restaurant.tradeName} y hacé tu pedido por WhatsApp.`)
   const imageAlt = `Imagen de ${restaurant.tradeName}`
   const safe = {
     title: escapeHtml(title),
@@ -128,7 +131,7 @@ export function renderMenuPreviewHtml({
     <main>
       <h1>${safe.tradeName}</h1>
       <p>${safe.description}</p>
-      <a href="${safe.canonicalUrl}">Abrir menú digital</a>
+      <a href="${safe.canonicalUrl}">${channel === 'store' ? 'Abrir tienda online' : 'Abrir menú digital'}</a>
     </main>
   </body>
 </html>`
@@ -197,8 +200,10 @@ async function fetchRestaurantPreview(
   slug: string,
   configuration: PreviewConfiguration,
   fetchImplementation: typeof fetch,
+  channel: 'menu' | 'store' = 'menu',
+  productId: string | null = null,
 ): Promise<RestaurantPreview | null> {
-  const endpoint = new URL('/rest/v1/rpc/get_public_menu', configuration.supabaseUrl)
+  const endpoint = new URL(`/rest/v1/rpc/${channel === 'store' ? 'get_public_catalog' : 'get_public_menu'}`, configuration.supabaseUrl)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
@@ -210,11 +215,25 @@ async function fetchRestaurantPreview(
         authorization: `Bearer ${configuration.publishableKey}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ p_restaurant_slug: slug }),
+      body: JSON.stringify({ p_restaurant_slug: slug, ...(channel === 'store' ? { p_channel: 'store' } : {}) }),
       signal: controller.signal,
     })
     if (!response.ok) throw new Error('PUBLIC_MENU_UNAVAILABLE')
-    return parseRestaurantPreview(await response.json())
+    const payload: unknown = await response.json()
+    const restaurant = parseRestaurantPreview(payload)
+    if (!restaurant || !productId) return restaurant
+    const categories = (payload as { categories?: unknown }).categories
+    if (!Array.isArray(categories)) return null
+    for (const category of categories) {
+      if (!category || !Array.isArray(category.products)) continue
+      for (const product of category.products) {
+        if (!product || (product.id !== productId && product.family?.id !== productId)) continue
+        const presentation = product.family ?? product
+        if (typeof presentation.name !== 'string' || typeof presentation.description !== 'string' || (presentation.imagePath !== null && typeof presentation.imagePath !== 'string')) return null
+        return { ...restaurant, product: { name: presentation.name.slice(0, 160), description: presentation.description.slice(0, 1200), imagePath: presentation.imagePath } }
+      }
+    }
+    return null
   } finally {
     clearTimeout(timeout)
   }
@@ -241,7 +260,11 @@ export async function handleMenuPreviewRequest(
   const isHeadRequest = request.method === 'HEAD'
   if (request.method !== 'GET' && !isHeadRequest) return errorResponse(405, false)
 
-  const slug = new URL(request.url).searchParams.get('slug')?.trim() ?? ''
+  const params = new URL(request.url).searchParams
+  const slug = params.get('slug')?.trim() ?? ''
+  const channel = params.get('channel') ?? 'menu'
+  const productId = params.get('product')
+  if (!['menu', 'store'].includes(channel) || (productId && (channel !== 'store' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)))) return errorResponse(404, isHeadRequest)
   if (!isValidRestaurantSlug(slug)) return errorResponse(404, isHeadRequest)
 
   const environment = dependencies.environment ?? runtimeEnvironment()
@@ -253,13 +276,16 @@ export async function handleMenuPreviewRequest(
       slug,
       configuration,
       dependencies.fetch ?? fetch,
+      channel as 'menu' | 'store',
+      productId,
     )
     if (!restaurant || restaurant.slug !== slug) return errorResponse(404, isHeadRequest)
 
-    const canonicalUrl = new URL(`/r/${encodeURIComponent(restaurant.slug)}`, configuration.appBaseUrl)
+    const canonicalUrl = new URL(`/${channel === 'store' ? 't' : 'r'}/${encodeURIComponent(restaurant.slug)}${productId ? `/producto/${productId}` : ''}`, configuration.appBaseUrl)
       .toString()
     const faviconUrl = new URL('/favicon.svg', configuration.appBaseUrl).toString()
     const imageUrl =
+      buildPublicAssetUrl(configuration.supabaseUrl, restaurant.product?.imagePath ?? null) ??
       buildPublicAssetUrl(configuration.supabaseUrl, restaurant.coverPath) ??
       buildPublicAssetUrl(configuration.supabaseUrl, restaurant.logoPath) ??
       faviconUrl
@@ -268,6 +294,7 @@ export async function handleMenuPreviewRequest(
       canonicalUrl,
       imageUrl,
       faviconUrl,
+      channel: channel as 'menu' | 'store',
     })
     return new Response(isHeadRequest ? null : html, {
       status: 200,

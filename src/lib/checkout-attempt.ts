@@ -1,5 +1,6 @@
 import type { CartLine } from '../types/domain'
 import type { CheckoutValues } from './validation/schemas'
+import { commerceStorageKey, type CommerceChannel } from './commerce-channel'
 
 export type StoredCheckoutAttempt = {
   version?: 2
@@ -8,13 +9,14 @@ export type StoredCheckoutAttempt = {
   createdAt: number
   status?: 'uncertain' | 'rejected'
   estimatedTotalCents?: number
+  checkoutMode?: 'whatsapp' | 'online'
 }
-const storageKey = (restaurantSlug: string) => `mozzi:checkout-attempt:${restaurantSlug}`
+const storageKey = (restaurantSlug: string, channel: CommerceChannel = 'menu') => commerceStorageKey('checkout-attempt', restaurantSlug, channel)
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export function readCheckoutAttempt(restaurantSlug: string): StoredCheckoutAttempt | null {
+export function readCheckoutAttempt(restaurantSlug: string, channel: CommerceChannel = 'menu'): StoredCheckoutAttempt | null {
   let raw: string | null
-  try { raw = sessionStorage.getItem(storageKey(restaurantSlug)) } catch { throw new Error('No podemos guardar el reintento en este navegador. Habilitá el almacenamiento antes de enviar el pedido.') }
+  try { raw = sessionStorage.getItem(storageKey(restaurantSlug, channel)) } catch { throw new Error('No podemos guardar el reintento en este navegador. Habilitá el almacenamiento antes de enviar el pedido.') }
   if (!raw) return null
   try {
     const value: unknown = JSON.parse(raw)
@@ -23,6 +25,7 @@ export function readCheckoutAttempt(restaurantSlug: string): StoredCheckoutAttem
     if (typeof attempt.fingerprint !== 'string' || typeof attempt.idempotencyKey !== 'string' || !uuid.test(attempt.idempotencyKey) || typeof attempt.createdAt !== 'number' || !Number.isFinite(attempt.createdAt)) throw new Error()
     if (attempt.version !== undefined && (attempt.version !== 2 || !['uncertain', 'rejected'].includes(attempt.status ?? '') || !/^[a-f0-9]{64}$/.test(attempt.fingerprint))) throw new Error()
     if (attempt.estimatedTotalCents !== undefined && (!Number.isSafeInteger(attempt.estimatedTotalCents) || attempt.estimatedTotalCents < 0)) throw new Error()
+    if (attempt.checkoutMode !== undefined && !['whatsapp', 'online'].includes(attempt.checkoutMode)) throw new Error()
     return attempt as StoredCheckoutAttempt
   } catch { throw new Error('No pudimos recuperar el intento anterior. Consultá al comercio antes de iniciar otro pedido.') }
 }
@@ -48,12 +51,13 @@ function replaceControls(value: string, preserveNewlines = false): string {
 const normalizeSingleLine = (value = '') => replaceControls(value.normalize('NFKC')).replace(/\s+/g, ' ').trim()
 const normalizeMultiline = (value = '') => replaceControls(value.normalize('NFKC').replace(/\r\n?/g, '\n'), true).split('\n').map((line) => line.replace(/[\t ]+/g, ' ').trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim()
 
-export function checkoutBusinessRequest(slug: string, values: CheckoutValues, lines: readonly CartLine[]) {
+export function checkoutBusinessRequest(slug: string, values: CheckoutValues, lines: readonly CartLine[], channel: CommerceChannel = 'menu', checkoutMode: 'whatsapp' | 'online' = 'whatsapp') {
   let phone = values.customerPhone.normalize('NFKC').trim().replace(/[\s().-]/g, '')
   if (phone.startsWith('00')) phone = `+${phone.slice(2)}`
   if (!phone.startsWith('+')) phone = `+${phone}`
   const items: { productId: string; quantity: number; notes: string; optionIds: string[] }[] = JSON.parse(checkoutCartFingerprint(lines))
   return {
+    ...(channel === 'store' ? { channel, checkoutMode } : {}),
     restaurantSlug: slug,
     customer: { name: normalizeSingleLine(values.customerName), phone },
     fulfillment: {
@@ -78,27 +82,28 @@ export async function checkoutRequestFingerprint(request: unknown): Promise<stri
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export function getCheckoutAttemptKey(restaurantSlug: string, fingerprint: string, now = Date.now(), createKey = () => crypto.randomUUID()) {
-  const existing = readCheckoutAttempt(restaurantSlug)
+export function getCheckoutAttemptKey(restaurantSlug: string, fingerprint: string, now = Date.now(), createKey = () => crypto.randomUUID(), channel: CommerceChannel = 'menu') {
+  const existing = readCheckoutAttempt(restaurantSlug, channel)
   // Time and changes never rotate a key. Only confirmed success or an explicit
   // user decision after checking with the merchant may clear the old attempt.
   if (existing) return existing.idempotencyKey
   const idempotencyKey = createKey()
-  try { sessionStorage.setItem(storageKey(restaurantSlug), JSON.stringify({ fingerprint, idempotencyKey, createdAt: now })) }
+  try { sessionStorage.setItem(storageKey(restaurantSlug, channel), JSON.stringify({ fingerprint, idempotencyKey, createdAt: now })) }
   catch { throw new Error('No pudimos guardar el reintento. El pedido no se envió; habilitá el almacenamiento y volvé a intentar.') }
   return idempotencyKey
 }
 
-export function recordCheckoutAttempt(restaurantSlug: string, key: string, fingerprint: string, status: 'uncertain' | 'rejected', estimatedTotalCents?: number): void {
-  const existing = readCheckoutAttempt(restaurantSlug)
+export function recordCheckoutAttempt(restaurantSlug: string, key: string, fingerprint: string, status: 'uncertain' | 'rejected', estimatedTotalCents?: number, channel: CommerceChannel = 'menu', checkoutMode?: 'whatsapp' | 'online'): void {
+  const existing = readCheckoutAttempt(restaurantSlug, channel)
   if (existing && existing.idempotencyKey !== key) throw new Error('Otro intento reemplazó este pedido. Consultá al comercio antes de continuar.')
   const quote = estimatedTotalCents ?? existing?.estimatedTotalCents
   if (quote !== undefined && (!Number.isSafeInteger(quote) || quote < 0)) throw new Error('El total estimado no es válido. Revisá el carrito antes de enviar.')
-  const attempt: StoredCheckoutAttempt = { version: 2, fingerprint, idempotencyKey: key, createdAt: existing?.createdAt ?? Date.now(), status, ...(quote !== undefined ? { estimatedTotalCents: quote } : {}) }
-  try { sessionStorage.setItem(storageKey(restaurantSlug), JSON.stringify(attempt)) }
+  const mode = checkoutMode ?? existing?.checkoutMode
+  const attempt: StoredCheckoutAttempt = { version: 2, fingerprint, idempotencyKey: key, createdAt: existing?.createdAt ?? Date.now(), status, ...(quote !== undefined ? { estimatedTotalCents: quote } : {}), ...(mode ? { checkoutMode: mode } : {}) }
+  try { sessionStorage.setItem(storageKey(restaurantSlug, channel), JSON.stringify(attempt)) }
   catch { throw new Error('No pudimos guardar el reintento. El pedido no se envió; habilitá el almacenamiento y volvé a intentar.') }
 }
 
-export function clearCheckoutAttempt(restaurantSlug: string): void {
-  sessionStorage.removeItem(storageKey(restaurantSlug))
+export function clearCheckoutAttempt(restaurantSlug: string, channel: CommerceChannel = 'menu'): void {
+  sessionStorage.removeItem(storageKey(restaurantSlug, channel))
 }

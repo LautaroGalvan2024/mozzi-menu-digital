@@ -10,6 +10,8 @@ import { z } from 'zod'
 import { currentProductPrice } from '../../lib/money'
 import { calculateCartLineTotal, cartLineConfigurationKey } from '../../lib/quantity-pricing'
 import type { CartLine, PublicProduct } from '../../types/domain'
+import { commerceStorageKey, type CommerceChannel } from '../../lib/commerce-channel'
+import { cartProductName } from '../../lib/catalog-presentation'
 
 const MAX_CART_LINE_QUANTITY = 100
 
@@ -48,11 +50,12 @@ const lineSchema = z.object({
 })
 
 interface CartContextValue {
+  channel: CommerceChannel
   restaurantSlug: string | null
   lines: CartLine[]
   itemCount: number
   subtotalCents: number
-  activateRestaurant: (slug: string) => void
+  activateRestaurant: (slug: string, channel?: CommerceChannel) => void
   reconcileProducts: (products: readonly PublicProduct[]) => void
   addLine: (line: CartLine) => void
   replaceLine: (key: string, line: CartLine) => void
@@ -63,8 +66,8 @@ interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | null>(null)
 
-function storageKey(slug: string) {
-  return `mozzi:cart:${slug}`
+function storageKey(slug: string, channel: CommerceChannel = 'menu') {
+  return commerceStorageKey('cart', slug, channel)
 }
 
 export function parseStoredCart(value: string | null): CartLine[] {
@@ -77,9 +80,9 @@ export function parseStoredCart(value: string | null): CartLine[] {
   }
 }
 
-function readCart(slug: string): CartLine[] {
+function readCart(slug: string, channel: CommerceChannel): CartLine[] {
   try {
-    return parseStoredCart(localStorage.getItem(storageKey(slug)))
+    return parseStoredCart(localStorage.getItem(storageKey(slug, channel)))
   } catch {
     return []
   }
@@ -150,7 +153,7 @@ export function reconcileCartLines(
     ))
     return {
       ...line,
-      productName: product.name,
+      productName: cartProductName(product),
       productImagePath: product.imagePath,
       unitPriceCents: currentProductPrice(product),
       quantityPrices: product.quantityPrices,
@@ -161,6 +164,7 @@ export function reconcileCartLines(
 
 export function CartProvider({ children }: PropsWithChildren) {
   const [restaurantSlug, setRestaurantSlug] = useState<string | null>(null)
+  const [channel, setChannel] = useState<CommerceChannel>('menu')
   const [lines, setLines] = useState<CartLine[]>([])
 
   const persist = useCallback(
@@ -168,13 +172,13 @@ export function CartProvider({ children }: PropsWithChildren) {
       setLines(next)
       if (restaurantSlug) {
         try {
-          localStorage.setItem(storageKey(restaurantSlug), JSON.stringify(next))
+          localStorage.setItem(storageKey(restaurantSlug, channel), JSON.stringify(next))
         } catch {
           // Keep the in-memory cart usable when storage is disabled or full.
         }
       }
     },
-    [restaurantSlug],
+    [restaurantSlug, channel],
   )
 
   const reconcileProducts = useCallback((products: readonly PublicProduct[]) => {
@@ -183,28 +187,30 @@ export function CartProvider({ children }: PropsWithChildren) {
       if (JSON.stringify(next) === JSON.stringify(current)) return current
       if (restaurantSlug) {
         try {
-          localStorage.setItem(storageKey(restaurantSlug), JSON.stringify(next))
+          localStorage.setItem(storageKey(restaurantSlug, channel), JSON.stringify(next))
         } catch {
           // Keep the in-memory cart usable when storage is disabled or full.
         }
       }
       return next
     })
-  }, [restaurantSlug])
+  }, [restaurantSlug, channel])
 
   const value = useMemo<CartContextValue>(
     () => ({
       restaurantSlug,
+      channel,
       lines,
       itemCount: lines.reduce((sum, line) => sum + line.quantity, 0),
       subtotalCents: lines.reduce(
         (sum, line) => sum + calculateCartLineTotal(line),
         0,
       ),
-      activateRestaurant: (slug) => {
-        if (slug === restaurantSlug) return
+      activateRestaurant: (slug, nextChannel = 'menu') => {
+        if (slug === restaurantSlug && nextChannel === channel) return
         setRestaurantSlug(slug)
-        setLines(readCart(slug))
+        setChannel(nextChannel)
+        setLines(readCart(slug, nextChannel))
       },
       reconcileProducts,
       addLine: (line) => persist(addOrMergeCartLine(lines, line)),
@@ -220,7 +226,7 @@ export function CartProvider({ children }: PropsWithChildren) {
       removeLine: (key) => persist(lines.filter((line) => line.key !== key)),
       clear: () => persist([]),
     }),
-    [lines, persist, reconcileProducts, restaurantSlug],
+    [lines, persist, reconcileProducts, restaurantSlug, channel],
   )
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
 }

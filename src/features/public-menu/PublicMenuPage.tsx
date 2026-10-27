@@ -1,3 +1,4 @@
+import { groupCatalogProducts, productVariants } from '../../lib/catalog-presentation'
 import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
@@ -34,9 +35,9 @@ export function PublicMenuPage() {
   }, [activateRestaurant, restaurantSlug])
 
   useEffect(() => {
-    if (!menuQuery.data || cart.restaurantSlug !== menuQuery.data.restaurant.slug) return
+    if (!menuQuery.data || cart.restaurantSlug !== menuQuery.data.restaurant.slug || (cart.channel ?? 'menu') !== 'menu') return
     reconcileProducts(menuQuery.data.categories.flatMap((category) => category.products))
-  }, [cart.restaurantSlug, menuQuery.data, menuQuery.dataUpdatedAt, reconcileProducts])
+  }, [cart.restaurantSlug, cart.channel, menuQuery.data, menuQuery.dataUpdatedAt, reconcileProducts])
 
   const categories = useMemo(() => {
     const normalized = search.trim().toLocaleLowerCase('es')
@@ -158,8 +159,8 @@ export function PublicMenuPage() {
               {category.description ? <p className="mt-1 max-w-2xl text-sm leading-5 text-stone-600">{category.description}</p> : null}
             </div>
             <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-              {category.products.map((product) => {
-                const imageUrl = publicAssetUrl(product.imagePath)
+              {groupCatalogProducts(category.products).map((product) => {
+                const imageUrl = publicAssetUrl(product.family?.imagePath ?? product.imagePath)
                 const price = currentProductPrice(product)
                 const hasQuantityPromotion = effectiveQuantityPrices(price, product.quantityPrices).length > 0
                 return (
@@ -174,7 +175,7 @@ export function PublicMenuPage() {
                     >
                       <div className="flex min-h-36 min-w-0 flex-col p-4 sm:min-h-40 sm:p-5">
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="font-display text-lg font-bold leading-tight text-stone-950">{product.name}</h3>
+                          <h3 className="font-display text-lg font-bold leading-tight text-stone-950">{product.family?.name ?? product.name}</h3>
                           {product.featured ? <span className="shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-stone-900" style={{ backgroundColor: 'color-mix(in srgb, var(--brand) 15%, white)', borderColor: 'color-mix(in srgb, var(--brand) 45%, #d6d3d1)' }}>Favorito</span> : null}
                         </div>
                         <p className="mt-2 line-clamp-2 text-sm leading-5 text-stone-600">{product.description}</p>
@@ -200,7 +201,7 @@ export function PublicMenuPage() {
         {categories.length === 0 ? <p className="rounded-3xl border border-stone-200 bg-white p-8 text-center text-sm text-stone-600 shadow-sm">No hay productos que coincidan con la búsqueda.</p> : null}
       </main>
 
-      {cart.restaurantSlug === restaurant.slug && cart.itemCount > 0 ? (
+      {cart.restaurantSlug === restaurant.slug && (cart.channel ?? 'menu') === 'menu' && cart.itemCount > 0 ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pt-3 sm:px-4" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
           <Link
             to={`/r/${restaurant.slug}/carrito`}
@@ -212,7 +213,7 @@ export function PublicMenuPage() {
           </Link>
         </div>
       ) : null}
-      {selectedProduct ? <ProductDialog product={selectedProduct} restaurant={restaurant} onClose={() => setSelectedProduct(null)} onAdd={(line) => { cart.addLine(line); setSelectedProduct(null) }} /> : null}
+      {selectedProduct ? <ProductDialog product={selectedProduct} variants={productVariants(selectedProduct, menuQuery.data.categories.flatMap(category => category.products))} restaurant={restaurant} onClose={() => setSelectedProduct(null)} onAdd={(line) => { cart.addLine(line); setSelectedProduct(null) }} /> : null}
       {showHours ? (
         <RestaurantHoursDialog
           restaurantName={restaurant.tradeName}

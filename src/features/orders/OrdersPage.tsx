@@ -1,3 +1,4 @@
+import { CommerceOrderStatus } from './CommerceOrderStatus'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Eye, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -298,7 +299,7 @@ export function OrdersPage() {
                   <tr key={row.id}>
                     <td className="font-display font-bold text-stone-950">{row.display_number}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
-                    <td><StatusPill status={row.status} outcome={row.inventory_outcome} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
+                    <td><StatusPill status={row.status} outcome={row.inventory_outcome} /><CommerceOrderStatus channel={row.channel} checkoutMode={row.checkout_mode} paymentStatus={row.payment_status} pendingPreparation={row.status === 'generated'} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
@@ -317,7 +318,7 @@ export function OrdersPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <strong className="font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
-                  <StatusPill status={row.status} outcome={row.inventory_outcome} />
+                  <StatusPill status={row.status} outcome={row.inventory_outcome} /><CommerceOrderStatus channel={row.channel} checkoutMode={row.checkout_mode} paymentStatus={row.payment_status} pendingPreparation={row.status === 'generated'} />
                 </div>
                 <div className="mt-4 min-w-0">
                   {row.replaces_order_id?<p className="mb-1 text-xs text-amber-800">Pedido de reemplazo · misma operación comercial</p>:null}

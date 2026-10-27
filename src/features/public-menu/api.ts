@@ -1,11 +1,12 @@
 import { supabase } from '../../lib/supabase/client'
 import { publicMenuSchema } from '../../lib/validation/schemas'
 import type { PublicMenu } from '../../types/domain'
+import type { CommerceChannel } from '../../lib/commerce-channel'
 
-export async function fetchPublicMenu(slug: string): Promise<PublicMenu> {
-  const { data, error } = await supabase.rpc('get_public_menu', {
-    p_restaurant_slug: slug,
-  })
+export async function fetchPublicMenu(slug: string, channel: CommerceChannel = 'menu'): Promise<PublicMenu> {
+  const { data, error } = channel === 'store'
+    ? await supabase.rpc('get_public_catalog', { p_restaurant_slug: slug, p_channel: channel })
+    : await supabase.rpc('get_public_menu', { p_restaurant_slug: slug })
   if (error) {
     if (error.code === 'PGRST116' || error.message.includes('not found')) {
       throw new Error('No encontramos un menú publicado con esa dirección.')

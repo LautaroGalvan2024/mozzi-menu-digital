@@ -158,6 +158,15 @@ describe('operational order details', () => {
     mocks.selectRestaurant.mockReset()
   })
 
+  it('renders the frozen variant attributes without changing the historical item title', async () => {
+    setupInventoryOrder('completed', { product_name_snapshot: 'Nombre histórico del pedido', family_name_snapshot: 'Familia original', variant_attributes_snapshot: { Modelo: 'iPhone 15', Color: 'Rojo original' } })
+    mocks.rpc.mockResolvedValue({ data: inventoryDetail, error: null })
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    expect(await screen.findByText('3 × Nombre histórico del pedido')).toBeVisible()
+    expect(screen.getByLabelText('Variante elegida')).toHaveTextContent('Modelo: iPhone 15 · Color: Rojo original')
+    expect(mocks.from.mock.calls.some(([table]) => table === 'products' || table === 'product_families')).toBe(false)
+  })
+
   it('acceptance reserves explicitly and blocks duplicate clicks while a response is pending', async () => {
     let finish: ((value: unknown) => void) | undefined
     mocks.rpc.mockImplementation((name: string) => name === 'claim_order'
@@ -318,13 +327,14 @@ describe('operational order details', () => {
 
 const PRODUCT_ID = '60000000-0000-4000-8000-000000000001'
 const inventoryDetail = { replacementOrderId: null, inventoryOperations: [] }
-function setupInventoryOrder(status: string) {
+function setupInventoryOrder(status: string, itemOverrides: Record<string, unknown> = {}) {
   const order = { ...adminOrder, status, inventory_tracked: true, inventory_outcome: status === 'completed' ? 'delivered' : 'none' }
   mocks.from.mockImplementation((table: string) => {
     const rows = table === 'order_items' ? [{
       id: '50000000-0000-4000-8000-000000000001', order_id: ORDER_ID, product_id: PRODUCT_ID,
       product_name_snapshot: 'Producto de prueba', product_code_snapshot: 'P-1', quantity: 3,
       unit_price_cents: 100, base_subtotal_cents: 300, pricing_mode_snapshot: 'unit', pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 100, baseSubtotalCents: 300, components: [] }, options_total_unit_cents: 0, line_total_cents: 300, notes: null,
+      ...itemOverrides,
     }] : []
     const request: Record<string, unknown> & PromiseLike<unknown> = { then(resolve, reject) { return Promise.resolve({ data: rows, error: null }).then(resolve, reject) }, single: () => Promise.resolve({ data: order, error: null }) }
     for (const method of ['select', 'eq', 'order', 'in', 'is', 'limit', 'ilike']) request[method] = () => request

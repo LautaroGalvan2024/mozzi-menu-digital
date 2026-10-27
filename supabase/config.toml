@@ -108,3 +108,21 @@ verify_jwt = false
 
 [functions.expire-orders]
 verify_jwt = false
+
+[functions.mercadopago-connect]
+verify_jwt = false
+
+[functions.mercadopago-callback]
+verify_jwt = false
+
+[functions.create-payment]
+verify_jwt = false
+
+[functions.payment-status]
+verify_jwt = false
+
+[functions.mercadopago-webhook]
+verify_jwt = false
+
+[functions.reconcile-payments]
+verify_jwt = false

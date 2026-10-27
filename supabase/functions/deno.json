@@ -15,7 +15,7 @@
     }
   },
   "tasks": {
-    "check": "deno check _shared/*.ts create-restaurant/index.ts invite-restaurant-user/index.ts create-order/index.ts recover-order/index.ts register-whatsapp-opened/index.ts import-products/index.ts expire-orders/index.ts",
+    "check": "deno check _shared/*.ts create-restaurant/index.ts invite-restaurant-user/index.ts create-order/index.ts recover-order/index.ts register-whatsapp-opened/index.ts import-products/index.ts expire-orders/index.ts mercadopago-connect/index.ts mercadopago-callback/index.ts create-payment/index.ts payment-status/index.ts mercadopago-webhook/index.ts reconcile-payments/index.ts",
     "test": "deno test --allow-env _shared/*_test.ts"
   }
 }

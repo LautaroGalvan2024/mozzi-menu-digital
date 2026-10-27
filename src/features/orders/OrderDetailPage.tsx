@@ -1,3 +1,4 @@
+import { CommerceOrderStatus, paymentStatusLabel } from './CommerceOrderStatus'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -198,8 +199,8 @@ export function OrderDetailPage() {
     />
     {error ? <p className="form-error mb-5" role="alert">{error}</p> : null}
     {order.inventory_tracked || order.replaces_order_id || isReversed(order) ? <section className="form-card mb-6">
-      <h2 className="form-card-title">Entrega e inventario</h2>
-      <p className="mt-3">{isReversed(order) ? inventoryOutcomeLabel[order.inventory_outcome] : order.status === 'accepted' ? 'Unidades reservadas. Pendiente de recepción del cliente o retiro.' : order.inventory_outcome === 'delivered' ? 'Entrega vigente: existencia física descontada.' : 'La reserva se realiza al aceptar; la existencia física se descuenta al confirmar recepción o retiro.'}</p>
+      <h2 className="form-card-title">Entrega e inventario</h2><CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={order.status === 'generated'} />
+      <p className="mt-3">{isReversed(order) ? inventoryOutcomeLabel[order.inventory_outcome] : order.status === 'accepted' ? 'Unidades reservadas. Pendiente de recepción del cliente o retiro.' : order.inventory_outcome === 'delivered' ? 'Entrega vigente: existencia física descontada.' : order.checkout_mode === 'online' ? 'El checkout reserva las unidades antes del pago. La existencia física se descuenta al confirmar recepción o retiro.' : 'La reserva se realiza al aceptar; la existencia física se descuenta al confirmar recepción o retiro.'}</p>
       {isReversed(order) ? <p className="mt-2 text-sm">Se conserva el pedido original. Su importe no se suma como venta vigente. Esto no registra un reintegro de dinero.</p> : null}
       <div className="mt-3 flex flex-wrap gap-4 text-sm">
         {order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.replaces_order_id}`}>Ver pedido reemplazado</Link>:null}
@@ -208,7 +209,7 @@ export function OrderDetailPage() {
       </div>
       {order.replacement_reason?<p className="mt-3 text-sm">Motivo del reemplazo: {order.replacement_reason}</p>:null}
     </section>:null}
-    <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+    {order.checkout_mode === 'online' ? <section className="form-card mb-6"><CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={order.status === 'generated'} /><p className="mt-3 text-sm">Cancelar un pedido no devuelve el pago. Los reintegros se gestionan en Mercado Pago y su estado se actualiza al confirmarse.</p>{order.status === 'generated' && order.payment_status === 'approved' ? <Link className="button-primary mt-4" to={`/admin/pedidos/tomar/${order.action_id}`}>Aceptar para preparar</Link> : null}</section> : null}<div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
       <div className="space-y-6">
         <section className="form-card">
           <div className="flex justify-between"><h2 className="form-card-title">Productos</h2><StatusPill status={order.status} outcome={order.inventory_outcome} /></div>
@@ -218,6 +219,7 @@ export function OrderDetailPage() {
                 <div><strong>{item.quantity} × {item.product_name_snapshot}</strong><p className="text-xs text-stone-500">{item.product_code_snapshot}</p></div>
                 <strong>{formatMoney(item.line_total_cents, order.currency_code)}</strong>
               </div>
+              {Object.keys(item.variant_attributes_snapshot).length ? <p className="mt-1 text-sm text-stone-600" aria-label="Variante elegida">{Object.entries(item.variant_attributes_snapshot).map(([attribute, value]) => `${attribute}: ${value}`).join(' · ')}</p> : null}
               {options.filter((option) => option.order_item_id === item.id).map((option) => <p key={option.id} className="mt-1 pl-4 text-sm text-stone-600">· {option.group_name_snapshot}: {option.option_name_snapshot}{Number(option.price_delta_cents) ? ` (+${formatMoney(option.price_delta_cents, order.currency_code)})` : ''}</p>)}
               {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">Promo por cantidad aplicada · base {formatMoney(item.base_subtotal_cents, order.currency_code)}</p> : null}
               {item.notes ? <p className="mt-2 text-sm italic text-stone-500">“{item.notes}”</p> : null}
@@ -237,7 +239,7 @@ export function OrderDetailPage() {
             <Info label="Cliente" value={order.customer_name} />
             <Info label="Teléfono" value={order.customer_phone} />
             <Info label="Modalidad" value={order.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'} />
-            <Info label="Pago" value={order.payment_method_name_snapshot} />
+            <Info label="Pago" value={order.payment_method_name_snapshot} /><Info label="Canal" value={order.channel === 'store' ? 'Tienda online' : 'Menú digital'} />{order.checkout_mode === 'online' ? <Info label="Estado del cobro" value={paymentStatusLabel(order.payment_status)} /> : null}
             {deliveryAddress ? <Info label="Dirección" value={deliveryAddress} /> : null}
             {order.delivery_floor ? <Info label="Piso" value={order.delivery_floor} /> : null}
             {order.delivery_apartment ? <Info label="Departamento" value={order.delivery_apartment} /> : null}
@@ -290,7 +292,7 @@ export function OrderDetailPage() {
             {event.actor_user_id ? <p className="mt-1 text-xs text-stone-500">Usuario …{event.actor_user_id.slice(-8)}</p> : null}
           </li>)}
         </ol>
-        {inventory.inventoryOperations.length?<><h3 className="mt-6 font-semibold">Movimientos de inventario</h3><ol className="mt-4 space-y-4">{inventory.inventoryOperations.map((operation)=><li key={operation.id} className="text-sm"><strong>{{reserve:'Reserva al aceptar',delivery:'Entrega confirmada',release:'Reserva liberada',correction:'Entrega corregida',return:'Devolución completa'}[operation.kind]??operation.kind}</strong><p className="text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString('es-AR')}{operation.actorUserId?` · Usuario …${operation.actorUserId.slice(-8)}`:''}</p>{operation.reason?<p>{operation.reason}</p>:null}{operation.result.restockQuantities?.map((part)=><p key={part.productId}>{deliveredProducts.get(part.productId)?.name??'Producto'}: {part.quantity} unidades repuestas como vendibles.</p>)}{operation.result.restocked!==undefined?<p>{operation.result.restocked?'Con reposición de unidades vendibles.':'Sin reposición al stock vendible.'}</p>:null}</li>)}</ol></>:null}
+        {inventory.inventoryOperations.length?<><h3 className="mt-6 font-semibold">Movimientos de inventario</h3><ol className="mt-4 space-y-4">{inventory.inventoryOperations.map((operation)=><li key={operation.id} className="text-sm"><strong>{{reserve:'Reserva confirmada',payment_hold:'Reserva temporal de pago',payment_release:'Reserva de pago liberada',delivery:'Entrega confirmada',release:'Reserva liberada',correction:'Entrega corregida',return:'Devolución completa'}[operation.kind]??operation.kind}</strong><p className="text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString('es-AR')}{operation.actorUserId?` · Usuario …${operation.actorUserId.slice(-8)}`:''}</p>{operation.reason?<p>{operation.reason}</p>:null}{operation.result.restockQuantities?.map((part)=><p key={part.productId}>{deliveredProducts.get(part.productId)?.name??'Producto'}: {part.quantity} unidades repuestas como vendibles.</p>)}{operation.result.restocked!==undefined?<p>{operation.result.restocked?'Con reposición de unidades vendibles.':'Sin reposición al stock vendible.'}</p>:null}</li>)}</ol></>:null}
       </aside>
     </div>
   </>

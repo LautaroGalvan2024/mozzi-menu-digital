@@ -1,11 +1,28 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(97);
+select plan(148);
 
 with expected(signature, access) as (
   values
     ('public.get_public_menu(text)', 'public'),
+    ('public.get_public_catalog(text,text)', 'public-service'),
+    ('public.save_product_family(uuid,jsonb,jsonb)', 'authenticated'),
+    ('public.get_payment_connection(uuid)', 'authenticated'),
+    ('public.save_payment_account(uuid,text,text,timestamptz,boolean)', 'service'),
+    ('public.get_payment_account(uuid,text)', 'service'),
+    ('public.disconnect_payment_account(uuid)', 'service'),
+    ('public.acquire_payment_account_refresh(uuid,timestamptz)', 'service'),
+    ('public.save_payment_oauth_state(text,text)', 'service'),
+    ('public.consume_payment_oauth_state(text)', 'service'),
+    ('public.begin_online_checkout(jsonb,text,text,text,text)', 'service'),
+    ('public.set_online_checkout_preference(uuid,text,text,uuid)', 'service'),
+    ('public.get_online_payment_attempt(uuid)', 'service'),
+    ('public.get_online_checkout_status(uuid,text)', 'service'),
+    ('public.reconcile_online_payment(uuid,text,text,bigint,text,timestamptz,jsonb)', 'service'),
+    ('public.list_online_reconciliation(integer)', 'service'),
+    ('public.mark_online_reconciled(uuid)', 'service'),
+    ('public.expire_online_reservations(timestamptz,integer)', 'service'),
     ('public.get_actor_authorization()', 'authenticated'),
     ('public.get_order_by_action(uuid)', 'authenticated'),
     ('public.claim_order(uuid)', 'authenticated'),
@@ -39,21 +56,21 @@ with expected(signature, access) as (
 )
 select is(
   has_function_privilege('anon', signature, 'execute'),
-  access = 'public',
+  access in ('public', 'public-service'),
   format('anon EXECUTE matches the ACL contract for %s', signature)
 )
 from expected
 union all
 select is(
   has_function_privilege('authenticated', signature, 'execute'),
-  access in ('public', 'authenticated'),
+  access in ('public', 'public-service', 'authenticated'),
   format('authenticated EXECUTE matches the ACL contract for %s', signature)
 )
 from expected
 union all
 select is(
   has_function_privilege('service_role', signature, 'execute'),
-  access = 'service',
+  access in ('service', 'public-service'),
   format('service_role EXECUTE matches the ACL contract for %s', signature)
 )
 from expected;
@@ -65,7 +82,7 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  31::bigint,
+  48::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 

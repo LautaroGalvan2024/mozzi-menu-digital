@@ -113,7 +113,7 @@ export function AdminLayout() {
         </div>
 
         <div className="mx-3 mb-2 rounded-2xl border border-stone-800 bg-stone-900/80 p-3.5">
-          <div className="flex items-center gap-2 text-stone-400"><Store className="h-3.5 w-3.5" aria-hidden /><label className="text-[10px] font-bold uppercase tracking-[.14em]" htmlFor="restaurant-select">Restaurante activo</label></div>
+          <div className="flex items-center gap-2 text-stone-400"><Store className="h-3.5 w-3.5" aria-hidden /><label className="text-[10px] font-bold uppercase tracking-[.14em]" htmlFor="restaurant-select">Comercio activo</label></div>
           <div className="relative mt-2">
             <select id="restaurant-select" className="min-h-8 w-full appearance-none bg-transparent pr-7 text-sm font-semibold text-white outline-none" value={scope.selected?.id ?? ''} onChange={(event) => scope.selectRestaurant(event.target.value)}>
               {scope.choices.map((choice) => <option className="bg-stone-900" value={choice.id} key={choice.id}>{choice.name}</option>)}

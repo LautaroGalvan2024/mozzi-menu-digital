@@ -26,14 +26,18 @@ export async function importResultWorkbook(data: ImportData, result: ImportResul
     ['description', 'descripcion'], ['promotionalPriceCents', 'precio_promocional'], ['promotionStartsAt', 'promocion_desde'], ['promotionEndsAt', 'promocion_hasta'], ['active', 'activo'], ['available', 'disponible'], ['featured', 'destacado'], ['sortOrder', 'orden'], ['imageFilename', 'imagen_archivo'],
   ] as const
   const columns = optional.filter(([field]) => data.products.every((product) => Object.hasOwn(product, field)))
+  const hasFamilies = data.products.some((product) => product.familyCode)
+  const familyHeaders = hasFamilies ? ['familia_codigo', 'familia_nombre', 'atributo_1', 'valor_1', 'atributo_2', 'valor_2', 'atributo_3', 'valor_3'] : []
   return importWorkbook({ Productos: [
-    ['fila', 'id', 'codigo', 'nombre', 'categoria', 'precio', ...columns.map(([, header]) => header), 'resultado'],
+    ['fila', 'id', 'codigo', 'nombre', 'categoria', 'precio', ...columns.map(([, header]) => header), ...familyHeaders, 'resultado'],
     ...result.products.map((item) => {
       const product = byRef.get(item.rowRef)
+      const attributes = Object.entries(product?.variantAttributes ?? {})
+      const familyValues = hasFamilies ? [product?.familyCode ?? '', product?.familyName ?? '', ...[0, 1, 2].flatMap((index) => attributes[index] ?? ['', ''])] : []
       return [item.rowRef, item.id, item.code, product?.name, product?.category, product ? (product.basePriceCents / 100).toFixed(2) : '', ...columns.map(([field]) => {
         const value = product?.[field]
         return field === 'promotionalPriceCents' && typeof value === 'number' ? (value / 100).toFixed(2) : typeof value === 'boolean' ? (value ? 'sí' : 'no') : value ?? ''
-      }), item.outcome]
+      }), ...familyValues, item.outcome]
     }),
   ] })
 }

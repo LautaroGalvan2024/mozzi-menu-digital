@@ -18,6 +18,9 @@ serve({
   maxBodyBytes: MAX_BODY_BYTES,
   handler: async (request, context) => {
     const input = parseInput(createOrderSchema, await readJson(request, MAX_BODY_BYTES));
+    if (input.checkoutMode === "online") {
+      throw new ApiError(422, "CHECKOUT_MODE_INVALID", "Usá el pago online de la tienda.");
+    }
     if (input.antiSpam.honeypot?.trim()) {
       throw new ApiError(400, "REQUEST_REJECTED", "No se pudo procesar la solicitud.");
     }

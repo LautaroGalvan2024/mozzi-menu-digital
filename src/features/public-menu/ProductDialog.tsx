@@ -4,8 +4,18 @@ import { formatMoney, currentProductPrice } from '../../lib/money'
 import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import { publicAssetUrl } from '../../lib/supabase/client'
 import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/domain'
+import { cartProductName, variantLabel } from '../../lib/catalog-presentation'
 
-export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine }: { product: PublicProduct; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }) {
+type ProductDialogProps = { product: PublicProduct; variants?: PublicProduct[]; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }
+
+export function ProductDialog(props: ProductDialogProps) {
+  const variants = props.variants ?? [props.product]
+  const [selectedId, setSelectedId] = useState(props.initialLine?.productId ?? props.product.id)
+  const selected = variants.find(product => product.id === selectedId) ?? props.product
+  return <ProductConfiguration key={selected.id} {...props} product={selected} variants={variants} onVariantChange={setSelectedId} />
+}
+
+function ProductConfiguration({ product, variants, onVariantChange, restaurant, onClose, onAdd, initialLine }: ProductDialogProps & { variants: PublicProduct[]; onVariantChange: (id: string) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [quantity, setQuantity] = useState(initialLine?.quantity ?? 1)
   const [notes, setNotes] = useState(initialLine?.notes ?? '')
@@ -70,7 +80,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine
     onAdd({
       key: initialLine?.key ?? crypto.randomUUID(),
       productId: product.id,
-      productName: product.name,
+      productName: cartProductName(product),
       productImagePath: product.imagePath,
       quantity,
       notes: notes.trim(),
@@ -81,7 +91,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine
     dialogRef.current?.close()
   }
 
-  const imageUrl = publicAssetUrl(product.imagePath)
+  const imageUrl = publicAssetUrl(product.imagePath ?? product.family?.imagePath ?? null)
   const titleId = `product-dialog-title-${product.id}`
   return (
     <dialog
@@ -108,8 +118,9 @@ export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine
           )}
           <div className="p-5 pb-6 sm:p-7 sm:pb-8">
             <div className="pr-10">
-              <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.name}</h2>
-              <p className="mt-2 text-sm leading-6 text-stone-600">{product.description}</p>
+              <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.family?.name ?? product.name}</h2>
+              {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name}{!variant.available ? ' · Sin stock' : ''}</option>)}</select></label> : null}
+              <p className="mt-2 text-sm leading-6 text-stone-600">{product.family?.description ?? product.description}</p>
               <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
               {advertisedQuantityPrices.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2" aria-label="Promociones por cantidad">
@@ -150,7 +161,7 @@ export function ProductDialog({ product, restaurant, onClose, onAdd, initialLine
               ))}
               <label className="field">
                 <span>Observaciones para este producto</span>
-                <textarea maxLength={300} rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ej.: sin cebolla" />
+                <textarea maxLength={300} rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder={restaurant.channel === 'store' ? 'Información adicional para el comercio' : 'Ej.: sin cebolla'} />
               </label>
               {error ? <p className="form-error" role="alert">{error}</p> : null}
             </div>

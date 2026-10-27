@@ -17,6 +17,9 @@ export interface ImportProduct {
   featured?: boolean
   sortOrder?: number
   imageFilename?: string
+  familyCode?: string
+  familyName?: string
+  variantAttributes?: Record<string, string>
 }
 
 export interface ImportGroup {
@@ -171,6 +174,17 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
     const ends = dateValue(row.promocion_hasta)
     const imageFilename = stringValue(row.imagen_archivo) || undefined
     const sortOrder = sortOrderValue(row.orden)
+    const familyCode = stringValue(row.familia_codigo)
+    const familyName = stringValue(row.familia_nombre)
+    const attributePairs = [1, 2, 3].map((index) => [stringValue(row[`atributo_${index}`]), stringValue(row[`valor_${index}`])] as const).filter(([axis, value]) => axis || value)
+    if (familyCode || familyName || attributePairs.length) {
+      if (!familyCode || !familyName || familyCode.length > 80 || familyName.length > 120 || hasControls(familyCode) || attributePairs.length === 0
+        || attributePairs.some(([axis, value]) => !axis || !value || axis.length > 40 || value.length > 80 || hasControls(axis) || hasControls(value))
+        || new Set(attributePairs.map(([axis]) => axis.toLocaleLowerCase('es'))).size !== attributePairs.length) {
+        errors.push(`Productos fila ${rowNumber}: completá familia_codigo, familia_nombre y entre uno y tres atributos con sus valores, sin repetir nombres.`)
+        return
+      }
+    }
 
     if (!name || !category || basePriceCents === null) {
       errors.push(`Productos fila ${rowNumber}: nombre, categoría y precio no negativo son obligatorios.`)
@@ -233,13 +247,26 @@ export function parseImportSheets(sheets: Record<string, SheetData>): ImportData
       ...(stringValue(row.destacado) ? { featured } : {}),
       ...(stringValue(row.orden) ? { sortOrder } : {}),
       ...(imageFilename ? { imageFilename } : {}),
+      ...(familyCode ? { familyCode, familyName, variantAttributes: Object.fromEntries(attributePairs) } : {}),
     })
   })
 
   const productCodes = new Set<string>()
   const productRefs = new Set<string>()
   const productIds = new Set<string>()
+  const familyDefinitions = new Map<string, string>()
+  const variantCombinations = new Set<string>()
   for (const product of products) {
+    if (product.familyCode && product.variantAttributes) {
+      const familyKey = product.familyCode.toLocaleLowerCase('es')
+      const axes = Object.keys(product.variantAttributes).sort()
+      const definition = JSON.stringify([product.familyName, product.category, axes])
+      if (familyDefinitions.has(familyKey) && familyDefinitions.get(familyKey) !== definition) errors.push(`Familia ${product.familyCode}: todas sus variantes deben tener el mismo nombre de familia, categoría y atributos.`)
+      familyDefinitions.set(familyKey, definition)
+      const combination = JSON.stringify([familyKey, axes.map((axis) => [axis, product.variantAttributes![axis]])])
+      if (variantCombinations.has(combination)) errors.push(`Familia ${product.familyCode}: combinación de atributos duplicada en fila ${product.rowRef}.`)
+      variantCombinations.add(combination)
+    }
     if (productRefs.has(product.rowRef)) errors.push(`Fila de producto duplicada: ${product.rowRef}.`)
     productRefs.add(product.rowRef)
     if (product.id && productIds.has(product.id.toLowerCase())) errors.push(`Identificador de producto duplicado en fila ${product.rowRef}.`)

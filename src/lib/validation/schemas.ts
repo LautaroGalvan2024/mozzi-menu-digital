@@ -69,6 +69,8 @@ const quantityPricesSchema = z.array(quantityPriceSchema).max(19).superRefine((r
 })
 
 const productSchema = z.object({
+  family: z.object({ id: z.string().uuid(), name: z.string(), description: z.string(), imagePath: z.string().nullable(), axes: z.array(z.string()) }).nullable().optional(),
+  variantAttributes: z.record(z.string(), z.string()).optional(),
   id: z.string().uuid(),
   categoryId: z.string().uuid(),
   code: z.string(),
@@ -88,6 +90,10 @@ const productSchema = z.object({
 
 export const publicMenuSchema = z.object({
   restaurant: z.object({
+    channel: z.enum(['menu', 'store']).optional(),
+    acceptsOrders: z.boolean().optional(),
+    storeCheckoutWhatsappEnabled: z.boolean().optional(),
+    storeCheckoutOnlineEnabled: z.boolean().optional(),
     id: z.string().uuid(),
     name: z.string(),
     tradeName: z.string(),
@@ -145,6 +151,7 @@ export const publicMenuSchema = z.object({
   ),
   paymentMethods: z.array(
     z.object({
+      provider: z.literal('mercadopago').nullable().optional(),
       id: z.string().uuid(),
       code: z.string(),
       name: z.string(),
