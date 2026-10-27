@@ -25,6 +25,7 @@ supabase/.temp
 playwright-report
 test-results
 coverage
+.tmp/
 
 # Editor directories and files
 .vscode/*

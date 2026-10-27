@@ -24,6 +24,7 @@ const SecurityPage=lazy(()=>import('./features/auth/SecurityPage').then((module)
 const RestaurantSelectPage=lazy(()=>import('./features/restaurants/RestaurantSelectPage').then((module)=>({default:module.RestaurantSelectPage})))
 const AdminDashboardPage=lazy(()=>import('./features/restaurants/AdminDashboardPage').then((module)=>({default:module.AdminDashboardPage})))
 const RestaurantSettingsPage=lazy(()=>import('./features/restaurants/RestaurantSettingsPage').then((module)=>({default:module.RestaurantSettingsPage})))
+const StoreSettingsPage=lazy(()=>import('./features/restaurants/StoreSettingsPage').then((module)=>({default:module.StoreSettingsPage})))
 const BrandPage=lazy(()=>import('./features/restaurants/BrandPage').then((module)=>({default:module.BrandPage})))
 const UsersPage=lazy(()=>import('./features/restaurants/UsersPage').then((module)=>({default:module.UsersPage})))
 const HoursPage=lazy(()=>import('./features/business-hours/HoursPage').then((module)=>({default:module.HoursPage})))
@@ -75,6 +76,7 @@ const router=createBrowserRouter([
       {path:'seguridad',element:<SecurityPage/>},
       {element:<RequireRestaurantAdmin/>,children:[
         {path:'configuracion',element:<RestaurantSettingsPage/>},
+        {path:'tienda',element:<StoreSettingsPage/>},
         {path:'marca',element:<BrandPage/>},
         {path:'horarios',element:<HoursPage/>},
         {path:'medios-de-pago',element:<PaymentMethodsPage/>},

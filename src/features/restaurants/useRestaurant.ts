@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { supabase } from '../../lib/supabase/client'
 
 export const restaurantSchema = z.object({
+  inventory_mode: z.enum(['never_enabled', 'enforced', 'paused']).default('never_enabled'),
+  inventory_cutover_id: z.string().uuid().nullable().default(null),
   store_enabled: z.boolean().default(false),
   store_ordering_policy: z.enum(['always', 'business_hours']).default('always'),
   store_checkout_whatsapp_enabled: z.boolean().default(true),
@@ -18,7 +20,7 @@ export function useRestaurant(restaurantId: string | undefined) {
     enabled: Boolean(restaurantId),
     queryFn: async () => {
       const { data, error } = await supabase.from('restaurants').select('*').eq('id', restaurantId ?? '').single()
-      if (error) throw new Error('No se pudo cargar la configuración del restaurante.')
+      if (error) throw new Error('No se pudo cargar la configuración del comercio.')
       return restaurantSchema.parse(data)
     },
   })

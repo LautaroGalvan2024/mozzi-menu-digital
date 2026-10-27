@@ -33,6 +33,7 @@ const navGroups = [
       { to: '/admin', label: 'Resumen', icon: LayoutDashboard, end: true },
       { to: '/admin/pedidos', label: 'Pedidos', icon: ClipboardList },
       { to: '/admin/stock', label: 'Stock', icon: PackageOpen },
+      { to: '/admin/tienda', label: 'Tienda online', icon: BookOpen, adminOnly: true },
     ],
   },
   {

@@ -283,6 +283,8 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   it('never confirms business rules or activates stock on load', async () => {
     const data = fixture('never_enabled'); data.policy.businessConfirmed = false; mocks.inventory = data
     view(); await screen.findByText('Reglas para activar el stock')
+    expect(screen.getByRole('button', { name: 'Activar control de stock' })).toBeEnabled()
+    await userEvent.click(screen.getByText('Herramientas avanzadas de inventario'))
     expect(screen.getByRole('button', { name: 'Guardar reglas' })).toBeDisabled()
     expect(mocks.mutate).not.toHaveBeenCalled()
   })
@@ -293,6 +295,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
       return { data: null, error: { code: '40001', message: 'INVENTORY_VERSION_CONFLICT' } }
     })
     view(); await screen.findByText('Arroz')
+    await user.click(screen.getByText('Herramientas avanzadas de inventario'))
     await user.type(screen.getByLabelText('Motivo'), 'Verificación física')
     await user.click(screen.getByRole('button', { name: 'Pausar operaciones' }))
     const first = structuredClone(mocks.mutate.mock.calls[0]!)
@@ -312,5 +315,30 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     await user.click(screen.getByRole('button', { name: 'Reanudar operaciones' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Completá un conteo desde esta pausa')
     expect(screen.getByRole('button', { name: 'Iniciar ventana de conteo' })).toBeEnabled()
+  })
+  it('activates from explicit product balances with no physical count command and preserves an uncertain retry', async () => {
+    const data = fixture('never_enabled'); data.policy.businessConfirmed = false; mocks.inventory = data
+    mocks.mutate.mockRejectedValueOnce(new Error('Lost response'))
+    const user = userEvent.setup(); const firstView = view()
+    await user.click(await screen.findByRole('button', { name: 'Activar control de stock' }))
+    await screen.findByRole('alert')
+    const original = structuredClone(mocks.mutate.mock.calls[0])
+    expect(original).toEqual(['activate_inventory_from_product_stock', { p_restaurant_id: tenant, p_operation_id: expect.any(String), p_expected_policy_version: 1, p_other_channels: 'none' }])
+    firstView.unmount(); view()
+    await user.click(await screen.findByRole('button', { name: 'Reintentar operación' }))
+    await screen.findByText('Control de stock activado. Ya se limita la venta a las unidades disponibles.')
+    expect(mocks.mutate.mock.calls[1]).toEqual(original)
+    expect(sessionStorage.getItem(`mozzi:inventory-command:${tenant}`)).toBeNull()
+  })
+  it('requires a quantity for every product and links to its editor instead of starting a count', async () => {
+    const data = fixture('never_enabled')
+    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })) }
+    view()
+    expect(await screen.findByText('Falta cargar stock en 1 producto:')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Activar control de stock' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Editar stock de Arroz' })).toHaveAttribute('href', `/admin/catalogo/productos/${product}`)
+    expect(screen.getByText('Sin cargar')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Iniciar ventana de conteo' })).not.toBeVisible()
+    expect(mocks.mutate).not.toHaveBeenCalled()
   })
 })

@@ -1574,6 +1574,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_inventory_from_product_stock: {
+        Args: { p_restaurant_id: string; p_operation_id: string; p_expected_policy_version: number; p_other_channels?: string }
+        Returns: Json
+      }
+      get_catalog_stock: {
+        Args: { p_restaurant_id: string; p_product_ids: string[] }
+        Returns: Json
+      }
+      save_product_catalog_with_stock: {
+        Args: { p_restaurant_id: string; p_product: Json; p_groups: Json; p_removed_group_ids: string[]; p_removed_option_ids: string[]; p_operation_id: string; p_stock?: Json }
+        Returns: Json
+      }
+      save_product_family_with_stock: {
+        Args: { p_restaurant_id: string; p_family: Json; p_variants: Json; p_operation_id: string; p_stock_rows?: Json }
+        Returns: Json
+      }
       set_online_checkout_preference: {
         Args: {
           p_attempt_id: string

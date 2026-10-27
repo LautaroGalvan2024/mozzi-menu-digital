@@ -1,12 +1,22 @@
 # Menú y tienda con catálogo compartido
 
-El menú conserva `/r/:slug`; la tienda usa `/t/:slug`. Configuración permite publicar cada canal y elegir recepción permanente o por horario para la tienda. Productos, precios, inventario, marca y entrega local se comparten. Carritos, intentos y recuperación se separan por canal; las claves anteriores del menú conservan compatibilidad.
+El menú conserva `/r/:slug`; la tienda usa `/t/:slug`. **Tienda online** en el panel permite marcar **Publicar mi tienda online**, elegir WhatsApp, Mercado Pago o ambos y guardar. Debajo aparecen el link y el QR. Se puede publicar con WhatsApp sin conectar Mercado Pago y recibir pedidos las 24 horas o respetar los horarios. Configuración conserva los controles anteriores de publicación. Productos, precios, inventario, marca y entrega local se comparten. Carritos, intentos y recuperación se separan por canal; las claves anteriores del menú conservan compatibilidad.
 
 ## Fichas y variantes
 
 En Productos, las fichas agrupan SKU existentes o nuevos por atributos como modelo y color. Cada SKU conserva su UUID, código, precio, imagen y saldo. Las fichas no tienen stock propio. Los extras gastronómicos siguen separados de las variantes.
 
 La importación acepta columnas opcionales `familia_codigo`, `familia_nombre` y hasta tres pares `atributo_1`/`valor_1`, `atributo_2`/`valor_2`, `atributo_3`/`valor_3`. Ejemplo: `Modelo`/`iPhone 15` y `Color`/`Negro`. Los archivos anteriores no desagrupan SKU; `skip_existing` conserva sus relaciones. El lote confirma productos y agrupaciones en una transacción. El snapshot del pedido conserva los atributos vendidos aunque luego se edite la ficha.
+
+## Stock desde los productos
+
+Al crear o editar un producto, **Stock (unidades)** guarda la cantidad total: escribir 10 deja 10 unidades, no suma 10. Cada variante tiene su propio campo. Cero indica agotado; dejar vacío conserva el saldo anterior, o deja sin inicializar un producto nuevo. Cambiar sólo el nombre, precio o foto no modifica cantidades. El total incluye las unidades reservadas: 10 totales y 2 reservadas dejan 8 disponibles. El servidor rechaza totales inferiores a las reservas.
+
+Para un comercio nuevo, cargar las cantidades de sus productos y luego entrar a **Stock → Activar control de stock**. No requiere conteo general. Los pedidos ya aceptados reservan sus unidades al activar; si no alcanza el stock, toda la activación se revierte. Las ventas fuera de Mozzi deben registrarse también. Un comercio ya activo conserva su configuración. Las herramientas de conteo físico permanecen en **Herramientas avanzadas de inventario**; una pausa o un conteo en curso bloquean la edición de cantidades hasta resolverlos.
+
+La migración `202610270005` agrega RPC de guardado atómico de catálogo y saldo, lectura de cantidades y activación. No cambia saldos ni activa comercios al instalarse. El navegador conserva el UUID y el contenido del intento antes de enviarlo; repetirlo recupera el resultado sin reponer unidades vendidas después. Ante cambios concurrentes, se exige revisar el saldo e ingresar nuevamente la cantidad. No borrar intentos pendientes ni retirar estas RPC durante una reversión del frontend.
+
+Validación local reproducible: suites SQL (incluida `021_catalog_absolute_stock.sql`), pruebas de formularios y `e2e/catalog-stock-store.spec.ts`. `node scripts/database/local-test-catalog-stock-concurrency.mjs --database=mozzi_<base_sintetica>` prueba sesiones PostgreSQL simultáneas contra checkout, reserva y guardados repetidos; requiere el PostgreSQL local configurado y nunca una base restaurada o producción.
 
 ## Configuración de Mercado Pago
 
@@ -47,7 +57,7 @@ El comercio, su catálogo, sus SKU y sus enlaces se conservan. No hay que crear 
 2. Aplicar `202610270004`: cada intento queda vinculado a una conexión inmutable. Para conexiones previas, verificar el campo `liveMode` del contenido cifrado en el servidor y ejecutar `backfill_payment_account_environment` con ese ambiente; nunca inferirlo del modo actual ni del prefijo del token. Completar todas las conexiones desconocidas antes de desplegar las nuevas funciones. Invalidar los inicios OAuth anteriores, desplegar Edge y configurar `MERCADOPAGO_MODE=production`. Conservar la clave de cifrado y los demás secretos de la aplicación; verificar Webhooks y mantenimiento. Este paso no autoriza una cuenta ni convierte una autorización de prueba en productiva.
 3. El administrador del comercio abre **Medios de pago**. La pantalla debe indicar **Cobros reales**; si la cuenta todavía figura como prueba, usa **Reconectar cuenta para cobros reales**, inicia sesión en Mercado Pago con la cuenta del comercio y otorga la autorización. No se completa el consentimiento en nombre del vendedor.
 4. Al volver, verificar **Cuenta lista para cobros reales** y que la autorización actual figure como cobros reales. La nueva conexión pasa a ser la actual; la anterior conserva sus credenciales para conciliar sus pedidos. Cambiar de conexión desactiva los nuevos cobros hasta habilitarlos explícitamente. Una misma cuenta y ambiente no pueden pertenecer a dos comercios distintos.
-5. En **Inventario**, activar el control de stock y verificar existencias reales de cada SKU. En **Configuración → Tienda online**, publicar la tienda si corresponde, habilitar **Pagos online con Mercado Pago** y guardar. Las existencias ficticias del piloto deben regularizarse antes de ofrecer productos reales.
+5. En **Productos**, cargar existencias reales de cada SKU y activar el control desde **Stock** si todavía está sin activar. En **Tienda online**, publicar la tienda si corresponde, habilitar **Pagos online con Mercado Pago** y guardar. Las existencias ficticias del piloto deben regularizarse antes de ofrecer productos reales.
 6. Comprobar el recorrido de compra autorizado, el total, la cuenta cobradora, la notificación verificada y la conciliación. Documentar fecha, versión y resultado sin registrar tokens ni credenciales. El regreso del navegador nunca confirma por sí solo el pago.
 
 Los pagos anteriores siguen conciliándose con su conexión y ambiente originales, incluso después de cambiar el modo global. Sus enlaces de pago quedan ocultos en el ambiente nuevo, y un reintento de otra modalidad de ambiente se rechaza antes de reservar stock. Las renovaciones de credenciales históricas no reactivan cobros ni sustituyen la conexión actual. Una vuelta a modo prueba exige detener nuevos cobros y autorizar una conexión compatible; no basta con cambiar el texto de la pantalla.

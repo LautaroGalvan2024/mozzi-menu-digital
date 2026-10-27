@@ -18,6 +18,7 @@
 /playwright-report/
 /test-results/
 /coverage/
+/.tmp/
 *.log
 *.dump
 **/*.dump

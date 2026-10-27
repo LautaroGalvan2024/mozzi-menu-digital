@@ -157,7 +157,7 @@ export function AdminDashboardPage() {
         </SectionCard>
       </section>
 
-      <div className="mt-4"><PublicChannelsCard slug={selected.slug} menuEnabled={restaurant.public_menu_enabled} storeEnabled={restaurant.store_enabled} /></div>
+      <div className="mt-4"><PublicChannelsCard canConfigure={selected.role !== 'order_manager'} slug={selected.slug} menuEnabled={restaurant.public_menu_enabled} storeEnabled={restaurant.store_enabled} /></div>
     </>
   )
 }

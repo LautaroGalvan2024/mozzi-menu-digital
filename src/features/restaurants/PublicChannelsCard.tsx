@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Copy, Download, ExternalLink } from 'lucide-react'
 import QRCode from 'qrcode'
+import { Link } from 'react-router'
 import { commercePath } from '../../lib/commerce-channel'
 import { env } from '../../lib/env'
 
-export function PublicChannelsCard({ slug, menuEnabled, storeEnabled }: { slug: string; menuEnabled: boolean; storeEnabled: boolean }) {
-  return <section className="form-card"><h2 className="form-card-title">Links y códigos QR</h2><p className="mb-5 text-sm text-stone-500">El menú y la tienda comparten tu catálogo. Publicá cada vista desde la configuración.</p><div className="grid gap-5 sm:grid-cols-2"><ChannelLink slug={slug} channel="menu" enabled={menuEnabled} /><ChannelLink slug={slug} channel="store" enabled={storeEnabled} /></div></section>
+export function PublicChannelsCard({ slug, menuEnabled, storeEnabled, canConfigure = true }: { slug: string; menuEnabled: boolean; storeEnabled: boolean; canConfigure?: boolean }) {
+  return <section className="form-card"><h2 className="form-card-title">Links y códigos QR</h2><p className="mb-5 text-sm text-stone-500">El menú y la tienda comparten tu catálogo. {canConfigure ? <Link className="font-semibold text-orange-700 underline" to="/admin/tienda">{storeEnabled ? 'Configurar mi tienda online' : 'Publicar mi tienda online'}</Link> : null}</p><div className="grid gap-5 sm:grid-cols-2"><ChannelLink slug={slug} channel="menu" enabled={menuEnabled} /><ChannelLink slug={slug} channel="store" enabled={storeEnabled} /></div></section>
 }
 
 function ChannelLink({ slug, channel, enabled }: { slug: string; channel: 'menu' | 'store'; enabled: boolean }) {
