@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateRestaurantPage } from './CreateRestaurantPage'
 import { SuperRestaurantDetailPage } from './RestaurantDetailPage'
 
@@ -37,6 +37,7 @@ const restaurantId = '10000000-0000-4000-8000-000000000001'
 const administratorId = '20000000-0000-4000-8000-000000000001'
 
 describe('restaurant creation frontend flow', () => {
+  afterEach(cleanup)
   beforeEach(() => {
     mocks.from.mockReset()
     mocks.invoke.mockReset()
@@ -90,7 +91,7 @@ describe('restaurant creation frontend flow', () => {
 
   it('submits the Edge Function payload and renders the newly created draft detail', async () => {
     const user = userEvent.setup()
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -103,15 +104,13 @@ describe('restaurant creation frontend flow', () => {
       </QueryClientProvider>,
     )
 
-    await user.type(screen.getByLabelText('Nombre interno'), 'Restaurante Prueba')
-    await user.type(screen.getByLabelText('Nombre comercial'), 'Restaurante Prueba')
-    await user.type(screen.getByLabelText('Slug'), 'restaurante-prueba')
-    await user.type(screen.getByLabelText('WhatsApp E.164'), '+5493515555555')
-    await user.type(screen.getByLabelText('Descripción'), 'Alta integral')
-    await user.type(screen.getByLabelText('Dirección'), 'Calle Prueba 123')
-    await user.type(screen.getByLabelText('Ciudad'), 'Córdoba')
-    await user.type(screen.getByLabelText('Nombre completo'), 'Admin de prueba')
-    await user.type(screen.getByLabelText('Correo'), 'admin@example.com')
+    const fixture: [string | RegExp, string][] = [
+      ['Nombre interno', 'Restaurante Prueba'], ['Nombre comercial', 'Restaurante Prueba'],
+      [/^Dirección del link/, 'restaurante-prueba'], [/^WhatsApp/, '+5493515555555'],
+      ['Descripción', 'Alta integral'], ['Dirección', 'Calle Prueba 123'], ['Ciudad', 'Córdoba'],
+      ['Nombre completo', 'Admin de prueba'], ['Correo', 'admin@example.com'],
+    ]
+    for (const [label, value] of fixture) fireEvent.change(screen.getByLabelText(label), { target: { value } })
     await user.click(screen.getByRole('button', { name: 'Crear e invitar' }))
 
     expect(await screen.findByRole('heading', { name: 'Restaurante Prueba' })).toBeVisible()

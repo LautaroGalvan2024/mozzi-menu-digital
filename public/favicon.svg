@@ -1,15 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#ea580c" />
-  <g
-    fill="none"
-    stroke="#fff"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    stroke-width="2.2"
-    transform="translate(4 4)"
-  >
-    <path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8" />
-    <path d="M15 15 3.3 3.3a4.2 4.2 0 0 0 0 6l7.3 7.3c.7.7 2 .7 2.8 0L15 15Zm0 0 7 7" />
-    <path d="m2.1 21.8 6.4-6.3M19 5l-7 7" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none"><title>Mozzi</title><rect width="36" height="36" rx="10" fill="#BC4B24"/><path d="M9 25V11L18 20L27 11V25" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>

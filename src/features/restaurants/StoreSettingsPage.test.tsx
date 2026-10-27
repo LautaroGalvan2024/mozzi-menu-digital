@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StoreSettingsPage } from './StoreSettingsPage'
+import { RestaurantSettingsPage } from './RestaurantSettingsPage'
 import type { RestaurantRow } from './useRestaurant'
 
 const mocks = vi.hoisted(() => ({
@@ -32,9 +33,9 @@ function restaurant(id = firstId, overrides: Partial<RestaurantRow> = {}): Resta
   }
 }
 
-function show() {
+function show(page: 'store' | 'settings' = 'store') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  const tree = () => <QueryClientProvider client={client}><MemoryRouter><StoreSettingsPage /></MemoryRouter></QueryClientProvider>
+  const tree = () => <QueryClientProvider client={client}><MemoryRouter>{page === 'store' ? <StoreSettingsPage /> : <RestaurantSettingsPage />}</MemoryRouter></QueryClientProvider>
   const view = render(tree())
   return { ...view, client, refreshScope: () => view.rerender(tree()) }
 }
@@ -204,6 +205,7 @@ describe('StoreSettingsPage', () => {
     expect(storeCard().getByText('Sin publicar')).toBeVisible()
     expect(storeCard().queryByText('Publicado', { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await user.click(storeCard().getByRole('button', { name: 'Ver QR' }))
     expect(await storeCard().findByRole('img', { name: 'Código QR de Tienda online' })).toBeVisible()
     expect(mocks.qr).toHaveBeenCalledWith('https://mozzi.example.test/t/first-shop', { width: 256, margin: 2 })
   })
@@ -231,5 +233,51 @@ describe('StoreSettingsPage', () => {
     await screen.findByRole('status')
     expect(mocks.updateScope).toHaveBeenLastCalledWith('id', secondId)
     expect(mocks.update).toHaveBeenLastCalledWith({ store_enabled: true, store_ordering_policy: 'always', store_checkout_whatsapp_enabled: true, store_checkout_online_enabled: false })
+  })
+
+  it('generates a channel QR only when requested, while sharing links remain available', async () => {
+    const user = userEvent.setup(); show()
+    await publication()
+    expect(mocks.qr).not.toHaveBeenCalled()
+    expect(storeCard().getByRole('link', { name: 'Abrir' })).toHaveAttribute('href', 'https://mozzi.example.test/t/first-shop')
+    expect(storeCard().queryByRole('img')).not.toBeInTheDocument()
+    await user.click(storeCard().getByRole('button', { name: 'Ver QR' }))
+    expect(await storeCard().findByRole('img', { name: 'Código QR de Tienda online' })).toBeVisible()
+    expect(mocks.qr).toHaveBeenCalledExactlyOnceWith('https://mozzi.example.test/t/first-shop', { width: 256, margin: 2 })
+    expect(storeCard().getByRole('link', { name: 'Descargar QR' })).toHaveAttribute('download', 'first-shop-store-qr.png')
+    await user.click(storeCard().getByRole('button', { name: 'Ocultar QR' }))
+    expect(storeCard().queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('keeps general settings edits during a background refresh and never writes store publication fields', async () => {
+    const user = userEvent.setup(); const view = show('settings')
+    const name = await screen.findByRole('textbox', { name: 'Nombre comercial' })
+    await user.clear(name); await user.type(name, 'Nuevo nombre')
+    rows[firstId] = { ...rows[firstId]!, store_enabled: true, store_checkout_online_enabled: true }
+    await view.client.invalidateQueries({ queryKey: ['restaurant', firstId] })
+    expect(name).toHaveValue('Nuevo nombre')
+    expect(screen.queryByRole('checkbox', { name: 'Tienda publicada' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Configurar tienda online' })).toHaveAttribute('href', '/admin/tienda')
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Configuración guardada.')
+    const patch = mocks.update.mock.calls[0]![0]
+    expect(patch.trade_name).toBe('Nuevo nombre')
+    for (const key of ['store_enabled', 'store_ordering_policy', 'store_checkout_whatsapp_enabled', 'store_checkout_online_enabled']) expect(patch).not.toHaveProperty(key)
+    expect(rows[firstId]!.store_enabled).toBe(true)
+    expect(rows[firstId]!.store_checkout_online_enabled).toBe(true)
+    expect(mocks.updateScope).toHaveBeenCalledExactlyOnceWith('id', firstId)
+  })
+
+  it('resets general settings when switching commerce without carrying unsaved identity', async () => {
+    const user = userEvent.setup(); const view = show('settings')
+    const name = await screen.findByRole('textbox', { name: 'Nombre comercial' })
+    await user.clear(name); await user.type(name, 'Primer comercio editado')
+    rows[secondId] = restaurant(secondId, { trade_name: 'Segundo comercio' })
+    mocks.selectedId = secondId; view.refreshScope()
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Nombre comercial' })).toHaveValue('Segundo comercio'))
+    await user.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await screen.findByRole('status')
+    expect(mocks.updateScope).toHaveBeenCalledExactlyOnceWith('id', secondId)
+    expect(mocks.update.mock.calls[0]![0].trade_name).toBe('Segundo comercio')
   })
 })

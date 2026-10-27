@@ -56,6 +56,20 @@ describe('variant family editing', () => {
     await user.type(screen.getByLabelText('Modelo'), 'iPhone 15')
     await user.type(screen.getByLabelText('Color'), 'Negro')
   }
+  it('contains keyboard focus in the variant editor and returns it after Escape', async () => {
+    const user = await openFamily()
+    const close = screen.getByRole('button', { name: 'Cerrar ficha' })
+    const save = screen.getByRole('button', { name: 'Guardar ficha y variantes' })
+    save.focus()
+    expect(save).toHaveFocus()
+    await user.tab()
+    expect(close).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(save).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Nueva ficha con variantes' })).toHaveFocus()
+  })
   it('groups existing physical SKUs without sending replacement prices or stock', async () => {
     const user = await openFamily()
     await user.click(screen.getByRole('button', { name: 'Agrupar producto existente' }))

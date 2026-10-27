@@ -24,7 +24,7 @@ const orders = [paidOrder,
   { ...paidOrder, id: '23000000-0000-4000-8000-000000000003', display_number: 'CM-0003', customer_name: 'Cliente sin teléfono válido', customer_phone: 'sin teléfono' },
 ]
 
-async function adminFixture(page: Page) {
+async function adminFixture(page: Page, options: { inventoryCounting?: boolean } = {}) {
   const user = { id: userId, aud: 'authenticated', role: 'authenticated', email: 'admin@example.invalid', app_metadata: {}, user_metadata: {}, factors: [], created_at: new Date().toISOString() }
   // Synthetic local session. All provider requests below are intercepted; no credentials or remote service are used.
   const expiresAt = Math.floor(Date.now() / 1000) + 3600
@@ -48,7 +48,18 @@ async function adminFixture(page: Page) {
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '26000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
-    else if (request.method() === 'GET' && path === '/rest/v1/orders') body = orders
+    else if (request.method() === 'GET' && path === '/rest/v1/orders') body = new URL(request.url()).searchParams.has('id') ? paidOrder : orders
+    else if (request.method() === 'GET' && path === '/rest/v1/order_items') body = [{
+      id: '27000000-0000-4000-8000-000000000001', order_id: paidOrder.id, product_name_snapshot: 'Funda de silicona', product_code_snapshot: 'FUN-NEGRO', quantity: 1,
+      unit_price_cents: 1050000, base_subtotal_cents: 1050000, pricing_mode_snapshot: 'unit', options_total_unit_cents: 0, line_total_cents: 1050000, notes: null,
+      pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 1050000, baseSubtotalCents: 1050000, components: [] }, variant_attributes_snapshot: { Modelo: 'iPhone 15', Color: 'Negro' },
+    }]
+    else if (request.method() === 'GET' && ['/rest/v1/order_events', '/rest/v1/order_item_options'].includes(path)) body = []
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_by_action') body = { replacementOrderId: null, inventoryOperations: [] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory') body = {
+      policy: { mode: options.inventoryCounting ? 'paused' : 'enforced', version: '1', activatedAt: '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
+      items: ['Funda negra', 'Funda roja', 'Cable USB'].map((name, index) => ({ productId: '28000000-0000-4000-8000-00000000000' + (index + 1), name, code: 'PROD-00' + index, initialized: true, onHand: '10', reserved: '2', available: '8', version: '1' })), nextCursor: null, operations: [],
+    }
     else {
       unexpected.push(`${request.method()} ${path}`)
       await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Unexpected mocked request' }) })
@@ -96,9 +107,11 @@ test.describe('admin WhatsApp contact', () => {
       await expect(invalidRow.getByRole('link', { name: 'Ver CM-0003' })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       if (viewport.name === 'mobile') {
+        await page.getByText('Fechas y modalidad', { exact: true }).click()
         const from = await page.getByLabel('Desde', { exact: true }).boundingBox()
         const to = await page.getByLabel('Hasta', { exact: true }).boundingBox()
         expect(from!.y).toBe(to!.y)
+        await page.getByText('Fechas y modalidad', { exact: true }).click()
         const number = await approvedRow.getByText('CM-0001', { exact: true }).boundingBox()
         const state = await approvedRow.getByText('Pagado · Pendiente de preparación').boundingBox()
         expect(state!.y).toBeGreaterThanOrEqual(number!.y + number!.height)
@@ -107,5 +120,67 @@ test.describe('admin WhatsApp contact', () => {
       await page.screenshot({ path: testInfo.outputPath(`orders-whatsapp-${viewport.name}.png`), fullPage: true })
       expect(unexpected).toEqual([])
     })
+
+    test(`${viewport.name} keeps stock editing prominent and occasional inventory tools collapsed`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      const unexpected = await adminFixture(page)
+      await page.goto('/admin/stock')
+      await expect(page.getByRole('heading', { name: 'Stock', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Editar stock de Funda negra' })).toHaveAttribute('href', '/admin/catalogo/productos/28000000-0000-4000-8000-000000000001')
+      const balances = page.getByRole('table', { name: 'Existencias de productos' })
+      const firstProduct = balances.getByRole('row').filter({ hasText: 'Funda negra' })
+      const editStock = await firstProduct.getByRole('link', { name: 'Editar stock de Funda negra' }).boundingBox()
+      expect(editStock!.x).toBeGreaterThanOrEqual(0)
+      expect(editStock!.x + editStock!.width).toBeLessThanOrEqual(viewport.width)
+      if (viewport.name === 'mobile') {
+        for (const label of ['Total', 'Reservado', 'Disponible']) await expect(firstProduct.getByText(label, { exact: true })).toBeVisible()
+        const quantities = await firstProduct.locator('.inventory-quantity').evaluateAll(cells => cells.map(cell => cell.getBoundingClientRect().top))
+        expect(new Set(quantities).size).toBe(1)
+        expect(editStock!.height).toBeGreaterThanOrEqual(44)
+      }
+      await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).not.toBeVisible()
+      await page.getByText('Ingresos, ajustes y ventas externas', { exact: true }).click()
+      await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.getByText('Ingresos, ajustes y ventas externas', { exact: true }).click()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.screenshot({ path: testInfo.outputPath(`stock-overview-${viewport.name}.png`), fullPage: true })
+      expect(unexpected).toEqual([])
+    })
+
+    test(`${viewport.name} prioritizes the paid order and customer over its technical history`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      const unexpected = await adminFixture(page)
+      await page.goto('/admin/pedidos/' + paidOrder.id)
+      await expect(page.getByRole('heading', { name: 'CM-0001', exact: true })).toBeVisible()
+      await expect(page.getByText('Pagado · Pendiente de preparación', { exact: true })).toHaveCount(1)
+      await expect(page.getByRole('link', { name: 'Aceptar para preparar' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Cliente y entrega' })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`order-detail-${viewport.name}.png`), fullPage: true })
+      expect(unexpected).toEqual([])
+    })
   }
+
+  test('mobile keeps stock count inputs visible within each product row', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const unexpected = await adminFixture(page, { inventoryCounting: true })
+    await page.goto('/admin/stock')
+    const balances = page.getByRole('table', { name: 'Existencias de productos' })
+    await expect(balances).toBeVisible()
+    const count = balances.getByRole('textbox', { name: 'Conteo de Funda negra', exact: true })
+    await expect(count).toBeVisible()
+    const box = await count.boundingBox()
+    expect(box!.x).toBeGreaterThanOrEqual(0)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390)
+    expect(box!.height).toBeGreaterThanOrEqual(44)
+    await count.fill('10')
+    await expect(count).toHaveValue('10')
+    await expect(balances.getByRole('link', { name: /Editar stock/ })).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.screenshot({ path: testInfo.outputPath('stock-count-mobile.png'), fullPage: true })
+    expect(unexpected).toEqual([])
+  })
 })

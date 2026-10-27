@@ -223,7 +223,7 @@ describe('operational order details', () => {
       return Promise.resolve({ data: { operationId: args.p_operation_id, orderId: ORDER_ID }, error: null })
     })
     wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
-    await screen.findByRole('heading', { name: 'Devolución o corrección completa' })
+    await user.click(await screen.findByText('Devolución o corrección completa'))
     await user.type(screen.getByLabelText('Motivo'), 'Envase dañado')
     await user.selectOptions(screen.getByLabelText('Mercadería que queda vendible'), 'partial')
     await user.type(screen.getByLabelText('Producto de prueba · recibidas 3'), '1')
@@ -252,6 +252,7 @@ describe('operational order details', () => {
     }, error: null })
     wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
     expect(await screen.findByRole('heading', { name: 'PED-0001' })).toBeVisible()
+    await userEvent.click(screen.getByText('Línea de tiempo'))
     expect(screen.getByText('Producto de prueba: 2 unidades repuestas como vendibles.')).toBeVisible()
     expect(screen.getByText('Devolución total, una unidad dañada')).toBeVisible()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -264,8 +265,8 @@ describe('operational order details', () => {
     setupInventoryOrder('completed')
     mocks.rpc.mockResolvedValue({ data: inventoryDetail, error: null })
     wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
-    await screen.findByRole('heading', { name: 'Entrega e inventario' })
-    expect(screen.queryByRole('heading', { name: 'Devolución o corrección completa' })).not.toBeInTheDocument()
+    await screen.findByText('Entrega e inventario')
+    expect(screen.queryByText('Devolución o corrección completa')).not.toBeInTheDocument()
   })
 
   it('shows every operational field on the claim screen', async () => {

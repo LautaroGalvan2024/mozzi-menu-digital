@@ -1,5 +1,5 @@
 import { useQuery,useQueryClient } from '@tanstack/react-query'
-import { CircleCheck, CircleX, Eye, EyeOff, ImageIcon, Plus, Search, Star } from 'lucide-react'
+import { CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
@@ -40,46 +40,49 @@ export function ProductsPage(){
     <PageHeader
       eyebrow="Catálogo"
       title="Productos"
-      description="Marcá un producto como agotado sin eliminarlo. Los pedidos guardan snapshots históricos."
+      description="Administrá los productos, precios y disponibilidad de tu catálogo."
       actions={<Link className="button-primary w-full sm:w-auto" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>}
     />
     {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
-    <ProductFamilies key={scope.selected?.id} />
-    <div className="filter-bar mb-5 p-3">
-      <label className="relative block">
+    <div className="admin-toolbar mb-4 flex flex-wrap items-center justify-between gap-3">
+      <label className="relative block w-full sm:max-w-md">
         <span className="sr-only">Buscar productos</span>
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-stone-400" aria-hidden/>
         <input className="h-11 w-full rounded-xl border border-stone-300 bg-white pl-10 pr-4 text-sm outline-none transition duration-150 placeholder:text-stone-400 hover:border-stone-400 focus:border-orange-500 focus:ring-3 focus:ring-orange-100" placeholder="Buscar por nombre o código" value={search} onChange={(e)=>setSearch(e.target.value)}/>
       </label>
+      <p className="text-sm text-stone-500">{products.length} {products.length === 1 ? 'producto' : 'productos'}</p>
     </div>
+    <ProductFamilies key={scope.selected?.id} />
     {mutationError?<p className="form-error mb-5" role="alert">{mutationError}</p>:null}
-    {products.length===0?<EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/>:<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {products.length===0?<EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/>:<div className="admin-table-shell rounded-xl border border-stone-200 bg-white">
+      <div className="hidden grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] gap-4 border-b border-stone-200 px-5 py-3 text-xs font-medium text-stone-500 lg:grid" aria-hidden><span>Producto</span><span>Estado</span><span className="text-right">Precio</span><span /></div>
       {products.map((row)=>{
         const image=publicAssetUrl(row.image_path);const busy=busyProductId===row.id;const hasPromotion=row.promotional_price_cents!==null
-        return <article className="surface-card group flex min-w-0 flex-col overflow-hidden transition duration-150 hover:-translate-y-0.5 hover:border-stone-300 hover:shadow-md focus-within:border-orange-300" key={row.id}>
-          <Link to={`/admin/catalogo/productos/${row.id}`} className="flex flex-1 flex-col">
-            <div className="overflow-hidden bg-stone-100">
-              {image?<img src={image} alt="" className="aspect-[16/10] w-full object-cover transition duration-150 group-hover:scale-[1.015]"/>:<div className="grid aspect-[16/10] place-items-center bg-stone-100"><span className="grid h-14 w-14 place-items-center rounded-2xl border border-stone-200 bg-white text-stone-300 shadow-sm"><ImageIcon className="h-6 w-6" aria-hidden/></span></div>}
-            </div>
-            <div className="flex flex-1 flex-col p-4 sm:p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="status-badge border-orange-200 bg-orange-50 text-orange-800">{row.categories?.name??'Sin categoría'}</span>
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-[.08em] text-stone-500">{row.code}</span>
-              </div>
-              <h2 className="mt-3 font-display text-xl font-bold leading-tight tracking-tight text-stone-950">{row.name}</h2>
-              <div className="mt-auto flex items-end justify-between gap-3 pt-5">
-                <div>
-                  <p className="font-display text-xl font-bold tracking-tight text-stone-950">{formatMoney(row.promotional_price_cents??row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>
-                  {hasPromotion?<p className="mt-0.5 text-xs font-medium text-stone-400 line-through">{formatMoney(row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>:null}
-                </div>
-                <span className="text-xs font-semibold text-stone-500 transition group-hover:text-orange-700">Editar</span>
-              </div>
+        return <article className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 border-b border-stone-100 p-4 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] lg:px-5" key={row.id}>
+          <Link to={`/admin/catalogo/productos/${row.id}`} className="flex min-w-0 items-center gap-3 rounded-lg focus-visible:outline-offset-4">
+            {image?<img src={image} alt="" loading="lazy" className="h-12 w-12 shrink-0 rounded-lg border border-stone-100 object-cover"/>:<span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-stone-100 text-stone-400"><ImageIcon className="h-5 w-5" aria-hidden/></span>}
+            <div className="min-w-0">
+              <h2 className="break-words text-sm font-semibold leading-5 text-stone-950">{row.name}{row.featured ? <Star className="ml-1.5 inline h-3.5 w-3.5 text-stone-400" aria-label="Destacado" /> : null}</h2>
+              <p className="mt-1 truncate text-xs text-stone-500">{row.categories?.name??'Sin categoría'} <span aria-hidden>·</span> {row.code}</p>
             </div>
           </Link>
-          <div className="grid grid-cols-3 divide-x divide-stone-200 border-t border-stone-200 text-xs">
-            <button type="button" disabled={busy} aria-pressed={row.available} aria-label={`${row.available?'Disponible':'Agotado'}: ${row.name}`} className={`flex min-h-12 items-center justify-center gap-1.5 px-2 text-[11px] font-bold transition duration-150 focus-visible:z-10 disabled:cursor-wait disabled:opacity-50 sm:text-xs ${row.available?'bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100':'bg-stone-50 text-stone-600 hover:bg-stone-100'}`} onClick={()=>void toggle(row.id,'available',!row.available)}>{row.available?<CircleCheck className="h-4 w-4 shrink-0" aria-hidden/>:<CircleX className="h-4 w-4 shrink-0" aria-hidden/>}{row.available?'Disponible':'Agotado'}</button>
-            <button type="button" disabled={busy} aria-pressed={row.active} aria-label={`${row.active?'Activo':'Oculto'}: ${row.name}`} className={`flex min-h-12 items-center justify-center gap-1.5 px-2 text-[11px] font-bold transition duration-150 focus-visible:z-10 disabled:cursor-wait disabled:opacity-50 sm:text-xs ${row.active?'bg-sky-50/70 text-sky-800 hover:bg-sky-100':'bg-stone-50 text-stone-600 hover:bg-stone-100'}`} onClick={()=>void toggle(row.id,'active',!row.active)}>{row.active?<Eye className="h-4 w-4 shrink-0" aria-hidden/>:<EyeOff className="h-4 w-4 shrink-0" aria-hidden/>}{row.active?'Activo':'Oculto'}</button>
-            <button type="button" disabled={busy} aria-pressed={row.featured} aria-label={`${row.featured?'Destacado':'Sin destacar'}: ${row.name}`} className={`flex min-h-12 items-center justify-center gap-1.5 px-2 text-[11px] font-bold transition duration-150 focus-visible:z-10 disabled:cursor-wait disabled:opacity-50 sm:text-xs ${row.featured?'bg-amber-50/80 text-amber-800 hover:bg-amber-100':'bg-stone-50 text-stone-600 hover:bg-stone-100'}`} onClick={()=>void toggle(row.id,'featured',!row.featured)}><Star className={`h-4 w-4 shrink-0 ${row.featured?'fill-current':''}`} aria-hidden/>{row.featured?'Destacado':'Destacar'}</button>
+          <p className="col-start-1 row-start-2 flex items-center gap-1.5 pl-15 text-xs text-stone-600 lg:col-auto lg:row-auto lg:pl-0"><span className={`h-1.5 w-1.5 rounded-full ${!row.active?'bg-stone-300':row.available?'bg-emerald-600':'bg-amber-600'}`} aria-hidden />{!row.active?'Oculto':row.available?'Disponible':'Agotado'}</p>
+          <div className="col-start-1 row-start-3 pl-15 text-sm font-semibold tabular-nums text-stone-950 sm:col-start-2 sm:row-start-2 sm:pl-0 sm:text-right lg:col-auto lg:row-auto">
+            <p>{formatMoney(row.promotional_price_cents??row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>
+            {hasPromotion?<p className="mt-0.5 text-xs font-normal text-stone-400 line-through">{formatMoney(row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>:null}
+          </div>
+          <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 lg:col-auto lg:row-auto">
+            <Link className="hidden rounded-lg px-2 py-2 text-sm font-medium text-stone-600 hover:text-stone-950 sm:block" aria-label={`Editar ${row.name}`} to={`/admin/catalogo/productos/${row.id}`}>Editar</Link>
+            <details className="relative" name="product-actions" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
+              <summary className="icon-button list-none [&::-webkit-details-marker]:hidden" aria-label={`Opciones de ${row.name}`}><MoreHorizontal className="h-5 w-5" aria-hidden /></summary>
+              <div className="absolute right-0 z-20 mt-1 grid w-60 gap-1 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg">
+                <Link className="rounded-lg px-3 py-2.5 text-sm hover:bg-stone-50" to={`/admin/catalogo/productos/${row.id}`}>Editar producto</Link>
+                <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.available} aria-label={`${row.available?'Disponible':'Agotado'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'available',!row.available)}>{row.available?<CircleX className="h-4 w-4" aria-hidden/>:<CircleCheck className="h-4 w-4" aria-hidden/>}{row.available?'Marcar agotado':'Marcar disponible'}</button>
+                <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.active} aria-label={`${row.active?'Activo':'Oculto'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'active',!row.active)}>{row.active?<EyeOff className="h-4 w-4" aria-hidden/>:<Eye className="h-4 w-4" aria-hidden/>}{row.active?'Ocultar producto':'Mostrar producto'}</button>
+                <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.featured} aria-label={`${row.featured?'Destacado':'Sin destacar'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'featured',!row.featured)}><Star className="h-4 w-4" aria-hidden/>{row.featured?'Quitar destacado':'Destacar producto'}</button>
+                {busy ? <p role="status" className="px-3 py-2 text-xs text-stone-500">Guardando…</p> : null}
+              </div>
+            </details>
           </div>
         </article>
       })}

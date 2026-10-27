@@ -32,7 +32,7 @@ export function SetPasswordPage() {
   }
 
   return (
-    <AuthShell title="Definí tu contraseña" subtitle="La contraseña nunca se guarda en tablas de la aplicación ni se envía por WhatsApp.">
+    <AuthShell title="Definí tu contraseña" subtitle="Elegí una contraseña segura para acceder a tu comercio.">
       <form className="space-y-5" onSubmit={submit}>
         <label className="field"><span>Nueva contraseña</span><input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <PasswordStrength password={password} />

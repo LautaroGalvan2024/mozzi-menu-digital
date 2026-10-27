@@ -70,6 +70,10 @@ function renderExistingProductRoute(productId: string) {
 }
 
 const existingId = '30000000-0000-4000-8000-000000000001'
+async function openSection(label: string) {
+  const summary = screen.getByText(label, { selector: 'summary', exact: false })
+  if (!summary.closest('details')?.open) await userEvent.click(summary)
+}
 function stockResponse(onHand = '10', reserved = '3', version = '7', mode = 'enforced') {
   return { data: { policy: { mode, version: '1', cutoverId: null, businessConfirmed: true, businessPolicy: null }, items: [{ productId: existingId, initialized: true, onHand, reserved, available: String(BigInt(onHand) - BigInt(reserved)), version }] }, error: null }
 }
@@ -120,10 +124,39 @@ describe('new product route', () => {
     expect(screen.queryByRole('heading', { name: 'Listado de productos' })).not.toBeInTheDocument()
   })
 
+  it('keeps essentials visible and optional configuration folded until requested', async () => {
+    renderNewProductRoute()
+    expect(await screen.findByLabelText('Nombre')).toBeVisible()
+    expect(screen.getByLabelText('Precio base')).toBeVisible()
+    expect(screen.getByLabelText('Stock (unidades)')).toBeVisible()
+    expect(screen.getByLabelText('Precio promocional')).not.toBeVisible()
+    expect(screen.getByLabelText('Código / SKU (opcional)')).not.toBeVisible()
+    expect(screen.getByRole('button', { name: 'Grupo' })).not.toBeVisible()
+    await openSection('Promociones y precios especiales')
+    expect(screen.getByLabelText('Precio promocional')).toBeVisible()
+  })
+
+  it('reopens a manually closed optional section when its values prevent saving', async () => {
+    const user = userEvent.setup()
+    renderNewProductRoute()
+    await user.type(await screen.findByLabelText('Nombre'), 'Funda')
+    await user.clear(screen.getByLabelText('Precio base'))
+    await user.type(screen.getByLabelText('Precio base'), '100')
+    await openSection('Promociones y precios especiales')
+    await user.type(screen.getByLabelText('Precio promocional'), '150')
+    await user.click(screen.getByText('Promociones y precios especiales', { selector: 'summary' }))
+    expect(screen.getByLabelText('Precio promocional')).not.toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('precios y la vigencia')
+    expect(screen.getByLabelText('Precio promocional')).toBeVisible()
+    expect(mocks.rpc).not.toHaveBeenCalled()
+  })
+
   it('creates without a code and keeps an informed code as text', async () => {
     const user = userEvent.setup()
     renderNewProductRoute()
     await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await openSection('Código y organización')
     expect(screen.getByText('Si lo dejás vacío, lo generamos automáticamente')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
     expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog_with_stock', expect.objectContaining({ p_product: expect.objectContaining({ code: '' }), p_stock: null }))
@@ -131,6 +164,7 @@ describe('new product route', () => {
     cleanup()
     renderNewProductRoute()
     await user.type(await screen.findByLabelText('Nombre'), 'Fideos')
+    await openSection('Código y organización')
     await user.type(screen.getByLabelText('Código / SKU (opcional)'), '000123')
     await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
     expect(mocks.rpc).toHaveBeenLastCalledWith('save_product_catalog_with_stock', expect.objectContaining({ p_product: expect.objectContaining({ code: '000123' }) }))
@@ -293,9 +327,11 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Milanesa')
+    await openSection('Código y organización')
     await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'MIL-1')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
+    await openSection('Promociones y precios especiales')
     await user.type(screen.getByLabelText('Precio promocional'), '150')
     await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
 
@@ -308,9 +344,11 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Milanesa')
+    await openSection('Código y organización')
     await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'MIL-2')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
+    await openSection('Extras y adicionales')
     await user.click(screen.getByRole('button', { name: 'Grupo' }))
     await user.type(screen.getByLabelText('Nombre del grupo'), 'Salsas')
     await user.clear(screen.getByLabelText('Mínimo'))
@@ -325,6 +363,7 @@ describe('new product route', () => {
     const user = userEvent.setup()
     renderNewProductRoute()
     await user.type(await screen.findByLabelText('Nombre'), 'Arroz')
+    await openSection('Extras y adicionales')
     await user.click(screen.getByRole('button', { name: 'Grupo' }))
     await user.type(screen.getByLabelText('Nombre del grupo'), 'Extras')
     await user.clear(screen.getByLabelText('Máximo'))
@@ -350,9 +389,11 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
+    await openSection('Código y organización')
     await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'EMP-1')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
+    await openSection('Promociones y precios especiales')
     await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
     await user.clear(screen.getByLabelText('Precio total para 2 unidades'))
     await user.type(screen.getByLabelText('Precio total para 2 unidades'), '180')
@@ -373,10 +414,13 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await user.type(await screen.findByLabelText('Nombre'), 'Empanada')
+    await openSection('Código y organización')
     await user.type(screen.getByLabelText('Código / SKU (opcional)'), 'EMP-2')
     await user.clear(screen.getByLabelText('Precio base'))
     await user.type(screen.getByLabelText('Precio base'), '100')
+    await openSection('Promociones y precios especiales')
     await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
+    await openSection('Promociones y precios especiales')
     await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
     const duplicateQuantity = screen.getByLabelText('Cantidad del precio especial 3')
     await user.clear(duplicateQuantity)
@@ -392,6 +436,7 @@ describe('new product route', () => {
     renderNewProductRoute()
 
     await screen.findByRole('heading', { name: 'Nuevo producto' })
+    await openSection('Extras y adicionales')
     await user.click(screen.getByRole('button', { name: 'Grupo' }))
     const required = screen.getByRole('checkbox', { name: 'Obligatorio' })
     await user.click(required)
@@ -441,10 +486,11 @@ describe('new product route', () => {
 
     renderExistingProductRoute(productId)
 
-    expect(await screen.findByRole('heading', { name: 'Editar Burger' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Editar producto' })).toBeVisible()
     expect(optionIn).toHaveBeenCalledWith('option_group_id', [groupId])
     expect(screen.getByLabelText('Precio total para 2 unidades')).toHaveValue(180)
     const user = userEvent.setup()
+    await openSection('Código y organización')
     await user.clear(screen.getByLabelText('Código / SKU (opcional)'))
     await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
     expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog_with_stock', expect.objectContaining({ p_product: expect.objectContaining({ id: productId, code: '' }) }))

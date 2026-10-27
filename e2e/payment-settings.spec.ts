@@ -90,8 +90,9 @@ test.describe('Mercado Pago environment settings', () => {
     expect(requests.unexpected).toEqual([])
   })
 
-  test('desktop shows a ready production account and the separate inventory and store activation steps', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 'mobile', width: 390, height: 844 }]) {
+  test(`${viewport.name} shows a ready production account and the separate inventory and store activation steps`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport)
     const requests = await adminFixture(page, {
       configured: true, configurationIssue: null, environment: 'production', connectionEnvironment: 'production', readyForPayments: true,
       connectionIssue: null, connection: { connected: true, providerUserId: '12345', expiresAt: '2030-01-01T00:00:00Z' },
@@ -101,14 +102,19 @@ test.describe('Mercado Pago environment settings', () => {
     await expect(section.getByRole('status')).toHaveText('Cuenta lista para cobros reales')
     await expect(section.getByRole('status')).toHaveClass(/text-emerald-800/)
     await expect(section.getByText(/Autorización actual: cobros reales/)).toBeVisible()
+    await expect(section.getByRole('link', { name: 'Configurar pagos en la tienda' })).toBeVisible()
+    await expect(section.getByRole('button', { name: 'Desactivar nuevos cobros' })).not.toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`payment-settings-ready-${viewport.name}.png`), fullPage: true })
+    await section.getByText('Cómo habilitar los cobros online').click()
     const steps = section.getByRole('list', { name: 'Pasos para habilitar pagos online' })
     await expect(steps).toContainText('Activá el control desde Stock')
     await expect(steps).toContainText('Pagos online con Mercado Pago')
     await expect(section.getByText(/no necesitás copiar claves/)).toBeVisible()
+    await section.getByText('Administrar conexión').click()
     await expect(section.getByRole('button', { name: 'Desactivar nuevos cobros' })).toBeEnabled()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await page.screenshot({ path: testInfo.outputPath('payment-settings-ready-desktop.png'), fullPage: true })
     expect(requests.paymentRequests).toEqual([{ restaurantId, action: 'status' }])
     expect(requests.unexpected).toEqual([])
   })
+  }
 })

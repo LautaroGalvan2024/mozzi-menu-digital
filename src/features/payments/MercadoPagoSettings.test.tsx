@@ -72,6 +72,7 @@ describe('Mercado Pago connection configuration', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Cuenta lista para pruebas')
     expect(screen.getByText(/Las compras de prueba no generan cobros reales/)).toBeVisible()
     expect(screen.queryByText('Cuenta lista para cobros reales')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('Administrar conexión'))
     expect(screen.getByRole('button', { name: 'Reconectar Mercado Pago para pruebas' })).toBeEnabled()
   })
 
@@ -80,6 +81,7 @@ describe('Mercado Pago connection configuration', () => {
     view()
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Cuenta lista para cobros reales'))
     expect(screen.getByText(/Autorización actual: cobros reales/)).toBeVisible()
+    await userEvent.click(screen.getByText('Cómo habilitar los cobros online'))
     const steps = screen.getByRole('list', { name: 'Pasos para habilitar pagos online' })
     expect(steps).toHaveTextContent('Activá el control desde Stock')
     expect(steps).toHaveTextContent('Pagos online con Mercado Pago')

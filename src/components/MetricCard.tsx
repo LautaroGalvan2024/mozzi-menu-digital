@@ -23,13 +23,13 @@ export function MetricCard({
   detail?: ReactNode
 }) {
   return (
-    <article className="surface-card p-5">
+    <article className="metric-card surface-card p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-stone-500">{label}</p>
           <p className="mt-2 font-display text-3xl font-bold tracking-tight text-stone-950">{value}</p>
         </div>
-        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ring-inset ${tones[tone]}`}>
+        <span className={`metric-card-icon grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 ring-inset ${tones[tone]}`}>
           <Icon className="h-5 w-5" aria-hidden />
         </span>
       </div>

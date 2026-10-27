@@ -118,7 +118,17 @@ export function ProductEditorPage() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const saveInFlight = useRef(false)
+  const promotionsSection = useRef<HTMLDetailsElement>(null)
+  const extrasSection = useRef<HTMLDetailsElement>(null)
+  const organizationSection = useRef<HTMLDetailsElement>(null)
   const [error, setError] = useState<string | null>(null)
+  function showEditorError(message: string | null) {
+    setError(message)
+    if (!message) return
+    if (/precios|precio|vigencia/.test(message) && promotionsSection.current) promotionsSection.current.open = true
+    if (/opciones|grupo/.test(message) && extrasSection.current) extrasSection.current.open = true
+    if (/código|orden/.test(message) && organizationSection.current) organizationSection.current.open = true
+  }
   const [pendingSave, setPendingSave] = useState<ProductSaveAttempt | null>(null)
   const stock = useQuery({
     queryKey: ['catalog-stock', scope.selected?.id, isNew ? 'new' : productId],
@@ -390,7 +400,7 @@ export function ProductEditorPage() {
     const endsAt = currentDraft.promotionEndsAt ? new Date(currentDraft.promotionEndsAt) : null
     const moneyIsValid = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= maxCents
     setSaving(true)
-    setError(null)
+    showEditorError(null)
     let stockChange: ProductSaveAttempt['request']['p_stock'] = null
     if (!pendingSave) {
       try {
@@ -402,11 +412,11 @@ export function ProductEditorPage() {
           stockChange = { onHand, expectedVersion: currentDraft.stockBaseline?.version ?? null }
         }
       } catch (failure) {
-        setError(failure instanceof Error ? failure.message : 'Revisá la cantidad de stock.'); setSaving(false); return
+        showEditorError(failure instanceof Error ? failure.message : 'Revisá la cantidad de stock.'); setSaving(false); return
       }
     }
     if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code) || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
-      setError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
+      showEditorError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
       setSaving(false)
       return
     }
@@ -423,14 +433,14 @@ export function ProductEditorPage() {
     }))
     const quantityValues = new Set(quantityPrices.map((rule) => rule.quantity))
     if (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents))) {
-      setError('Revisá los precios por cantidad: cada cantidad entre 2 y 20 debe aparecer una sola vez y tener un precio válido.')
+      showEditorError('Revisá los precios por cantidad: cada cantidad entre 2 y 20 debe aparecer una sola vez y tener un precio válido.')
       setSaving(false)
       return
     }
     for (const group of groups) {
       const activeOptionCount = group.options.filter((option) => option.active).length
       if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < Math.max(1, group.minSelect) || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
-        setError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.')
+        showEditorError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.')
         setSaving(false)
         return
       }
@@ -520,7 +530,7 @@ export function ProductEditorPage() {
             setDraft(value => value ? { ...value, stockQuantity: '', stockBaseline: refreshed.data?.items.find(item => item.productId === currentDraft.id) ?? value.stockBaseline } : value)
           }
         }
-        setError(catalogStockError(saveError))
+        showEditorError(catalogStockError(saveError))
         return
       }
       catalogSaved = true
@@ -536,14 +546,14 @@ export function ProductEditorPage() {
         if (!cleaned) {
           setDraft((value) => (value ? { ...value, imagePath: nextPath } : value))
           setImageFile(null)
-          setError('El producto quedó guardado, pero no se pudo retirar la imagen anterior. Reintentá la limpieza desde esta pantalla.')
+          showEditorError('El producto quedó guardado, pero no se pudo retirar la imagen anterior. Reintentá la limpieza desde esta pantalla.')
           return
         }
       }
       if (isNew) clearProductAttempt(restaurantId)
       navigate('/admin/catalogo/productos', { state: { savedCode: savedCode.success ? savedCode.data.code : currentDraft.code } })
     } catch (failure) {
-      setError(catalogSaved ? 'El producto y su stock quedaron guardados, pero no se pudo completar la actualización de la pantalla.' : catalogStockError(failure))
+      showEditorError(catalogSaved ? 'El producto y su stock quedaron guardados, pero no se pudo completar la actualización de la pantalla.' : catalogStockError(failure))
     } finally {
       saveInFlight.current = false
       setSaving(false)
@@ -563,93 +573,79 @@ export function ProductEditorPage() {
     <>
       <PageHeader
         eyebrow="Catálogo"
-        title={isNew ? 'Nuevo producto' : `Editar ${draft.name}`}
-        description="Completá los datos del producto. Si no tenés un código, lo generamos al guardar."
-        actions={
-          <Link className="button-secondary" to="/admin/catalogo/productos">
-            <ArrowLeft className="h-4 w-4" />
-            Volver
-          </Link>
-        }
+        title={isNew ? 'Nuevo producto' : 'Editar producto'}
+        description="Nombre, precio y stock: lo esencial para empezar."
+        actions={<Link className="button-secondary" to="/admin/catalogo/productos"><ArrowLeft className="h-4 w-4" />Volver</Link>}
       />
-      <div className="space-y-6">
-        {pendingSave ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">Hay un guardado pendiente de confirmación. Reintentá el mismo envío antes de cambiar los datos; conservamos la cantidad y la imagen para no aplicar el stock dos veces.</p> : null}
-        <fieldset disabled={saving || Boolean(pendingSave)} className="m-0 space-y-6 border-0 p-0">
+      <div className="mx-auto max-w-4xl space-y-4">
+        {pendingSave ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">Hay un guardado pendiente de confirmación. Reintentá el mismo envío antes de cambiar los datos.</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <fieldset disabled={saving || Boolean(pendingSave)} className="m-0 space-y-4 border-0 p-0">
+          <section className="form-card">
+            <h2 className="form-card-title mb-5">Datos principales</h2>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <label className="field"><span>Nombre</span><input maxLength={160} value={draft.name} onChange={e => patch('name', e.target.value)} placeholder="Nombre del producto" /></label>
+              <label className="field"><span>Categoría</span><select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={e => patch('categoryId', e.target.value)}>{categories.data?.map(category => <option value={category.id} key={category.id}>{category.name}</option>)}</select>{product.data?.product.family_id ? <p className="text-xs font-normal text-stone-500">La categoría se cambia desde la ficha de variantes en Productos.</p> : null}</label>
+              <label className="field"><span>Precio base</span><input type="number" min="0" step="0.01" value={draft.basePrice} onChange={e => patch('basePrice', e.target.value)} /></label>
+              <div className="field">
+                <label htmlFor="product-stock">Stock (unidades)</label>
+                <input id="product-stock" type="text" inputMode="numeric" aria-describedby="product-stock-help product-stock-current" value={draft.stockQuantity} disabled={stock.data?.policy.mode === 'paused' || Boolean(stock.data?.policy.cutoverId)} onChange={event => patch('stockQuantity', event.target.value)} placeholder={isNew ? 'Ej.: 20' : 'Sin modificar'} />
+                <p id="product-stock-help" className="text-xs font-normal text-stone-500">Cantidad total. Vacío conserva el stock; 0 indica agotado.</p>
+                <p id="product-stock-current" className="text-xs font-normal text-stone-500">{draft.stockBaseline?.initialized ? `Stock actual: ${draft.stockBaseline.onHand} · Reservado: ${draft.stockBaseline.reserved} · Disponible: ${draft.stockBaseline.available}` : 'Todavía no se cargó stock para este producto.'}</p>
+                {stock.data?.policy.cutoverId ? <p className="text-xs font-normal text-amber-800">Hay una actualización de inventario en curso. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'paused' ? <p className="text-xs font-normal text-amber-800">El stock está pausado. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'never_enabled' ? <p className="text-xs font-normal text-stone-500">Podés cargar las cantidades ahora y activar el control desde Stock.</p> : null}
+              </div>
+              <label className="field sm:col-span-2"><span>Descripción</span><textarea rows={2} maxLength={2000} value={draft.description} onChange={e => patch('description', e.target.value)} placeholder="Una descripción breve para tus clientes (opcional)" /></label>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-5 border-t border-stone-100 pt-4">
+              <label className="check-field"><input type="checkbox" checked={draft.active} onChange={e => patch('active', e.target.checked)} />Activo</label>
+              <label className="check-field"><input type="checkbox" checked={draft.available} onChange={e => patch('available', e.target.checked)} />Disponible</label>
+            </div>
+          </section>
         <section className="form-card">
-          <h2 className="form-card-title">Datos principales</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="field">
-              <span>Nombre</span>
-              <input maxLength={160} value={draft.name} onChange={(e) => patch('name', e.target.value)} />
-            </label>
-            <div className="field">
-              <label htmlFor="product-code">Código / SKU (opcional)</label>
-              <input id="product-code" aria-describedby="product-code-help" maxLength={80} value={draft.code} onChange={(e) => patch('code', e.target.value)} />
-              <small id="product-code-help">Si lo dejás vacío, lo generamos automáticamente{!isNew ? '. En esta edición, si lo dejás vacío, conservamos el código actual.' : ''}</small>
+          <h2 className="form-card-title mb-4">Foto</h2>
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            {imagePreview ? (
+              <img className="h-24 w-24 rounded-2xl object-cover" src={imagePreview} alt="Previsualización del producto" />
+            ) : (
+              <div className="grid h-24 w-24 place-items-center rounded-2xl bg-stone-100">
+                <ImagePlus className="h-6 w-6 text-stone-300" />
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <label className="button-secondary cursor-pointer">
+                <ImagePlus className="h-4 w-4" />
+                Elegir o tomar foto
+                <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => setImageFile(e.target.files?.[0] ?? null)} />
+              </label>
+              {imagePreview ? (
+                <button
+                  className="button-quiet"
+                  type="button"
+                  onClick={() => {
+                    setImageFile(null)
+                    patch('imagePath', null)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Quitar imagen
+                </button>
+              ) : null}
             </div>
-            <label className="field">
-              <span>Categoría</span>
-              <select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={(e) => patch('categoryId', e.target.value)}>
-                {categories.data?.map((category) => (
-                  <option value={category.id} key={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-              {product.data?.product.family_id ? <small>La categoría se cambia desde la ficha de variantes en Productos.</small> : null}
-            </label>
-            <label className="field">
-              <span>Orden</span>
-              <input type="number" min="0" value={draft.sortOrder} onChange={(e) => patch('sortOrder', Number(e.target.value))} />
-            </label>
-            <label className="field sm:col-span-2">
-              <span>Descripción</span>
-              <textarea rows={3} maxLength={2000} value={draft.description} onChange={(e) => patch('description', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Precio base</span>
-              <input type="number" min="0" step="0.01" value={draft.basePrice} onChange={(e) => patch('basePrice', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Precio promocional</span>
-              <input type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={(e) => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" />
-            </label>
-            <div className="field sm:col-span-2">
-              <label htmlFor="product-stock">Stock (unidades)</label>
-              <input id="product-stock" type="text" inputMode="numeric" aria-describedby="product-stock-help product-stock-current" value={draft.stockQuantity} disabled={stock.data?.policy.mode === 'paused' || Boolean(stock.data?.policy.cutoverId)} onChange={event => patch('stockQuantity', event.target.value)} placeholder={isNew ? 'Ej.: 20' : 'Sin modificar'} />
-              <p id="product-stock-help" className="text-xs font-normal text-stone-600">Ingresá la cantidad final que tenés. Si dejás el campo vacío, no modificamos el stock; cero significa sin unidades.</p>
-              <p id="product-stock-current" className="text-xs font-normal text-stone-600">{draft.stockBaseline?.initialized ? `Stock actual: ${draft.stockBaseline.onHand} · Reservado: ${draft.stockBaseline.reserved} · Disponible: ${draft.stockBaseline.available}` : 'Todavía no se cargó stock para este producto.'}</p>
-              {stock.data?.policy.cutoverId ? <p className="text-xs font-normal text-amber-800">Hay una actualización de inventario en curso. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'paused' ? <p className="text-xs font-normal text-amber-800">El stock está pausado. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'never_enabled' ? <p className="text-xs font-normal text-stone-600">Podés cargar las cantidades ahora y activar el control de stock desde Stock cuando estén listas.</p> : null}
-            </div>
-            <label className="field">
-              <span>Promoción desde</span>
-              <input type="datetime-local" value={draft.promotionStartsAt} onChange={(e) => patch('promotionStartsAt', e.target.value)} />
-            </label>
-            <label className="field">
-              <span>Promoción hasta</span>
-              <input type="datetime-local" value={draft.promotionEndsAt} onChange={(e) => patch('promotionEndsAt', e.target.value)} />
-            </label>
-          </div>
-          <div className="mt-5 flex flex-wrap gap-4">
-            <label className="check-field">
-              <input type="checkbox" checked={draft.active} onChange={(e) => patch('active', e.target.checked)} />
-              Activo
-            </label>
-            <label className="check-field">
-              <input type="checkbox" checked={draft.available} onChange={(e) => patch('available', e.target.checked)} />
-              Disponible
-            </label>
-            <label className="check-field">
-              <input type="checkbox" checked={draft.featured} onChange={(e) => patch('featured', e.target.checked)} />
-              Destacado
-            </label>
           </div>
         </section>
-        <section className="form-card">
+          <details ref={promotionsSection} className="admin-disclosure" open={Boolean(draft.promotionalPrice || draft.quantityPrices.length) || undefined}>
+            <summary>Promociones y precios especiales</summary>
+            <div className="space-y-6">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="field"><span>Precio promocional</span><input type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={e => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" /></label>
+                <label className="field"><span>Promoción desde</span><input type="datetime-local" value={draft.promotionStartsAt} onChange={e => patch('promotionStartsAt', e.target.value)} /></label>
+                <label className="field"><span>Promoción hasta</span><input type="datetime-local" value={draft.promotionEndsAt} onChange={e => patch('promotionEndsAt', e.target.value)} /></label>
+              </div>
+              <div className="border-t border-stone-100 pt-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="form-card-title">Precios por cantidad</h2>
-              <p className="text-sm text-stone-500">El precio base corresponde a una unidad. Podés ofrecer, por ejemplo, 2 unidades por un precio total especial.</p>
+              <h3 className="font-semibold">Precios por cantidad</h3>
+              <p className="text-sm text-stone-500">Ofrecé un precio total especial al comprar varias unidades.</p>
             </div>
             <button className="button-secondary" disabled={draft.quantityPrices.length >= 19} onClick={addQuantityPrice} type="button">
               <Plus className="h-4 w-4" />
@@ -699,44 +695,15 @@ export function ProductEditorPage() {
               ))}
             </div>
           )}
-        </section>
-        <section className="form-card">
-          <h2 className="form-card-title">Foto</h2>
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            {imagePreview ? (
-              <img className="h-36 w-48 rounded-2xl object-cover" src={imagePreview} alt="Previsualización del producto" />
-            ) : (
-              <div className="grid h-36 w-48 place-items-center rounded-2xl bg-stone-100">
-                <ImagePlus className="h-10 w-10 text-stone-300" />
-              </div>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <label className="button-secondary cursor-pointer">
-                <ImagePlus className="h-4 w-4" />
-                Elegir o tomar foto
-                <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => setImageFile(e.target.files?.[0] ?? null)} />
-              </label>
-              {imagePreview ? (
-                <button
-                  className="button-danger"
-                  type="button"
-                  onClick={() => {
-                    setImageFile(null)
-                    patch('imagePath', null)
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Quitar imagen
-                </button>
-              ) : null}
+</div>
             </div>
-          </div>
-        </section>
-        <section className="form-card">
+          </details>
+          <details ref={extrasSection} className="admin-disclosure" open={Boolean(draft.groups.length) || undefined}>
+            <summary>Extras y adicionales{draft.groups.length ? ` · ${draft.groups.length} grupos` : ''}</summary>
+            <div>
           <div className="flex justify-between">
             <div>
-              <h2 className="form-card-title">Variantes y adicionales</h2>
-              <p className="text-sm text-stone-500">Definí mínimos y máximos por grupo.</p>
+              <p className="text-sm text-stone-500">Opciones que el cliente puede agregar al producto, como ingredientes o acompañamientos.</p>
             </div>
             <button className="button-secondary" onClick={addGroup}>
               <Plus className="h-4 w-4" />
@@ -844,26 +811,20 @@ export function ProductEditorPage() {
               </article>
             ))}
           </div>
-        </section>
+</div>
+          </details>
+          <details ref={organizationSection} className="admin-disclosure">
+            <summary>Código y organización</summary>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="field"><label htmlFor="product-code">Código / SKU (opcional)</label><input id="product-code" aria-describedby="product-code-help" maxLength={80} value={draft.code} onChange={e => patch('code', e.target.value)} /><p id="product-code-help" className="text-xs font-normal text-stone-500">{isNew ? 'Si lo dejás vacío, lo generamos automáticamente' : 'Vacío conserva el código actual.'}</p></div>
+              <label className="field"><span>Orden</span><input type="number" min="0" value={draft.sortOrder} onChange={e => patch('sortOrder', Number(e.target.value))} /></label>
+              <label className="check-field sm:col-span-2"><input type="checkbox" checked={draft.featured} onChange={e => patch('featured', e.target.checked)} />Destacado</label>
+            </div>
+          </details>
         </fieldset>
-        {error ? (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className="flex flex-wrap justify-between gap-3">
-          {!isNew ? (
-            <button className="button-danger" disabled={saving || Boolean(pendingSave)} onClick={() => void archive()}>
-              <Trash2 className="h-4 w-4" />
-              Dar de baja
-            </button>
-          ) : (
-            <span />
-          )}
-          <button className="button-primary" disabled={saving} onClick={() => void save()}>
-            <Save className="h-4 w-4" />
-            {saving ? 'Guardando…' : pendingSave ? 'Reintentar guardado' : 'Guardar producto'}
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-5">
+          {!isNew ? <button className="button-quiet text-stone-500" disabled={saving || Boolean(pendingSave)} onClick={() => void archive()}><Trash2 className="h-4 w-4" />Dar de baja</button> : <span />}
+          <button className="button-primary" disabled={saving} onClick={() => void save()}><Save className="h-4 w-4" />{saving ? 'Guardando…' : pendingSave ? 'Reintentar guardado' : 'Guardar producto'}</button>
         </div>
       </div>
     </>
