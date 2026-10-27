@@ -16,8 +16,8 @@ Configurar estas variables **solo en Edge**, mediante el almacén de secretos de
 
 | Variable | Valor |
 | --- | --- |
-| `MERCADOPAGO_CLIENT_ID` | ID de la aplicación de Mercado Pago |
-| `MERCADOPAGO_CLIENT_SECRET` | Secreto de esa aplicación |
+| `MERCADOPAGO_CLIENT_ID` | Client ID / APP_ID numérico de la aplicación; no es la Public Key |
+| `MERCADOPAGO_CLIENT_SECRET` | Client Secret de esa aplicación; no es el Access Token |
 | `MERCADOPAGO_ENCRYPTION_KEY` | 32 bytes aleatorios en base64url sin padding; guardar también en el respaldo privado |
 | `MERCADOPAGO_WEBHOOK_SECRET` | Firma secreta de Webhooks de la aplicación |
 | `MERCADOPAGO_MODE` | `test` para pruebas o `production` para cobros reales; producción es el default |
@@ -26,7 +26,7 @@ Las credenciales de cada vendedor se cifran con AES-GCM y se vinculan criptográ
 
 La aplicación de integración pertenece a Mozzi y se configura una sola vez por entorno. Cada comercio usa **Medios de pago → Conectar Mercado Pago** para autorizar su propia cuenta mediante OAuth; no carga claves técnicas ni requiere modificaciones manuales en la base de datos. El dinero se acredita en la cuenta del vendedor que autorizó esa conexión.
 
-En modo `test`, el canje inicial OAuth solicita `test_token: true`; la renovación conserva el ambiente del token original. El servidor valida `live_mode` antes de guardar credenciales y antes de conciliar pagos. Usar vendedor y comprador de prueba distintos, ambos de Argentina, y sesiones separadas. El prefijo de un Access Token no permite determinar su ambiente. El modo pertenece al entorno completo: no cambiarlo mientras haya cobros de otro ambiente pendientes de conciliación. Ver [cuentas de prueba](https://www.mercadopago.com.ar/developers/es/docs/checkout-pro-preferences/test-accounts) y [OAuth](https://www.mercadopago.com.ar/developers/es/docs/split-payments/additional-content/security/oauth/creation).
+En modo `test`, el canje inicial OAuth solicita `test_token: true`; la renovación conserva el ambiente del token original. Mercado Pago puede omitir `live_mode` en la respuesta OAuth: únicamente en ese caso, el servidor completa el modo solicitado en el canje inicial y lo guarda junto con las credenciales cifradas. Las renovaciones usan ese modo persistido; un valor explícito contradictorio o de tipo inválido se rechaza. Una conexión anterior sin modo registrado requiere reconectarse, y cambiar `MERCADOPAGO_MODE` no reclasifica credenciales existentes. Los pagos consultados al proveedor siguen requiriendo `live_mode` explícito y coincidente para conciliarse. Usar vendedor y comprador de prueba distintos, ambos de Argentina, y sesiones separadas. El prefijo de un Access Token no permite determinar su ambiente. El modo pertenece al entorno completo: no cambiarlo mientras haya cobros de otro ambiente pendientes de conciliación. Ver [cuentas de prueba](https://www.mercadopago.com.ar/developers/es/docs/checkout-pro-preferences/test-accounts), [OAuth](https://www.mercadopago.com.ar/developers/es/docs/split-payments/additional-content/security/oauth/creation) y el [contrato de respuesta OAuth](https://github.com/mercadopago/openapi/blob/4bf7b8751434d29f5a1d9a2dfe498c69ce50d3cb/by-product/oauth/spec3.yaml#L201).
 
 En la aplicación de Mercado Pago, habilitar OAuth con PKCE y registrar exactamente:
 
