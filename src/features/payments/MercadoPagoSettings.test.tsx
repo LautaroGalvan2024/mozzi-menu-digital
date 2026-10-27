@@ -81,7 +81,7 @@ describe('Mercado Pago connection configuration', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Cuenta lista para cobros reales'))
     expect(screen.getByText(/Autorización actual: cobros reales/)).toBeVisible()
     const steps = screen.getByRole('list', { name: 'Pasos para habilitar pagos online' })
-    expect(steps).toHaveTextContent('Activá el control de stock en Inventario')
+    expect(steps).toHaveTextContent('Activá el control desde Stock')
     expect(steps).toHaveTextContent('Pagos online con Mercado Pago')
     expect(screen.getByText(/no necesitás copiar claves/)).toBeVisible()
     expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('mercadopago-connect', { body: { restaurantId, action: 'status' } })

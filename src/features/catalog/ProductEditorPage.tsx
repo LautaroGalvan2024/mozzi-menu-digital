@@ -10,7 +10,8 @@ import { uploadRestaurantImage } from '../../lib/images/upload'
 import { parsePriceCents } from '../../lib/money'
 import { publicAssetUrl, supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
-import { clearProductAttempt, recoverProductDraft, saveProductAttempt } from './product-draft'
+import { clearProductAttempt, clearProductSave, persistProductSave, recoverProductDraft, recoverProductSave, saveProductAttempt, type ProductSaveAttempt } from './product-draft'
+import { catalogStockError, catalogStockSchema, isDefinitiveCatalogError, parseStockQuantity, type CatalogStockBalance } from './catalog-stock'
 
 interface OptionDraft {
   id: string
@@ -49,6 +50,8 @@ interface ProductDraft {
   available: boolean
   featured: boolean
   sortOrder: number
+  stockQuantity: string
+  stockBaseline: CatalogStockBalance | null
   quantityPrices: QuantityPriceDraft[]
   groups: GroupDraft[]
 }
@@ -116,6 +119,16 @@ export function ProductEditorPage() {
   const [saving, setSaving] = useState(false)
   const saveInFlight = useRef(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingSave, setPendingSave] = useState<ProductSaveAttempt | null>(null)
+  const stock = useQuery({
+    queryKey: ['catalog-stock', scope.selected?.id, isNew ? 'new' : productId],
+    enabled: Boolean(scope.selected && validId),
+    queryFn: async () => {
+      const result = await supabase.rpc('get_catalog_stock', { p_restaurant_id: scope.selected!.id, p_product_ids: isNew ? [] : [productId!] })
+      if (result.error) throw new Error('No se pudo cargar el stock del producto. Reintentá antes de guardar.')
+      return catalogStockSchema.parse(result.data)
+    },
+  })
   const categories = useQuery({
     queryKey: ['categories-options', scope.selected?.id],
     enabled: Boolean(scope.selected),
@@ -185,9 +198,13 @@ export function ProductEditorPage() {
     setDraft(null)
     setImageFile(null)
     setError(null)
+    setPendingSave(null)
   }, [productId, scope.selected?.id])
   useEffect(() => {
     if (draft || !scope.selected) return
+    const recovered = recoverProductSave(scope.selected.id, isNew ? undefined : productId)
+    if (recovered) { setDraft(recovered.draft); setPendingSave(recovered); return }
+    if (!stock.data) return
     if (isNew && categories.data?.[0]) {
       setDraft(recoverProductDraft(scope.selected.id) ?? {
         id: crypto.randomUUID(),
@@ -204,6 +221,8 @@ export function ProductEditorPage() {
         available: true,
         featured: false,
         sortOrder: 0,
+        stockQuantity: '',
+        stockBaseline: null,
         quantityPrices: [],
         groups: [],
       })
@@ -224,6 +243,8 @@ export function ProductEditorPage() {
         available: p.available,
         featured: p.featured,
         sortOrder: p.sort_order,
+        stockQuantity: stock.data.items.find(item => item.productId === p.id)?.onHand ?? '',
+        stockBaseline: stock.data.items.find(item => item.productId === p.id) ?? null,
         quantityPrices: product.data.quantityPrices.map((rule) => ({
           id: rule.id,
           quantity: rule.quantity,
@@ -249,7 +270,7 @@ export function ProductEditorPage() {
         })),
       })
     }
-  }, [categories.data, draft, isNew, product.data, scope.selected])
+  }, [categories.data, draft, isNew, product.data, scope.selected, stock.data, productId])
   const originalGroupIds = useMemo(() => new Set(product.data?.groups.map((g) => g.id) ?? []), [product.data])
   const originalOptionIds = useMemo(() => new Set(product.data?.options.map((o) => o.id) ?? []), [product.data])
   const imagePreview = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : publicAssetUrl(draft?.imagePath ?? null)), [draft?.imagePath, imageFile])
@@ -260,9 +281,10 @@ export function ProductEditorPage() {
     [imagePreview],
   )
   if (!validId) return <Navigate to="/admin/catalogo/productos" replace />
-  if (categories.isLoading || (!isNew && product.isLoading)) return <LoadingScreen />
-  if (categories.error || product.error) return <ErrorPanel>{categories.error?.message ?? product.error?.message}</ErrorPanel>
-  if (!categories.data?.length)
+  if (!pendingSave && (categories.isLoading || stock.isLoading || (!isNew && product.isLoading))) return <LoadingScreen />
+  if (!pendingSave && (categories.error || product.error)) return <ErrorPanel>{categories.error?.message ?? product.error?.message}</ErrorPanel>
+  if (!pendingSave && stock.error) return <ErrorPanel>{stock.error.message}<button type="button" className="button-secondary mt-3" onClick={() => void stock.refetch()}>Reintentar carga</button></ErrorPanel>
+  if (!pendingSave && !categories.data?.length)
     return (
       <ErrorPanel title="Primero creá una categoría">
         Necesitás al menos una categoría activa antes de crear productos.
@@ -275,6 +297,7 @@ export function ProductEditorPage() {
     )
   if (!draft) return <LoadingScreen />
   function patch<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
+    if (pendingSave || saving) return
     setDraft((d) => (d ? { ...d, [key]: value } : d))
   }
   function patchGroup(id: string, values: Partial<GroupDraft>) {
@@ -359,7 +382,7 @@ export function ProductEditorPage() {
   async function save() {
     if (!scope.selected || saveInFlight.current) return
     const restaurantId = scope.selected.id
-    const currentDraft = draft!
+    const currentDraft = pendingSave?.draft ?? draft!
     const maxCents = 1_000_000_000_000
     const base = parsePriceCents(currentDraft.basePrice) ?? Number.NaN
     const promo = currentDraft.promotionalPrice.trim() === '' ? null : parsePriceCents(currentDraft.promotionalPrice) ?? Number.NaN
@@ -368,6 +391,20 @@ export function ProductEditorPage() {
     const moneyIsValid = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= maxCents
     setSaving(true)
     setError(null)
+    let stockChange: ProductSaveAttempt['request']['p_stock'] = null
+    if (!pendingSave) {
+      try {
+        const onHand = currentDraft.stockQuantity.trim() === currentDraft.stockBaseline?.onHand ? null : parseStockQuantity(currentDraft.stockQuantity)
+        if (onHand !== null && onHand !== currentDraft.stockBaseline?.onHand) {
+          if (stock.data?.policy.cutoverId) throw new Error(catalogStockError({ message: 'INVENTORY_CUTOVER' }))
+          if (stock.data?.policy.mode === 'paused') throw new Error(catalogStockError({ message: 'INVENTORY_PAUSED' }))
+          if (BigInt(onHand) < BigInt(currentDraft.stockBaseline?.reserved ?? '0')) throw new Error(catalogStockError({ message: 'INSUFFICIENT_STOCK' }))
+          stockChange = { onHand, expectedVersion: currentDraft.stockBaseline?.version ?? null }
+        }
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : 'Revisá la cantidad de stock.'); setSaving(false); return
+      }
+    }
     if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code) || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
       setError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
       setSaving(false)
@@ -402,10 +439,10 @@ export function ProductEditorPage() {
     const currentOptionIds = new Set(currentDraft.groups.flatMap((group) => group.options.map((option) => option.id)))
     const removedGroups = [...originalGroupIds].filter((id) => !currentGroupIds.has(id))
     const removedOptions = [...originalOptionIds].filter((id) => !currentOptionIds.has(id))
-    const previousPath = product.data?.product.image_path ?? null
+    const previousPath = pendingSave?.previousImagePath ?? product.data?.product.image_path ?? null
     let nextPath = currentDraft.imagePath
     let uploadedPath: string | null = null
-    let imageStateUncertain = false
+    let catalogSaved = false
     const cleanupAsset = async (path: string) => {
       const [storageResult, assetResult] = await Promise.all([supabase.storage.from('restaurant-assets').remove([path]), supabase.from('image_assets').update({ deleted_at: new Date().toISOString() }).eq('restaurant_id', restaurantId).eq('path', path)])
       return !storageResult.error && !assetResult.error
@@ -413,7 +450,7 @@ export function ProductEditorPage() {
     try {
       saveInFlight.current = true
       if (isNew) saveProductAttempt(restaurantId, currentDraft)
-      if (imageFile) {
+      if (imageFile && !pendingSave) {
         const processed = await processImage(imageFile)
         uploadedPath = await uploadRestaurantImage({
           restaurantId,
@@ -426,8 +463,12 @@ export function ProductEditorPage() {
         setImageFile(null)
         if (isNew) saveProductAttempt(restaurantId, { ...currentDraft, imagePath: nextPath })
       }
-      const { data: saved, error: saveError } = await supabase.rpc('save_product_catalog', {
+      const attempt: ProductSaveAttempt = pendingSave ?? {
+        draft: { ...currentDraft, imagePath: nextPath }, previousImagePath: previousPath,
+        request: {
         p_restaurant_id: restaurantId,
+        p_operation_id: crypto.randomUUID(),
+        p_stock: stockChange,
         p_product: {
           id: currentDraft.id,
           categoryId: currentDraft.categoryId,
@@ -463,20 +504,33 @@ export function ProductEditorPage() {
         })),
         p_removed_group_ids: removedGroups,
         p_removed_option_ids: removedOptions,
-      })
-      if (saveError) {
-        if (uploadedPath) {
-          const verification = await supabase.from('products').select('image_path').eq('id', currentDraft.id).eq('restaurant_id', restaurantId).maybeSingle()
-          if (verification.error) imageStateUncertain = true
-          // A successful read cannot exclude a still-running commit after a timeout.
-          // Keep the upload for a retry; orphan cleanup can reconcile it later.
-          else if (verification.data?.image_path !== uploadedPath) imageStateUncertain = true
-        }
-        throw saveError
+        },
       }
+      if (!pendingSave) {
+        persistProductSave(restaurantId, isNew ? undefined : productId, attempt)
+        setPendingSave(attempt)
+      }
+      const { data: saved, error: saveError } = await supabase.rpc('save_product_catalog_with_stock', attempt.request)
+      if (saveError) {
+        if (isDefinitiveCatalogError(saveError)) {
+          clearProductSave(restaurantId, isNew ? undefined : productId)
+          setPendingSave(null)
+          if (['INVENTORY_VERSION_CONFLICT', 'INSUFFICIENT_STOCK', 'INVENTORY_PAUSED', 'INVENTORY_CUTOVER'].includes(saveError.message)) {
+            const refreshed = await stock.refetch()
+            setDraft(value => value ? { ...value, stockQuantity: '', stockBaseline: refreshed.data?.items.find(item => item.productId === currentDraft.id) ?? value.stockBaseline } : value)
+          }
+        }
+        setError(catalogStockError(saveError))
+        return
+      }
+      catalogSaved = true
+      clearProductSave(restaurantId, isNew ? undefined : productId)
+      setPendingSave(null)
+      if (isNew) clearProductAttempt(restaurantId)
+      setDraft(value => value ? { ...value, stockQuantity: '' } : value)
       const savedCode = z.object({ code: z.string() }).safeParse(saved)
       if (savedCode.success) setDraft((value) => value ? { ...value, code: savedCode.data.code } : value)
-      await Promise.all([client.invalidateQueries({ queryKey: ['products', restaurantId] }), client.invalidateQueries({ queryKey: ['public-menu'] })])
+      await Promise.all([client.invalidateQueries({ queryKey: ['products', restaurantId] }), client.invalidateQueries({ queryKey: ['public-menu'] }), client.invalidateQueries({ queryKey: ['public-catalog'] }), client.invalidateQueries({ queryKey: ['inventory', restaurantId] }), client.invalidateQueries({ queryKey: ['catalog-stock', restaurantId] })])
       if (previousPath && previousPath !== nextPath) {
         const cleaned = await cleanupAsset(previousPath)
         if (!cleaned) {
@@ -488,8 +542,8 @@ export function ProductEditorPage() {
       }
       if (isNew) clearProductAttempt(restaurantId)
       navigate('/admin/catalogo/productos', { state: { savedCode: savedCode.success ? savedCode.data.code : currentDraft.code } })
-    } catch {
-      setError(imageStateUncertain ? 'No se pudo confirmar el guardado. Podés reintentar: conservamos el producto y la imagen de este intento.' : 'No se pudo guardar el producto completo. Revisá que el código no esté repetido y reintentá.')
+    } catch (failure) {
+      setError(catalogSaved ? 'El producto y su stock quedaron guardados, pero no se pudo completar la actualización de la pantalla.' : catalogStockError(failure))
     } finally {
       saveInFlight.current = false
       setSaving(false)
@@ -519,6 +573,8 @@ export function ProductEditorPage() {
         }
       />
       <div className="space-y-6">
+        {pendingSave ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">Hay un guardado pendiente de confirmación. Reintentá el mismo envío antes de cambiar los datos; conservamos la cantidad y la imagen para no aplicar el stock dos veces.</p> : null}
+        <fieldset disabled={saving || Boolean(pendingSave)} className="m-0 space-y-6 border-0 p-0">
         <section className="form-card">
           <h2 className="form-card-title">Datos principales</h2>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -534,7 +590,7 @@ export function ProductEditorPage() {
             <label className="field">
               <span>Categoría</span>
               <select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={(e) => patch('categoryId', e.target.value)}>
-                {categories.data.map((category) => (
+                {categories.data?.map((category) => (
                   <option value={category.id} key={category.id}>
                     {category.name}
                   </option>
@@ -558,6 +614,13 @@ export function ProductEditorPage() {
               <span>Precio promocional</span>
               <input type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={(e) => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" />
             </label>
+            <div className="field sm:col-span-2">
+              <label htmlFor="product-stock">Stock (unidades)</label>
+              <input id="product-stock" type="text" inputMode="numeric" aria-describedby="product-stock-help product-stock-current" value={draft.stockQuantity} disabled={stock.data?.policy.mode === 'paused' || Boolean(stock.data?.policy.cutoverId)} onChange={event => patch('stockQuantity', event.target.value)} placeholder={isNew ? 'Ej.: 20' : 'Sin modificar'} />
+              <p id="product-stock-help" className="text-xs font-normal text-stone-600">Ingresá la cantidad final que tenés. Si dejás el campo vacío, no modificamos el stock; cero significa sin unidades.</p>
+              <p id="product-stock-current" className="text-xs font-normal text-stone-600">{draft.stockBaseline?.initialized ? `Stock actual: ${draft.stockBaseline.onHand} · Reservado: ${draft.stockBaseline.reserved} · Disponible: ${draft.stockBaseline.available}` : 'Todavía no se cargó stock para este producto.'}</p>
+              {stock.data?.policy.cutoverId ? <p className="text-xs font-normal text-amber-800">Hay una actualización de inventario en curso. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'paused' ? <p className="text-xs font-normal text-amber-800">El stock está pausado. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'never_enabled' ? <p className="text-xs font-normal text-stone-600">Podés cargar las cantidades ahora y activar el control de stock desde Stock cuando estén listas.</p> : null}
+            </div>
             <label className="field">
               <span>Promoción desde</span>
               <input type="datetime-local" value={draft.promotionStartsAt} onChange={(e) => patch('promotionStartsAt', e.target.value)} />
@@ -782,6 +845,7 @@ export function ProductEditorPage() {
             ))}
           </div>
         </section>
+        </fieldset>
         {error ? (
           <p className="form-error" role="alert">
             {error}
@@ -789,7 +853,7 @@ export function ProductEditorPage() {
         ) : null}
         <div className="flex flex-wrap justify-between gap-3">
           {!isNew ? (
-            <button className="button-danger" onClick={() => void archive()}>
+            <button className="button-danger" disabled={saving || Boolean(pendingSave)} onClick={() => void archive()}>
               <Trash2 className="h-4 w-4" />
               Dar de baja
             </button>
@@ -798,7 +862,7 @@ export function ProductEditorPage() {
           )}
           <button className="button-primary" disabled={saving} onClick={() => void save()}>
             <Save className="h-4 w-4" />
-            {saving ? 'Guardando…' : 'Guardar producto'}
+            {saving ? 'Guardando…' : pendingSave ? 'Reintentar guardado' : 'Guardar producto'}
           </button>
         </div>
       </div>

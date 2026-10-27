@@ -102,7 +102,7 @@ test.describe('Mercado Pago environment settings', () => {
     await expect(section.getByRole('status')).toHaveClass(/text-emerald-800/)
     await expect(section.getByText(/Autorización actual: cobros reales/)).toBeVisible()
     const steps = section.getByRole('list', { name: 'Pasos para habilitar pagos online' })
-    await expect(steps).toContainText('Activá el control de stock en Inventario')
+    await expect(steps).toContainText('Activá el control desde Stock')
     await expect(steps).toContainText('Pagos online con Mercado Pago')
     await expect(section.getByText(/no necesitás copiar claves/)).toBeVisible()
     await expect(section.getByRole('button', { name: 'Desactivar nuevos cobros' })).toBeEnabled()

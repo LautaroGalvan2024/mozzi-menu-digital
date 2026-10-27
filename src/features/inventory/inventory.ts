@@ -32,7 +32,7 @@ export function inventoryError(error: unknown): string {
     INSUFFICIENT_STOCK: 'No alcanza el stock disponible. Revisá las reservas y las cantidades.',
     INVENTORY_PAUSED: 'El stock está pausado. Un administrador debe resolver la contingencia antes de continuar.',
     INVENTORY_CUTOVER: 'Hay un conteo físico en curso. Las operaciones están pausadas hasta finalizarlo.',
-    INVENTORY_NOT_INITIALIZED: 'Este producto todavía no tiene un conteo inicial.',
+    INVENTORY_NOT_INITIALIZED: 'Falta cargar stock en uno o más productos. Completá Stock (unidades) en cada producto, incluyendo 0 si está agotado.',
     INVENTORY_RECONCILIATION_REQUIRED: 'Completá un conteo desde esta pausa antes de reanudar las operaciones.',
     INVENTORY_COUNT_INCOMPLETE: 'Faltan productos por contar. Incluí también los que tienen cantidad cero.',
     INVENTORY_COUNT_TIME_INVALID: 'El conteo debe hacerse dentro de la ventana actual. Revisá la hora del dispositivo y volvé a contar.',
@@ -51,7 +51,8 @@ export function inventoryError(error: unknown): string {
     INVENTORY_EXTERNAL_REFERENCE_DUPLICATE: 'Esa venta externa ya fue registrada. Revisá los movimientos.',
     INVENTORY_EXTERNAL_ORDER_DUPLICATE: 'Ese pedido ya pertenece a la app. Registrá su entrega desde Pedidos.',
     INVENTORY_EXTERNAL_CHANNELS_DISABLED: 'Las ventas por otros canales no están habilitadas en las reglas del comercio.',
-    INVENTORY_NOT_ENABLED: 'El stock todavía no está activo. Completá las reglas y el conteo inicial.',
+    INVENTORY_NOT_ENABLED: 'El stock todavía no está activo. Cargá las cantidades en Productos y activá el control desde Stock.',
+    INVENTORY_ALREADY_ENABLED: 'El control de stock ya está activo. Actualizá la pantalla.',
     IDEMPOTENCY_CONFLICT: 'El intento anterior tiene otro contenido. Recuperá su resultado antes de continuar.',
   }
   return parsed.success && messages[parsed.data.message] ? messages[parsed.data.message]! : 'No se pudo confirmar la operación. Podés reintentar el mismo envío sin duplicar movimientos.'

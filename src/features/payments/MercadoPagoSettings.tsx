@@ -101,8 +101,8 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
     </div>
     <ol className="mt-5 list-decimal space-y-2 border-t border-stone-200 pl-5 pt-4 text-sm leading-6 text-stone-600" aria-label="Pasos para habilitar pagos online">
       <li>Autorizá la cuenta de tu comercio para {environment === 'production' ? 'cobros reales' : environment === 'test' ? 'pruebas' : 'el ambiente configurado'}.</li>
-      <li>Activá el control de stock en Inventario y verificá las existencias de cada producto o variante.</li>
-      <li>En Configuración → Tienda online, habilitá <strong>Pagos online con Mercado Pago</strong> y guardá los cambios.</li>
+      <li>Cargá las cantidades al crear o editar tus productos y variantes. Activá el control desde Stock si aún está sin activar.</li>
+      <li>En Tienda online, marcá <strong>Publicar mi tienda online</strong>, habilitá <strong>Pagos online con Mercado Pago</strong> y guardá los cambios.</li>
     </ol>
     {ready ? <p className="mt-3 text-xs leading-5 text-stone-600">La cuenta está autorizada. Para que aparezca el pago online en tu tienda, también deben estar activos el inventario y la opción de cobro.</p> : null}
     {connected ? <p className="mt-3 text-xs text-stone-500">Desactivar nuevos cobros conserva la conciliación de compras anteriores. Los reintegros se realizan desde Mercado Pago.</p> : null}
