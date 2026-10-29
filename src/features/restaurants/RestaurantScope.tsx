@@ -10,7 +10,7 @@ import {
 import { z } from 'zod'
 import { supabase } from '../../lib/supabase/client'
 import { useAuth } from '../auth/AuthProvider'
-import { resolveSelectedChoice } from './selection'
+import { persistSelectedRestaurant, readSelectedRestaurant, resolveSelectedChoice } from './selection'
 
 export interface RestaurantChoice {
   id: string
@@ -28,7 +28,6 @@ interface RestaurantScopeValue {
 }
 
 const RestaurantScopeContext = createContext<RestaurantScopeValue | null>(null)
-const STORAGE_KEY = 'mozzi:selected-restaurant'
 
 const restaurantRowsSchema = z.array(
   z.object({
@@ -41,7 +40,7 @@ const restaurantRowsSchema = z.array(
 
 export function RestaurantScopeProvider({ children }: PropsWithChildren) {
   const auth = useAuth()
-  const [selectedId, setSelectedId] = useState(() => localStorage.getItem(STORAGE_KEY))
+  const [selectedId, setSelectedId] = useState(readSelectedRestaurant)
   const superAdminEnabled = auth.isSuperAdmin && auth.assuranceLevel === 'aal2'
   const superAdminQuery = useQuery({
     queryKey: ['restaurant-scope-choices'],
@@ -82,7 +81,7 @@ export function RestaurantScopeProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (selected && selected.id !== selectedId) {
       setSelectedId(selected.id)
-      localStorage.setItem(STORAGE_KEY, selected.id)
+      persistSelectedRestaurant(selected.id)
     }
   }, [selected, selectedId])
 
@@ -95,7 +94,7 @@ export function RestaurantScopeProvider({ children }: PropsWithChildren) {
         if (!choices.some((choice) => choice.id === id)) return
         setSelectedId(id)
         // This is a UI preference only. RLS never trusts it for authorization.
-        localStorage.setItem(STORAGE_KEY, id)
+        persistSelectedRestaurant(id)
       },
     }),
     [choices, selected, superAdminEnabled, superAdminQuery.isLoading],

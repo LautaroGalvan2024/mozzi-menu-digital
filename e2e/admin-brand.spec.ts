@@ -62,6 +62,7 @@ const screens: { key: string; route: string; title: string; account: Account }[]
   { key: 'commerce-selection', route: '/admin/seleccionar-restaurante', title: 'Elegí un comercio', account: 'multi' },
   { key: 'central-control', route: '/superadmin', title: 'Control central', account: 'super' },
   { key: 'create-commerce', route: '/superadmin/restaurantes/nuevo', title: 'Crear comercio', account: 'super' },
+  { key: 'restaurant-detail', route: `/superadmin/restaurantes/${commerceId}`, title: 'Casa Móvil', account: 'super' },
   { key: 'categories', route: '/admin/catalogo/categorias', title: 'Categorías', account: 'admin' },
   { key: 'import', route: '/admin/catalogo/importar', title: 'Importación masiva', account: 'admin' },
   { key: 'brand', route: '/admin/marca', title: 'Logo y portada', account: 'admin' },
