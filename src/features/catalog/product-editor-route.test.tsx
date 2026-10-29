@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { queryKeys } from '../../lib/queryKeys'
 import { ProductEditorPage } from './ProductEditorPage'
 
 const mocks = vi.hoisted(() => ({
@@ -55,14 +56,16 @@ function renderNewProductRoute() {
   )
 }
 
-function renderExistingProductRoute(productId: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+function renderExistingProductRoute(
+  productId: string,
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`/admin/catalogo/productos/${productId}`]}>
         <Routes>
           <Route path="/admin/catalogo/productos/:productId" element={<ProductEditorPage />} />
-          <Route path="/admin/catalogo/productos" element={<h1>Listado de productos</h1>} />
+          <Route path="/admin/catalogo/productos" element={<><h1>Listado de productos</h1><Link to={`/admin/catalogo/productos/${productId}`}>Volver a editar</Link></>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -77,12 +80,15 @@ async function openSection(label: string) {
 function stockResponse(onHand = '10', reserved = '3', version = '7', mode = 'enforced') {
   return { data: { policy: { mode, version: '1', cutoverId: null, businessConfirmed: true, businessPolicy: null }, items: [{ productId: existingId, initialized: true, onHand, reserved, available: String(BigInt(onHand) - BigInt(reserved)), version }] }, error: null }
 }
-function mockExistingProduct() {
+function mockExistingProduct(
+  quantityPrices: () => Array<{ id: string; quantity: number; total_price_cents: number }> = () => [],
+) {
   const categories = mocks.from.getMockImplementation()!
   mocks.from.mockImplementation((table: string) => {
     if (table === 'categories') return categories(table)
     if (table === 'products') return { select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: { id: existingId, category_id: mocks.categories[0]!.id, code: 'FUN-1', name: 'Funda', description: '', base_price_cents: 10000, promotional_price_cents: null, promotion_starts_at: null, promotion_ends_at: null, image_path: null, active: true, available: true, featured: false, sort_order: 0 }, error: null }) }) }) }) }
-    if (table === 'product_option_groups' || table === 'product_quantity_prices') return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) }) }) }
+    if (table === 'product_option_groups') return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) }) }) }
+    if (table === 'product_quantity_prices') return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: quantityPrices(), error: null }) }) }) }) }) }
     throw new Error(`Unexpected table: ${table}`)
   })
   mocks.stock.mockResolvedValue(stockResponse())
@@ -407,6 +413,40 @@ describe('new product route', () => {
         }),
       }),
     ))
+  })
+
+  it('loads a just-saved quantity price when returning to the editor without reloading the page', async () => {
+    const user = userEvent.setup()
+    let persistedQuantityPrices: Array<{ id: string; quantity: number; total_price_cents: number }> = []
+    mockExistingProduct(() => persistedQuantityPrices)
+    mocks.rpc.mockImplementation(async (name: string, args: { p_product?: { quantityPrices?: Array<{ quantity: number; totalPriceCents: number }> } }) => {
+      if (name === 'save_product_catalog_with_stock') {
+        persistedQuantityPrices = (args.p_product?.quantityPrices ?? []).map((rule, index) => ({
+          id: `60000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+          quantity: rule.quantity,
+          total_price_cents: rule.totalPriceCents,
+        }))
+      }
+      return { data: null, error: null }
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderExistingProductRoute(existingId, queryClient)
+
+    await screen.findByLabelText('Nombre')
+    await openSection('Promociones y precios especiales')
+    await user.click(screen.getByRole('button', { name: 'Agregar precio' }))
+    const total = screen.getByLabelText('Precio total para 2 unidades')
+    await user.clear(total)
+    await user.type(total, '300000')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+
+    await screen.findByRole('heading', { name: 'Listado de productos' })
+    await waitFor(() => {
+      expect(queryClient.getQueryState(queryKeys.productEditor('10000000-0000-4000-8000-000000000001', existingId))).toBeUndefined()
+    })
+    await user.click(screen.getByRole('link', { name: 'Volver a editar' }))
+
+    expect(await screen.findByLabelText('Precio total para 2 unidades')).toHaveValue(300000)
   })
 
   it('rejects duplicate quantity rules before calling the RPC', async () => {

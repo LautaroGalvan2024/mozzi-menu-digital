@@ -65,6 +65,7 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
       } else {
         await Promise.all([
           cache.invalidateQueries({ queryKey: ['mercadopago-connection', restaurantId] }),
+          cache.invalidateQueries({ queryKey: ['store-payment-readiness', restaurantId] }),
           cache.invalidateQueries({ queryKey: ['restaurant', restaurantId] }),
           invalidateCatalogQueries(cache, restaurantId),
         ])

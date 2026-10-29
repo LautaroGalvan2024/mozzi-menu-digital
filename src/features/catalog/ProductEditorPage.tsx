@@ -10,6 +10,7 @@ import { assetVariantPaths, responsiveAssetUrls } from '../../lib/images/respons
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { parsePriceCents } from '../../lib/money'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
+import { queryKeys } from '../../lib/queryKeys'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { clearProductAttempt, clearProductSave, persistProductSave, recoverProductDraft, recoverProductSave, saveProductAttempt, type ProductSaveAttempt } from './product-draft'
@@ -142,7 +143,7 @@ export function ProductEditorPage() {
     },
   })
   const categories = useQuery({
-    queryKey: ['categories-options', scope.selected?.id],
+    queryKey: queryKeys.categoryOptions(scope.selected?.id),
     enabled: Boolean(scope.selected),
     queryFn: async () => {
       const { data, error: loadError } = await supabase
@@ -157,8 +158,12 @@ export function ProductEditorPage() {
     },
   })
   const product = useQuery({
-    queryKey: ['product-editor', scope.selected?.id, productId],
+    queryKey: queryKeys.productEditor(scope.selected?.id, productId),
     enabled: Boolean(scope.selected && !isNew && validId),
+    // An editor draft must never be rehydrated from a previous visit. The draft is
+    // intentionally initialized only once, so retaining this query after unmount
+    // could show an older snapshot while a background refetch is still running.
+    gcTime: 0,
     queryFn: async () => {
       const [p, g, q] = await Promise.all([
         supabase

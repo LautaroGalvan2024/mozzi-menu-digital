@@ -6,6 +6,7 @@ import { useForm, type FieldErrors } from 'react-hook-form'
 import { Link, useNavigate } from 'react-router'
 import { z } from 'zod'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateRestaurantCreationQueries } from '../../lib/admin-cache'
 import { parsePriceCents } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { restaurantCreateSchema } from '../../lib/validation/schemas'
@@ -68,7 +69,7 @@ export function CreateRestaurantPage() {
         setError('No se pudo crear el comercio. Revisá el enlace, el correo del administrador y tu verificación en dos pasos.')
         return
       }
-      await queryClient.invalidateQueries({ queryKey: ['restaurant-scope-choices'] })
+      await invalidateRestaurantCreationQueries(queryClient)
       navigate(`/superadmin/restaurantes/${result.data.restaurant.id}`, { replace: true })
     } catch {
       setError('No se pudo crear el comercio. Verificá tu conexión e intentá nuevamente.')

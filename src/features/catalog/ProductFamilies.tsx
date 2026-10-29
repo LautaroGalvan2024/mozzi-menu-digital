@@ -93,7 +93,7 @@ export function ProductFamilies() {
     } catch { /* A malformed or unavailable local draft never becomes a stock operation. */ }
   }, [restaurantId])
   const catalog = useQuery({
-    queryKey: ['product-families', restaurantId, familyPage, debouncedFamilySearch],
+    queryKey: [...queryKeys.productFamilies(restaurantId), familyPage, debouncedFamilySearch],
     enabled: Boolean(restaurantId && open),
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }) => {
@@ -251,7 +251,7 @@ export function ProductFamilies() {
       localStorage.removeItem(attemptKey(restaurantId)); setAttempt(null)
       setDraft(null); setMessage(submission.request.p_stock_rows.length ? 'Ficha y cantidades de stock guardadas.' : 'Ficha guardada. Se conservaron las cantidades de stock.')
       await Promise.all([
-        client.invalidateQueries({ queryKey: ['product-families', restaurantId] }),
+        client.invalidateQueries({ queryKey: queryKeys.productFamilies(restaurantId) }),
         invalidateCatalogQueries(client, restaurantId),
       ])
     } catch (failure) {

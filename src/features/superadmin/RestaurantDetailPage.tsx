@@ -5,6 +5,7 @@ import { Link,useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateRestaurantStatusQueries } from '../../lib/admin-cache'
 import { supabase } from '../../lib/supabase/client'
 import { listRestaurantMembers } from '../restaurants/member-directory'
 import { persistSelectedRestaurant } from '../restaurants/selection'
@@ -47,11 +48,7 @@ export function SuperRestaurantDetailPage(){
         return
       }
 
-      await Promise.all([
-        client.invalidateQueries({queryKey:['superadmin-restaurant',id]}),
-        client.invalidateQueries({queryKey:['superadmin-restaurants']}),
-        client.invalidateQueries({queryKey:['restaurant-scope-choices']}),
-      ])
+      await invalidateRestaurantStatusQueries(client,restaurant.id)
       setFeedback({kind:'success',message:`Comercio ${next==='active'?'activado':'suspendido'} correctamente.`})
     }catch{
       setFeedback({kind:'error',message:'No se pudo actualizar el comercio. Verificá tu conexión e intentá nuevamente.'})

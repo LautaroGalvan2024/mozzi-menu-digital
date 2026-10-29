@@ -11,7 +11,8 @@ function configured(environment: 'test' | 'production', accountEnvironment: 'tes
   return { configured: true, configurationIssue: null, environment, connectionEnvironment: accountEnvironment, readyForPayments: environment === accountEnvironment, connectionIssue: environment === accountEnvironment ? null : 'different_environment', connection: { connected: true, active: true, providerUserId: '12345' } }
 }
 function view() {
-  return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MercadoPagoSettings restaurantId={restaurantId} /></QueryClientProvider>)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return { client, ...render(<QueryClientProvider client={client}><MercadoPagoSettings restaurantId={restaurantId} /></QueryClientProvider>) }
 }
 
 describe('Mercado Pago connection configuration', () => {
@@ -125,5 +126,30 @@ describe('Mercado Pago connection configuration', () => {
       ['mercadopago-connect', { body: { restaurantId, action: 'status' } }],
       ['mercadopago-connect', { body: { restaurantId, action: 'status' } }],
     ])
+  })
+
+  it('invalidates store payment readiness after disconnecting the account', async () => {
+    mocks.invoke
+      .mockResolvedValueOnce({ data: configured('production'), error: null })
+      .mockResolvedValueOnce({ data: {}, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          ...configured('production'),
+          readyForPayments: false,
+          connectionIssue: 'inactive',
+          connection: { connected: false, active: false, providerUserId: '12345' },
+        },
+        error: null,
+      })
+    const user = userEvent.setup()
+    const { client } = view()
+    client.setQueryData(['store-payment-readiness', restaurantId], { configured: true, readyForPayments: true })
+    await screen.findByText('Cuenta lista para cobros reales')
+    await user.click(screen.getByText('Administrar conexión'))
+
+    await user.click(screen.getByRole('button', { name: 'Desactivar nuevos cobros' }))
+
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('mercadopago-connect', { body: { restaurantId, action: 'disconnect' } }))
+    expect(client.getQueryState(['store-payment-readiness', restaurantId])?.isInvalidated).toBe(true)
   })
 })

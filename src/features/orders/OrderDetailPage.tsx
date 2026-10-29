@@ -116,7 +116,10 @@ export function OrderDetailPage() {
 
   async function refreshOrder() {
     await Promise.all([
-      client.invalidateQueries({ queryKey: ['order-detail', order.restaurant_id, order.id] }),
+      // Replacement/reversal operations can update more than the order that is
+      // currently open, so stale every detail and candidate list for this tenant.
+      client.invalidateQueries({ queryKey: ['order-detail', order.restaurant_id] }),
+      client.invalidateQueries({ queryKey: ['order-replacements', order.restaurant_id] }),
       client.invalidateQueries({ queryKey: ['orders', order.restaurant_id] }),
       client.invalidateQueries({ queryKey: ['dashboard-orders', order.restaurant_id] }),
       client.invalidateQueries({ queryKey: ['inventory', order.restaurant_id] }),

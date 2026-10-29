@@ -43,8 +43,16 @@ export async function invalidateCatalogQueries(client: QueryClient, restaurantId
 }
 
 export async function invalidateCatalogQueriesLocally(client: QueryClient, restaurantId: string) {
+  // Editor forms hydrate local draft state from query data only once. Keeping an
+  // invalidated detail in memory would let a later navigation hydrate that draft
+  // with the old snapshot before the background refetch finishes.
+  client.removeQueries({ queryKey: queryKeys.productEditors(restaurantId), type: 'inactive' })
   await Promise.all([
+    client.invalidateQueries({ queryKey: queryKeys.categories(restaurantId) }),
+    client.invalidateQueries({ queryKey: queryKeys.categoryOptions(restaurantId) }),
+    client.invalidateQueries({ queryKey: queryKeys.productEditors(restaurantId), type: 'active' }),
     client.invalidateQueries({ queryKey: queryKeys.products(restaurantId) }),
+    client.invalidateQueries({ queryKey: queryKeys.productFamilies(restaurantId) }),
     client.invalidateQueries({ queryKey: queryKeys.catalogStock(restaurantId) }),
     client.invalidateQueries({ queryKey: queryKeys.inventory(restaurantId) }),
     client.invalidateQueries({ queryKey: queryKeys.inventoryOverview(restaurantId) }),

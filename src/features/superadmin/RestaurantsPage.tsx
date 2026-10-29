@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,EmptyState,LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateRestaurantStatusQueries } from '../../lib/admin-cache'
 import { supabase } from '../../lib/supabase/client'
 
 const schema=z.array(z.object({id:z.string().uuid(),name:z.string(),trade_name:z.string(),slug:z.string(),status:z.enum(['draft','active','suspended']),city:z.string(),public_menu_enabled:z.boolean(),created_at:z.string()}))
@@ -42,10 +43,7 @@ export function RestaurantsPage(){
         return
       }
 
-      await Promise.all([
-        client.invalidateQueries({queryKey:['superadmin-restaurants']}),
-        client.invalidateQueries({queryKey:['superadmin-restaurant',id]}),
-      ])
+      await invalidateRestaurantStatusQueries(client,id)
       setFeedback({kind:'success',message:`Comercio ${next==='active'?'activado':'suspendido'} correctamente.`})
     }catch{
       setFeedback({kind:'error',message:'No se pudo actualizar el comercio. Verificá tu conexión e intentá nuevamente.'})

@@ -26,7 +26,11 @@ export const queryKeys = {
       ['public-catalog', 'group', slug, channel] as const,
   },
   restaurant: (restaurantId: string | undefined) => ['restaurant', restaurantId] as const,
+  categories: (restaurantId: string | undefined) => ['categories', restaurantId] as const,
+  categoryOptions: (restaurantId: string | undefined) => ['categories-options', restaurantId] as const,
   products: (restaurantId: string | undefined) => ['products', restaurantId] as const,
+  productFamilies: (restaurantId: string | undefined) => ['product-families', restaurantId] as const,
+  productEditors: (restaurantId: string | undefined) => ['product-editor', restaurantId] as const,
   productEditor: (restaurantId: string | undefined, productId: string | undefined) =>
     ['product-editor', restaurantId, productId] as const,
   catalogStock: (restaurantId: string | undefined) => ['catalog-stock', restaurantId] as const,
