@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { supabase } from '../../lib/supabase/client'
 import { PublicChannelsCard } from './PublicChannelsCard'
 import { useRestaurantScope } from './RestaurantScope'
@@ -66,8 +67,7 @@ function StoreSettings({ restaurantId }: { restaurantId: string | undefined }) {
       await Promise.all([
         cache.invalidateQueries({ queryKey: ['restaurant', restaurantId] }),
         cache.invalidateQueries({ queryKey: ['restaurant-scope-choices'] }),
-        cache.invalidateQueries({ queryKey: ['public-menu'] }),
-        cache.invalidateQueries({ queryKey: ['public-catalog'] }),
+        invalidateCatalogQueries(cache, restaurantId),
       ])
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'No pudimos guardar la tienda.') }
     finally { setSaving(false) }

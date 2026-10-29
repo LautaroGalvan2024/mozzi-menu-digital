@@ -6,6 +6,7 @@ import readXlsxFile, { type SheetData } from 'read-excel-file/browser'
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { z } from 'zod'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { processImage } from '../../lib/images/processImage'
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { csvRecordsToSheet, parseImportSheets, type ImportData } from '../../lib/import-products'
@@ -230,7 +231,7 @@ export function ImportProductsPage() {
     }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['products', scope.selected.id] }),
-      queryClient.invalidateQueries({ queryKey: ['public-menu'] }),
+      invalidateCatalogQueries(queryClient, scope.selected.id),
     ])
   }
 
@@ -318,7 +319,7 @@ export function ImportProductsPage() {
         if (!imported.errors.length) {
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['products', restaurantId] }),
-            queryClient.invalidateQueries({ queryKey: ['public-menu'] }),
+            invalidateCatalogQueries(queryClient, restaurantId),
           ])
           await uploadImages(imported, activeSession, preparedZip)
         }

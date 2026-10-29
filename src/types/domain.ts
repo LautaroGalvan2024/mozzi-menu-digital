@@ -161,6 +161,34 @@ export interface PublicMenu {
   deliveryZones: PublicDeliveryZone[]
 }
 
+export interface CatalogRevision {
+  revision: number
+  updatedAt: string
+}
+
+export interface PublicCatalogMeta {
+  revision: number
+  restaurant: PublicRestaurant
+  categories: Array<Omit<PublicCategory, 'products'>>
+  businessHours: BusinessHour[]
+  specialHours: SpecialHour[]
+  paymentMethods: PublicPaymentMethod[]
+  deliveryZones: PublicDeliveryZone[]
+}
+
+export interface PublicCatalogGroup {
+  id: string
+  categoryId: string
+  family: NonNullable<PublicProduct['family']> | null
+  variants: PublicProduct[]
+}
+
+export interface PublicCatalogPage {
+  revision: number
+  items: PublicCatalogGroup[]
+  nextCursor: string | null
+}
+
 export interface CartLine {
   key: string
   productId: string

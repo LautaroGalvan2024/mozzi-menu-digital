@@ -196,18 +196,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [])
 
   useEffect(() => {
-    let mounted = true
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return
-      const nextPrincipalId = data.session?.user.id ?? null
-      if (principalId.current !== nextPrincipalId) queryClient.clear()
-      principalId.current = nextPrincipalId
-      setSession(data.session)
-      void loadAccess(data.session)
-    })
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    // onAuthStateChange always emits INITIAL_SESSION. Using getSession in
+    // parallel races that event and used to issue the four access queries
+    // twice for an authenticated visitor.
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
       const nextPrincipalId = nextSession?.user.id ?? null
-      if (principalId.current !== nextPrincipalId) {
+      const principalChanged = principalId.current !== nextPrincipalId
+      if (principalChanged) {
         queryClient.clear()
         setProfile(null)
         setMemberships([])
@@ -216,12 +211,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setAccessError(null)
       }
       principalId.current = nextPrincipalId
-      setLoading(true)
       setSession(nextSession)
+
+      const accessMayHaveChanged =
+        event === 'INITIAL_SESSION' ||
+        event === 'SIGNED_OUT' ||
+        event === 'USER_UPDATED' ||
+        event === 'PASSWORD_RECOVERY' ||
+        event === 'MFA_CHALLENGE_VERIFIED' ||
+        (event === 'SIGNED_IN' && principalChanged)
+      if (!accessMayHaveChanged) return
+
+      setLoading(true)
       window.setTimeout(() => void loadAccess(nextSession), 0)
     })
     return () => {
-      mounted = false
       data.subscription.unsubscribe()
     }
   }, [loadAccess, queryClient])

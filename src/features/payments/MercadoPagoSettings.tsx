@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { z } from 'zod'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { supabase } from '../../lib/supabase/client'
 
 const connectionSchema = z.object({
@@ -62,7 +63,11 @@ export function MercadoPagoSettings({ restaurantId }: { restaurantId: string }) 
         if (url.origin !== 'https://auth.mercadopago.com' || url.pathname !== '/authorization') throw new Error('La dirección de autorización no es válida.')
         window.location.assign(url.href)
       } else {
-        await Promise.all([cache.invalidateQueries({ queryKey: ['mercadopago-connection', restaurantId] }), cache.invalidateQueries({ queryKey: ['restaurant', restaurantId] })])
+        await Promise.all([
+          cache.invalidateQueries({ queryKey: ['mercadopago-connection', restaurantId] }),
+          cache.invalidateQueries({ queryKey: ['restaurant', restaurantId] }),
+          invalidateCatalogQueries(cache, restaurantId),
+        ])
       }
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo actualizar Mercado Pago.') }
     finally { setBusy(false) }

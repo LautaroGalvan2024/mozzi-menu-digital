@@ -5,6 +5,7 @@ import { useEffect,useRef,useState } from 'react'
 import { Link,useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,LoadingScreen } from '../../components/Feedback'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { inventoryOrderError, inventoryOutcomeSchema, inventoryOutcomeLabel } from './inventoryOrder'
@@ -33,6 +34,7 @@ async function claim() {
       client.invalidateQueries({ queryKey: ['orders', order.restaurantId] }),
       client.invalidateQueries({ queryKey: ['dashboard-orders', order.restaurantId] }),
       client.invalidateQueries({ queryKey: ['inventory', order.restaurantId] }),
+      invalidateCatalogQueries(client, order.restaurantId),
     ])
     running.current = false
     setMutating(false)

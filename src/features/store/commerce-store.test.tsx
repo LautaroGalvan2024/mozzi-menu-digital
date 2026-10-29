@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,18 +15,58 @@ const BLACK = '10000000-0000-4000-8000-000000000001'
 const RED = '10000000-0000-4000-8000-000000000002'
 const CATEGORY = '20000000-0000-4000-8000-000000000001'
 const mocks = vi.hoisted(() => ({ menu: {} as PublicMenu, hook: vi.fn() }))
-vi.mock('../public-menu/usePublicMenu', () => ({ usePublicMenu: (...args: unknown[]) => { mocks.hook(...args); return { data: mocks.menu, isLoading: false, dataUpdatedAt: 1 } } }))
+vi.mock('../../lib/useDebouncedValue', () => ({ useDebouncedValue: (value: unknown) => value }))
+vi.mock('../public-menu/usePublicCatalog', () => ({
+  usePublicCatalog: (...args: unknown[]) => {
+    mocks.hook(...args)
+    const [, , categoryId = '', search = ''] = args as [string, string, string, string]
+    const groups = catalogGroups(mocks.menu, categoryId, search)
+    return {
+      meta: { data: { ...mocks.menu, revision: 1, categories: mocks.menu.categories.map(({ products: _products, ...category }) => category) }, error: null, refetch: vi.fn() },
+      pages: { data: { pages: [{ revision: 1, items: groups, nextCursor: null }] }, error: null, refetch: vi.fn(), hasNextPage: false, isFetchingNextPage: false, fetchNextPage: vi.fn() },
+      groups,
+      isLoading: false,
+      isUpdating: false,
+      refreshError: null,
+    }
+  },
+}))
+vi.mock('../public-menu/api', () => ({
+  fetchPublicCatalogGroup: async (_slug: string, id: string) => {
+    const group = catalogGroups(mocks.menu).find((item) => item.id === id || item.variants.some((variant) => variant.id === id))
+    if (!group) throw new Error('missing')
+    return { revision: 1, group }
+  },
+}))
 vi.mock('../../lib/supabase/client', () => ({ publicAssetUrl: () => null }))
 
 const variant = (id: string, color: string, price: number): PublicProduct => ({ id, categoryId: CATEGORY, name: 'SKU anterior', description: '', code: id, basePriceCents: price, promotionalPriceCents: null, promotionStartsAt: null, promotionEndsAt: null, imagePath: null, available: true, featured: false, sortOrder: 0, quantityPrices: [], optionGroups: [], family: { id: FAMILY, name: 'Funda de silicona', description: 'Protección para tu teléfono.', imagePath: null, axes: ['Modelo', 'Color'] }, variantAttributes: { Modelo: 'iPhone 15', Color: color } })
 const black = variant(BLACK, 'Negro', 1000)
 const red = variant(RED, 'Rojo', 1200)
 
+function catalogGroups(menu: PublicMenu, categoryId = '', search = '') {
+  const phrase = search.trim().toLocaleLowerCase('es')
+  const groups = new Map<string, { id: string; categoryId: string; family: PublicProduct['family']; variants: PublicProduct[] }>()
+  for (const category of menu.categories) {
+    if (categoryId && category.id !== categoryId) continue
+    for (const product of category.products) {
+      const searchable = `${product.family?.name ?? ''} ${product.name} ${product.description} ${product.code} ${Object.values(product.variantAttributes ?? {}).join(' ')}`.toLocaleLowerCase('es')
+      if (phrase && !searchable.includes(phrase)) continue
+      const id = product.family?.id ?? product.id
+      const current = groups.get(id) ?? { id, categoryId: product.categoryId, family: product.family ?? null, variants: [] }
+      current.variants.push(product)
+      groups.set(id, current)
+    }
+  }
+  return [...groups.values()]
+}
+
 function fixture(): PublicMenu {
   return { restaurant: { id: FAMILY, slug: 'fundas', name: 'Fundas', tradeName: 'Fundas', description: 'Accesorios', address: 'Calle Uno', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', pickupEnabled: true, deliveryEnabled: true, isOpen: false, acceptsOrders: true, channel: 'store', minimumOrderCents: 0, whatsappPhone: '+5493492123456', currencyCode: 'ARS', locale: 'es-AR', logoPath: null, coverPath: null, primaryColor: '#000000', secondaryColor: '#ffffff', defaultPreparationMinutes: 30, nextOpeningAt: null }, categories: [{ id: CATEGORY, name: 'Fundas', slug: 'fundas', description: '', imagePath: null, sortOrder: 0, products: [black, red] }], paymentMethods: [], deliveryZones: [], businessHours: [], specialHours: [] }
 }
 function page(path = '/t/fundas') {
-  return render(<MemoryRouter initialEntries={[path]}><CartProvider><Routes><Route path="/t/:restaurantSlug" element={<PublicStorePage />} /><Route path="/t/:restaurantSlug/producto/:productId" element={<PublicStorePage />} /></Routes></CartProvider></MemoryRouter>)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><CartProvider><Routes><Route path="/t/:restaurantSlug" element={<PublicStorePage />} /><Route path="/t/:restaurantSlug/producto/:productId" element={<PublicStorePage />} /></Routes></CartProvider></MemoryRouter></QueryClientProvider>)
 }
 
 describe('shared catalog storefront', () => {
@@ -41,7 +82,7 @@ describe('shared catalog storefront', () => {
     expect(await screen.findAllByRole('heading', { name: 'Funda de silicona' })).toHaveLength(1)
     expect(screen.getByText('Recibimos pedidos')).toBeVisible()
     expect(screen.getByText('Atención: fuera de horario')).toBeVisible()
-    expect(mocks.hook).toHaveBeenCalledWith('fundas', 'store')
+    expect(mocks.hook).toHaveBeenCalledWith('fundas', 'store', '', '')
     const link = screen.getByRole('link', { name: /Funda de silicona/ })
     expect(link).toHaveAttribute('href', `/t/fundas/producto/${FAMILY}`)
     await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'Rojo')

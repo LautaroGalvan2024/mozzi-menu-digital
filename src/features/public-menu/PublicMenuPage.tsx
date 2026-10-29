@@ -1,4 +1,3 @@
-import { groupCatalogProducts, productVariants } from '../../lib/catalog-presentation'
 import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
@@ -10,50 +9,81 @@ import { formatMoney, currentProductPrice } from '../../lib/money'
 import { readOrderRecovery } from '../../lib/order-recovery'
 import { whatsappShareUrl } from '../../lib/phone'
 import { effectiveQuantityPrices } from '../../lib/quantity-pricing'
-import { publicAssetUrl } from '../../lib/supabase/client'
-import type { PublicProduct } from '../../types/domain'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { useDebouncedValue } from '../../lib/useDebouncedValue'
+import type { PublicCatalogGroup } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
 import { RestaurantHoursDialog } from './RestaurantHoursDialog'
-import { usePublicMenu } from './usePublicMenu'
+import { usePublicCatalog } from './usePublicCatalog'
 
 function RecentOrderLink({ slug }: { slug: string }) {
   const [reference] = useState(() => readOrderRecovery(slug))
   return reference ? <div className="page-shell py-3"><Link className="block rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900 underline" to={`/r/${slug}/pedido-generado`}>Recuperar mi último pedido y el mensaje de WhatsApp</Link></div> : null
 }
 
+const INITIAL_VISIBLE_GROUPS = 12
+
+export function catalogGroupPresentation(group: PublicCatalogGroup) {
+  const first = group.variants[0]
+  if (!first) return null
+  const availableVariants = group.variants.filter((variant) => variant.available)
+  const available = availableVariants.length > 0
+  const representative = availableVariants[0] ?? first
+  const pricedVariants = available ? availableVariants : group.variants
+  return {
+    available,
+    price: Math.min(...pricedVariants.map((variant) => currentProductPrice(variant))),
+    product: { ...representative, family: group.family ?? representative.family },
+  }
+}
+
 export function PublicMenuPage() {
   const { restaurantSlug } = useParams()
-  const menuQuery = usePublicMenu(restaurantSlug)
   const cart = useCart()
   const { activateRestaurant, reconcileProducts } = cart
   const [search, setSearch] = useState('')
-  const [selectedProduct, setSelectedProduct] = useState<PublicProduct | null>(null)
+  const [categoryId, setCategoryId] = useState('')
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [showHours, setShowHours] = useState(false)
+  const debouncedSearch = useDebouncedValue(search, 300)
+  const catalog = usePublicCatalog(restaurantSlug, 'menu', categoryId, debouncedSearch)
+  const filterKey = `${restaurantSlug ?? ''}:${categoryId}:${debouncedSearch.trim()}`
+  const [visibleState, setVisibleState] = useState({ key: filterKey, count: INITIAL_VISIBLE_GROUPS })
+  const visibleCount = visibleState.key === filterKey ? visibleState.count : INITIAL_VISIBLE_GROUPS
+  const visibleGroups = catalog.groups.slice(0, visibleCount)
+  const cards = useMemo(() => visibleGroups.flatMap((group) => {
+    const presentation = catalogGroupPresentation(group)
+    return presentation ? [{ group, ...presentation }] : []
+  }), [visibleGroups])
+  const selectedGroup = catalog.groups.find((group) => group.id === selectedGroupId)
+  const selectedProduct = selectedGroup ? catalogGroupPresentation(selectedGroup)?.product ?? null : null
 
   useEffect(() => {
     if (restaurantSlug) activateRestaurant(restaurantSlug)
   }, [activateRestaurant, restaurantSlug])
 
   useEffect(() => {
-    if (!menuQuery.data || cart.restaurantSlug !== menuQuery.data.restaurant.slug || (cart.channel ?? 'menu') !== 'menu') return
-    reconcileProducts(menuQuery.data.categories.flatMap((category) => category.products))
-  }, [cart.restaurantSlug, cart.channel, menuQuery.data, menuQuery.dataUpdatedAt, reconcileProducts])
-
-  const categories = useMemo(() => {
-    const normalized = search.trim().toLocaleLowerCase('es')
-    if (!menuQuery.data || !normalized) return menuQuery.data?.categories ?? []
-    return menuQuery.data.categories
-      .map((category) => ({ ...category, products: category.products.filter((product) => `${product.name} ${product.description} ${product.code}`.toLocaleLowerCase('es').includes(normalized)) }))
-      .filter((category) => category.products.length > 0)
-  }, [menuQuery.data, search])
+    if (!catalog.meta.data || cart.restaurantSlug !== catalog.meta.data.restaurant.slug || (cart.channel ?? 'menu') !== 'menu') return
+    reconcileProducts(catalog.groups.flatMap((group) => group.variants))
+  }, [cart.restaurantSlug, cart.channel, catalog.groups, catalog.meta.data, reconcileProducts])
 
   if (!env.isSupabaseConfigured) return <main className="page-shell py-16"><ErrorPanel title="Falta conectar Supabase">Ejecutá <code>npm run setup:project</code> desde la raíz y reiniciá la aplicación.</ErrorPanel></main>
-  if (menuQuery.isLoading) return <LoadingScreen label="Preparando el menú…" />
-  if (menuQuery.error || !menuQuery.data) return <main className="page-shell py-16"><ErrorPanel action={<button className="button-secondary" onClick={() => void menuQuery.refetch()}>Reintentar</button>}>{menuQuery.error instanceof Error ? menuQuery.error.message : 'No encontramos este menú.'}</ErrorPanel></main>
+  if (catalog.isLoading) return <LoadingScreen label="Preparando el menú…" />
+  if (!catalog.meta.data || !catalog.pages.data) return <main className="page-shell py-16"><ErrorPanel action={<button className="button-secondary" onClick={() => void Promise.all([catalog.meta.refetch(), catalog.pages.refetch()])}>Reintentar</button>}>{catalog.meta.error instanceof Error ? catalog.meta.error.message : catalog.pages.error instanceof Error ? catalog.pages.error.message : 'No encontramos este menú.'}</ErrorPanel></main>
 
-  const { restaurant } = menuQuery.data
-  const coverUrl = publicAssetUrl(restaurant.coverPath)
-  const logoUrl = publicAssetUrl(restaurant.logoPath)
+  const { restaurant } = catalog.meta.data
+  const selectedCategory = catalog.meta.data.categories.find((category) => category.id === categoryId)
+  const hasMoreProducts = visibleCount < catalog.groups.length || catalog.pages.hasNextPage
+  const loadMoreProducts = () => {
+    if (visibleCount < catalog.groups.length) {
+      setVisibleState({ key: filterKey, count: Math.min(catalog.groups.length, visibleCount + 12) })
+      return
+    }
+    setVisibleState({ key: filterKey, count: visibleCount + 24 })
+    if (catalog.pages.hasNextPage) void catalog.pages.fetchNextPage()
+  }
+  const coverImage = responsiveAssetUrls(restaurant.coverPath)
+  const logoImage = responsiveAssetUrls(restaurant.logoPath)
   const menuUrl = new URL(`/r/${restaurant.slug}`, `${env.appBaseUrl}/`)
   const previewAssetVersion = (restaurant.coverPath ?? restaurant.logoPath)?.split('/').at(-1)
   if (previewAssetVersion) menuUrl.searchParams.set('v', previewAssetVersion)
@@ -67,7 +97,7 @@ export function PublicMenuPage() {
       <RecentOrderLink key={restaurant.slug} slug={restaurant.slug} />
       <header className="relative overflow-hidden border-b-4 border-[var(--brand)] bg-stone-950 text-white">
         <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full opacity-25 blur-3xl" style={{ backgroundColor: 'var(--brand-secondary)' }} />
-        {coverUrl ? <img src={coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" fetchPriority="high" /> : null}
+        {coverImage.src ? <img src={coverImage.src} srcSet={coverImage.srcSet} sizes="100vw" decoding="async" alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" fetchPriority="high" /> : null}
         <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(12,10,9,.58)_0%,rgba(12,10,9,.76)_48%,rgba(12,10,9,.96)_100%)]" />
         <div className="page-shell relative flex min-h-[260px] flex-col justify-end py-5 sm:min-h-[310px] sm:py-7">
           <a
@@ -81,9 +111,12 @@ export function PublicMenuPage() {
             Compartir por WhatsApp
           </a>
           <div className="flex items-end gap-3 sm:gap-4">
-            {logoUrl ? (
+            {logoImage.src ? (
               <img
-                src={logoUrl}
+                src={logoImage.src}
+                srcSet={logoImage.srcSet}
+                sizes="96px"
+                decoding="async"
                 alt={`Logo de ${restaurant.tradeName}`}
                 className="h-20 w-20 shrink-0 rounded-2xl border-2 border-white/90 bg-white object-cover shadow-xl sm:h-24 sm:w-24 sm:rounded-3xl sm:border-4"
               />
@@ -137,41 +170,49 @@ export function PublicMenuPage() {
               placeholder="Buscar platos, bebidas…"
             />
           </label>
+          {catalog.isUpdating ? <p className="mt-2 text-xs font-medium text-stone-500" role="status">Actualizando…</p> : null}
+          {catalog.refreshError ? <p className="mt-2 text-xs font-medium text-amber-800" role="status">No se pudo actualizar ahora. Seguís viendo la última versión disponible.</p> : null}
           <nav className="scrollbar-none mt-3 flex gap-2 overflow-x-auto pb-0.5" aria-label="Categorías">
-            {menuQuery.data.categories.map((category) => (
-              <a
+            <button
+              type="button"
+              aria-pressed={!categoryId}
+              onClick={() => setCategoryId('')}
+              className={`shrink-0 rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition ${!categoryId ? 'border-[var(--brand)] bg-stone-950 text-white' : 'border-stone-300 bg-white text-stone-800 hover:border-[var(--brand)]'}`}
+            >Todos</button>
+            {catalog.meta.data.categories.map((category) => (
+              <button
+                type="button"
                 key={category.id}
-                href={`#category-${category.id}`}
-                className="shrink-0 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-800 shadow-sm transition hover:border-[var(--brand)] hover:bg-stone-50"
+                aria-pressed={categoryId === category.id}
+                onClick={() => setCategoryId(category.id)}
+                className={`shrink-0 rounded-full border px-4 py-2 text-sm font-semibold shadow-sm transition ${categoryId === category.id ? 'border-[var(--brand)] bg-stone-950 text-white' : 'border-stone-300 bg-white text-stone-800 hover:border-[var(--brand)] hover:bg-stone-50'}`}
               >
                 {category.name}
-              </a>
+              </button>
             ))}
           </nav>
         </div>
       </div>
 
-      <main className="page-shell space-y-9 py-7 pb-32 sm:space-y-11 sm:py-9">
-        {categories.map((category) => (
-          <section key={category.id} id={`category-${category.id}`} className="scroll-mt-40">
+      <main className="page-shell py-7 pb-32 sm:py-9">
+          <section className="scroll-mt-40">
             <div className="mb-4 sm:mb-5">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-[1.7rem]">{category.name}</h2>
-              {category.description ? <p className="mt-1 max-w-2xl text-sm leading-5 text-stone-600">{category.description}</p> : null}
+              <h2 className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-[1.7rem]">{selectedCategory?.name ?? (debouncedSearch.trim() ? 'Resultados' : 'Todos los productos')}</h2>
+              {selectedCategory?.description ? <p className="mt-1 max-w-2xl text-sm leading-5 text-stone-600">{selectedCategory.description}</p> : null}
             </div>
             <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-              {groupCatalogProducts(category.products).map((product) => {
-                const imageUrl = publicAssetUrl(product.family?.imagePath ?? product.imagePath)
-                const price = currentProductPrice(product)
-                const hasQuantityPromotion = effectiveQuantityPrices(price, product.quantityPrices).length > 0
+              {cards.map(({ group, product, price, available }) => {
+                const image = responsiveAssetUrls(product.family?.imagePath ?? product.imagePath)
+                const hasQuantityPromotion = group.variants.some((variant) => effectiveQuantityPrices(currentProductPrice(variant), variant.quantityPrices).length > 0)
                 return (
                   <article
-                    key={product.id}
+                    key={group.id}
                     className="group overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition duration-200 focus-within:border-[var(--brand)] focus-within:ring-3 focus-within:ring-[var(--brand)]/15 hover:-translate-y-0.5 hover:shadow-lg sm:rounded-3xl"
                   >
                     <button
                       className="grid h-full w-full grid-cols-[minmax(0,1fr)_7rem] text-left disabled:cursor-not-allowed sm:grid-cols-[minmax(0,1fr)_8.5rem]"
-                      onClick={() => product.available && setSelectedProduct(product)}
-                      disabled={!product.available}
+                      onClick={() => available && setSelectedGroupId(group.id)}
+                      disabled={!available}
                     >
                       <div className="flex min-h-36 min-w-0 flex-col p-4 sm:min-h-40 sm:p-5">
                         <div className="flex items-start justify-between gap-2">
@@ -180,14 +221,14 @@ export function PublicMenuPage() {
                         </div>
                         <p className="mt-2 line-clamp-2 text-sm leading-5 text-stone-600">{product.description}</p>
                         <div className="mt-auto pt-3">
-                          <p className="font-display text-base font-bold text-stone-950">{formatMoney(price, restaurant.currencyCode, restaurant.locale)}</p>
-                          {price !== product.basePriceCents ? <p className="mt-0.5 text-xs text-stone-400 line-through">{formatMoney(product.basePriceCents, restaurant.currencyCode, restaurant.locale)}</p> : null}
+                          <p className="font-display text-base font-bold text-stone-950">{group.variants.length > 1 ? 'Desde ' : ''}{formatMoney(price, restaurant.currencyCode, restaurant.locale)}</p>
+                          {price === currentProductPrice(product) && price !== product.basePriceCents ? <p className="mt-0.5 text-xs text-stone-400 line-through">{formatMoney(product.basePriceCents, restaurant.currencyCode, restaurant.locale)}</p> : null}
                           {hasQuantityPromotion ? <span className="mt-1.5 inline-flex rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800">Promos por cantidad</span> : null}
-                          {!product.available ? <span className="mt-2 inline-flex rounded-full bg-stone-200 px-2 py-1 text-xs font-bold text-stone-700">Agotado</span> : null}
+                          {!available ? <span className="mt-2 inline-flex rounded-full bg-stone-200 px-2 py-1 text-xs font-bold text-stone-700">Agotado</span> : null}
                         </div>
                       </div>
-                      {imageUrl ? (
-                        <img loading="lazy" src={imageUrl} alt={product.name} className={`h-full min-h-36 w-full object-cover transition duration-300 sm:min-h-40 ${!product.available ? 'grayscale opacity-60' : 'group-hover:scale-[1.025]'}`} />
+                      {image.src ? (
+                        <img loading="lazy" decoding="async" src={image.src} srcSet={image.srcSet} sizes="(min-width: 1024px) 14rem, 8.5rem" alt={product.family?.name ?? product.name} className={`h-full min-h-36 w-full object-cover transition duration-300 sm:min-h-40 ${!available ? 'grayscale opacity-60' : 'group-hover:scale-[1.025]'}`} />
                       ) : (
                         <div className="grid min-h-36 place-items-center text-4xl sm:min-h-40" style={{ backgroundColor: 'color-mix(in srgb, var(--brand) 8%, white)' }} role="img" aria-label="Sin imagen">🍲</div>
                       )}
@@ -197,8 +238,8 @@ export function PublicMenuPage() {
               })}
             </div>
           </section>
-        ))}
-        {categories.length === 0 ? <p className="rounded-3xl border border-stone-200 bg-white p-8 text-center text-sm text-stone-600 shadow-sm">No hay productos que coincidan con la búsqueda.</p> : null}
+        {cards.length === 0 ? <p className="rounded-3xl border border-stone-200 bg-white p-8 text-center text-sm text-stone-600 shadow-sm">No hay productos que coincidan con la búsqueda.</p> : null}
+        {hasMoreProducts ? <div className="mt-7 flex justify-center"><button type="button" className="button-secondary min-w-40" disabled={catalog.pages.isFetchingNextPage} onClick={loadMoreProducts}>{catalog.pages.isFetchingNextPage ? 'Cargando…' : 'Ver más productos'}</button></div> : null}
       </main>
 
       {cart.restaurantSlug === restaurant.slug && (cart.channel ?? 'menu') === 'menu' && cart.itemCount > 0 ? (
@@ -213,14 +254,14 @@ export function PublicMenuPage() {
           </Link>
         </div>
       ) : null}
-      {selectedProduct ? <ProductDialog product={selectedProduct} variants={productVariants(selectedProduct, menuQuery.data.categories.flatMap(category => category.products))} restaurant={restaurant} onClose={() => setSelectedProduct(null)} onAdd={(line) => { cart.addLine(line); setSelectedProduct(null) }} /> : null}
+      {selectedProduct && selectedGroup ? <ProductDialog product={selectedProduct} variants={selectedGroup.variants} restaurant={restaurant} onClose={() => setSelectedGroupId(null)} onAdd={(line) => { cart.addLine(line); setSelectedGroupId(null) }} /> : null}
       {showHours ? (
         <RestaurantHoursDialog
           restaurantName={restaurant.tradeName}
           timeZone={restaurant.timezone}
           locale={restaurant.locale}
-          businessHours={menuQuery.data.businessHours}
-          specialHours={menuQuery.data.specialHours}
+          businessHours={catalog.meta.data.businessHours}
+          specialHours={catalog.meta.data.specialHours}
           onClose={() => setShowHours(false)}
         />
       ) : null}

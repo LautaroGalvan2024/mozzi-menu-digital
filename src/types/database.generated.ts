@@ -1670,6 +1670,41 @@ export type Database = {
         }
         Returns: Json
       }
+      get_public_catalog_revision: {
+        Args: { p_restaurant_slug: string; p_channel?: string }
+        Returns: Json
+      }
+      get_public_catalog_meta: {
+        Args: { p_restaurant_slug: string; p_channel?: string }
+        Returns: Json
+      }
+      get_public_catalog_page: {
+        Args: {
+          p_restaurant_slug: string
+          p_channel?: string
+          p_category_id?: string
+          p_search?: string
+          p_after_group_id?: string
+          p_limit?: number
+        }
+        Returns: Json
+      }
+      get_public_catalog_group: {
+        Args: {
+          p_restaurant_slug: string
+          p_channel?: string
+          p_group_id?: string
+        }
+        Returns: Json
+      }
+      get_public_products_by_ids: {
+        Args: {
+          p_restaurant_slug: string
+          p_channel?: string
+          p_product_ids?: string[]
+        }
+        Returns: Json
+      }
       get_payment_connection: {
         Args: {
           p_restaurant_id: string
@@ -1829,6 +1864,19 @@ export type Database = {
         Args: { p_after?: string; p_limit?: number; p_restaurant_id: string }
         Returns: Json
       }
+      get_inventory_overview: {
+        Args: { p_restaurant_id: string }
+        Returns: Json
+      }
+      get_inventory_items: {
+        Args: {
+          p_restaurant_id: string
+          p_after?: string
+          p_limit?: number
+          p_search?: string
+        }
+        Returns: Json
+      }
       get_order_by_action: { Args: { p_action_id: string }; Returns: Json }
       get_order_metrics: {
         Args: { p_from: string; p_restaurant_id: string; p_to: string }
@@ -1855,6 +1903,18 @@ export type Database = {
           p_original_order_id: string
           p_reason: string
           p_replacement_order_id: string
+        }
+        Returns: Json
+      }
+      list_catalog_products: {
+        Args: {
+          p_restaurant_id: string
+          p_search?: string
+          p_family_id?: string
+          p_unassigned_only?: boolean
+          p_after_sort_order?: number
+          p_after_id?: string
+          p_limit?: number
         }
         Returns: Json
       }

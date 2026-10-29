@@ -50,7 +50,12 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   beforeEach(() => {
     sessionStorage.clear(); localStorage.clear(); mocks.role = 'restaurant_admin'
     mocks.inventory = fixture(); mocks.mutate.mockReset().mockResolvedValue({ data: {}, error: null })
-    mocks.rpc.mockReset().mockImplementation(async (name, args) => name === 'get_inventory' ? { data: structuredClone(mocks.inventory), error: null } : mocks.mutate(name, args))
+    mocks.rpc.mockReset().mockImplementation(async (name, args) => {
+      const data = structuredClone(mocks.inventory) as { policy: unknown; operations: unknown; items: unknown; nextCursor: unknown }
+      if (name === 'get_inventory_overview') return { data: { policy: data.policy, operations: data.operations }, error: null }
+      if (name === 'get_inventory_items') return { data: { items: data.items, nextCursor: data.nextCursor }, error: null }
+      return mocks.mutate(name, args)
+    })
     mocks.references.mockReset().mockResolvedValue({ data: [{ id: externalOperation, external_reference: 'Mostrador, comprobante 123' }], error: null })
     mocks.from.mockReset().mockImplementation(table => table === 'inventory_operations'
       ? { select: (columns: string) => ({ eq: (tenantColumn: string, tenantId: string) => ({ in: (idColumn: string, ids: string[]) => mocks.references({ columns, tenantColumn, tenantId, idColumn, ids }) }) }) }
@@ -63,6 +68,50 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(screen.queryByRole('button', { name: 'Pausar operaciones' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Registrar movimiento' })).not.toBeInTheDocument()
     expect(mocks.references).not.toHaveBeenCalled()
+  })
+  it('loads item pages incrementally without downloading the overview and history again', async () => {
+    const data = externalSaleFixture()
+    mocks.rpc.mockImplementation(async (name, args: { p_after?: string | null }) => {
+      if (name === 'get_inventory_overview') return { data: { policy: structuredClone(data.policy), operations: [] }, error: null }
+      if (name === 'get_inventory_items') return args.p_after
+        ? { data: { items: [structuredClone(data.items[1])], nextCursor: null }, error: null }
+        : { data: { items: [structuredClone(data.items[0])], nextCursor: product }, error: null }
+      return mocks.mutate(name, args)
+    })
+    const user = userEvent.setup(); view()
+    expect(await screen.findByText('Arroz')).toBeVisible()
+    expect(screen.queryByText('Fideos')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Ver más productos' }))
+
+    expect(await screen.findByText('Fideos')).toBeVisible()
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'get_inventory_overview')).toHaveLength(1)
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'get_inventory_items')).toHaveLength(2)
+  })
+  it('windows a 5,000 item inventory instead of mounting 5,000 table rows', async () => {
+    mocks.role = 'order_manager'
+    const data = fixture()
+    mocks.inventory = {
+      ...data,
+      items: Array.from({ length: 5_000 }, (_, index) => ({
+        productId: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        code: `SKU-${index}`,
+        name: `Producto ${index}`,
+        initialized: true,
+        onHand: '5',
+        reserved: '0',
+        available: '5',
+        version: '1',
+      })),
+    }
+
+    const rendered = view()
+
+    expect(await screen.findByText('Producto 0')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Existencias · 5000 productos cargados' })).toBeVisible()
+    const mountedRows = rendered.container.querySelectorAll('tr[data-inventory-row]')
+    expect(mountedRows.length).toBeGreaterThan(0)
+    expect(mountedRows.length).toBeLessThan(100)
   })
   it('shows automated payment holds without requiring a human actor', async () => {
     mocks.inventory = { ...fixture(), operations: [{ id: externalOperation, kind: 'payment_hold', orderId: null, sourceOperationId: null, reason: 'Mercado Pago: payment_hold', actorUserId: null, actorName: null, createdAt: '2026-10-27T12:00:00Z', result: {}, movements: [] }] }

@@ -26,11 +26,22 @@ describe('image processing', () => {
       new File([new Uint8Array(1_000)], 'foto.jpg', { type: 'image/jpeg' }),
     )
 
+    expect(result.variants.map(({ width, height }) => ({ width, height }))).toEqual([
+      { width: 320, height: 160 },
+      { width: 640, height: 320 },
+      { width: 1200, height: 600 },
+    ])
     expect(result.width).toBe(1200)
     expect(result.height).toBe(600)
     expect(result.mimeType).toBe('image/webp')
     expect(result.blob.size).toBeLessThanOrEqual(1024 * 1024)
-    expect(result.filename).toMatch(/\.webp$/)
+    const baseNames = result.variants.map((variant) => variant.filename.replace(/-(320|640|1200)\.webp$/, ''))
+    expect(new Set(baseNames).size).toBe(1)
+    expect(result.variants.map((variant) => variant.filename)).toEqual([
+      `${baseNames[0]}-320.webp`,
+      `${baseNames[0]}-640.webp`,
+      `${baseNames[0]}-1200.webp`,
+    ])
     expect(close).toHaveBeenCalledOnce()
   })
 })

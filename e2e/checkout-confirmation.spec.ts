@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { routePublicCatalog } from './public-catalog-fixture'
 
 const restaurantId = '10000000-0000-4000-8000-000000000001'
 const categoryId = '20000000-0000-4000-8000-000000000001'
@@ -6,13 +7,7 @@ const productId = '30000000-0000-4000-8000-000000000001'
 const paymentMethodId = '40000000-0000-4000-8000-000000000001'
 const actionId = '50000000-0000-4000-8000-000000000001'
 
-test('a successful checkout keeps the confirmation visible while clearing the cart', async ({ page }) => {
-  let whatsappOpenedRegistrations = 0
-  await page.route('**/rest/v1/rpc/get_public_menu', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+const catalog = {
         restaurant: {
           id: restaurantId,
           name: 'Checkout Test',
@@ -78,9 +73,11 @@ test('a successful checkout keeps the confirmation visible while clearing the ca
           sortOrder: 0,
         }],
         deliveryZones: [],
-      }),
-    })
-  })
+}
+
+test('a successful checkout keeps the confirmation visible while clearing the cart', async ({ page }) => {
+  let whatsappOpenedRegistrations = 0
+  await routePublicCatalog(page, catalog, 'checkout-test')
 
   await page.route('**/functions/v1/create-order', async (route) => {
     await route.fulfill({

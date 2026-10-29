@@ -48,7 +48,7 @@ function emptyOrdersRequest(data: unknown[] = []) {
       return Promise.resolve({ data, error: null, count: data.length }).then(resolve, reject)
     },
   }
-  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'range', 'ilike']) {
+  for (const method of ['select', 'eq', 'gte', 'lt', 'order', 'range', 'ilike', 'abortSignal']) {
     request[method] = () => request
   }
   return request

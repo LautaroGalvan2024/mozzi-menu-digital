@@ -69,6 +69,24 @@ jobs:
       - name: Production build
         run: npm run build
 
+      - name: Enforce production bundle budgets
+        run: npm run budget:check
+
+      - name: Mobile production performance budgets
+        id: performance_budget
+        run: npm run test:performance
+
+      - name: Upload performance budget diagnostics
+        if: ${{ failure() && steps.performance_budget.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-performance-failure
+          path: |
+            playwright-report/performance/
+            test-results/performance/
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Audit dependencies
         run: npm audit --audit-level=high
 

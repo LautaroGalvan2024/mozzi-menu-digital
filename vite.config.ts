@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     sourcemap: false,
+    // The CI budget check follows Vite's real static-import graph instead of
+    // relying on unstable hashed filenames.
+    manifest: true,
   },
   test: {
     include: ['src/**/*.test.{ts,tsx}'],

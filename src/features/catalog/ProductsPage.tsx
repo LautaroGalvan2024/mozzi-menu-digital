@@ -1,26 +1,47 @@
-import { useQuery,useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery,useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,EmptyState,LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
-import { publicAssetUrl,supabase } from '../../lib/supabase/client'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { queryKeys } from '../../lib/queryKeys'
+import { supabase } from '../../lib/supabase/client'
+import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { ProductFamilies } from './ProductFamilies'
 
 const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),description:z.string(),base_price_cents:z.union([z.number(),z.string()]),promotional_price_cents:z.union([z.number(),z.string()]).nullable(),image_path:z.string().nullable(),active:z.boolean(),available:z.boolean(),featured:z.boolean(),sort_order:z.number().int(),category_id:z.string().uuid(),categories:z.object({name:z.string()}).nullable()})
 type ToggleField='available'|'active'|'featured'
+const PAGE_SIZE=50
+
+function safeSearch(value:string){return value.trim().replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').slice(0,120)}
 
 export function ProductsPage(){
   const location = useLocation()
   const savedCode = z.object({ savedCode: z.string() }).safeParse(location.state)
-  const scope=useRestaurantScope();const restaurant=useRestaurant(scope.selected?.id);const client=useQueryClient();const[search,setSearch]=useState('');const[mutationError,setMutationError]=useState<string|null>(null);const[busyProductId,setBusyProductId]=useState<string|null>(null)
-  const query=useQuery({queryKey:['products',scope.selected?.id],enabled:Boolean(scope.selected),queryFn:async()=>{const{data,error}=await supabase.from('products').select('id,name,code,description,base_price_cents,promotional_price_cents,image_path,active,available,featured,sort_order,category_id,categories(name)').eq('restaurant_id',scope.selected?.id??'').is('deleted_at',null).order('sort_order');if(error)throw new Error('No se pudieron cargar los productos.');return z.array(schema).parse(data)}})
+  const scope=useRestaurantScope();const restaurant=useRestaurant(scope.selected?.id);const client=useQueryClient();const[search,setSearch]=useState('');const[page,setPage]=useState(0);const[mutationError,setMutationError]=useState<string|null>(null);const[busyProductId,setBusyProductId]=useState<string|null>(null)
+  const debouncedSearch=useDebouncedValue(search,300)
+  const normalizedSearch=safeSearch(debouncedSearch)
+  useEffect(()=>setPage(0),[normalizedSearch,scope.selected?.id])
+  const query=useQuery({
+    queryKey:[...queryKeys.products(scope.selected?.id),page,normalizedSearch],
+    enabled:Boolean(scope.selected),
+    placeholderData:keepPreviousData,
+    queryFn:async({signal})=>{
+      let request=supabase.from('products').select('id,name,code,description,base_price_cents,promotional_price_cents,image_path,active,available,featured,sort_order,category_id,categories(name)',{count:'exact'}).eq('restaurant_id',scope.selected?.id??'').is('deleted_at',null).order('sort_order').order('id').range(page*PAGE_SIZE,page*PAGE_SIZE+PAGE_SIZE-1).abortSignal(signal)
+      if(normalizedSearch)request=request.or(`name.ilike.%${normalizedSearch}%,code.ilike.%${normalizedSearch}%,description.ilike.%${normalizedSearch}%`)
+      const{data,error,count}=await request
+      if(error)throw new Error('No se pudieron cargar los productos.')
+      return{rows:z.array(schema).parse(data),count:count??0}
+    },
+  })
   if(query.isLoading||restaurant.isLoading)return <LoadingScreen/>;if(query.error||restaurant.error)return <ErrorPanel>{query.error?.message??restaurant.error?.message}</ErrorPanel>
-  const normalized=search.toLowerCase().trim();const products=(query.data??[]).filter((row)=>`${row.name} ${row.code} ${row.description}`.toLowerCase().includes(normalized))
+  const products=query.data?.rows??[];const total=query.data?.count??0
 
   async function toggle(id:string,field:ToggleField,value:boolean){
     const restaurantId=scope.selected?.id
@@ -29,10 +50,7 @@ export function ProductsPage(){
     const update=field==='available'?{available:value}:field==='active'?{active:value}:{featured:value}
     const{error}=await supabase.from('products').update(update).eq('id',id).eq('restaurant_id',restaurantId).select('id').single()
     if(error)setMutationError('No se pudo actualizar el producto. Verificá tu acceso y volvé a intentar.')
-    else await Promise.all([
-      client.invalidateQueries({queryKey:['products',restaurantId]}),
-      client.invalidateQueries({queryKey:['public-menu']}),
-    ])
+    else await invalidateCatalogQueries(client,restaurantId)
     setBusyProductId(null)
   }
 
@@ -50,17 +68,17 @@ export function ProductsPage(){
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-stone-400" aria-hidden/>
         <input className="h-11 w-full rounded-xl border border-stone-300 bg-white pl-10 pr-4 text-sm outline-none transition duration-150 placeholder:text-stone-400 hover:border-stone-400 focus:border-orange-500 focus:ring-3 focus:ring-orange-100" placeholder="Buscar por nombre o código" value={search} onChange={(e)=>setSearch(e.target.value)}/>
       </label>
-      <p className="text-sm text-stone-500">{products.length} {products.length === 1 ? 'producto' : 'productos'}</p>
+      <p className="text-sm text-stone-500">{total} {total === 1 ? 'producto' : 'productos'}{query.isFetching?' · Actualizando…':''}</p>
     </div>
     <ProductFamilies key={scope.selected?.id} />
     {mutationError?<p className="form-error mb-5" role="alert">{mutationError}</p>:null}
     {products.length===0?<EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/>:<div className="admin-table-shell rounded-xl border border-stone-200 bg-white">
       <div className="hidden grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] gap-4 border-b border-stone-200 px-5 py-3 text-xs font-medium text-stone-500 lg:grid" aria-hidden><span>Producto</span><span>Estado</span><span className="text-right">Precio</span><span /></div>
       {products.map((row)=>{
-        const image=publicAssetUrl(row.image_path);const busy=busyProductId===row.id;const hasPromotion=row.promotional_price_cents!==null
+        const image=responsiveAssetUrls(row.image_path);const busy=busyProductId===row.id;const hasPromotion=row.promotional_price_cents!==null
         return <article className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 border-b border-stone-100 p-4 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] lg:px-5" key={row.id}>
           <Link to={`/admin/catalogo/productos/${row.id}`} className="flex min-w-0 items-center gap-3 rounded-lg focus-visible:outline-offset-4">
-            {image?<img src={image} alt="" loading="lazy" className="h-12 w-12 shrink-0 rounded-lg border border-stone-100 object-cover"/>:<span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-stone-100 text-stone-400"><ImageIcon className="h-5 w-5" aria-hidden/></span>}
+            {image.src?<img src={image.src} srcSet={image.srcSet} sizes="48px" alt="" loading="lazy" decoding="async" className="h-12 w-12 shrink-0 rounded-lg border border-stone-100 object-cover"/>:<span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-stone-100 text-stone-400"><ImageIcon className="h-5 w-5" aria-hidden/></span>}
             <div className="min-w-0">
               <h2 className="break-words text-sm font-semibold leading-5 text-stone-950">{row.name}{row.featured ? <Star className="ml-1.5 inline h-3.5 w-3.5 text-stone-400" aria-label="Destacado" /> : null}</h2>
               <p className="mt-1 truncate text-xs text-stone-500">{row.categories?.name??'Sin categoría'} <span aria-hidden>·</span> {row.code}</p>
@@ -87,5 +105,6 @@ export function ProductsPage(){
         </article>
       })}
     </div>}
+    {total>PAGE_SIZE?<nav className="mt-5 flex items-center justify-between gap-3" aria-label="Páginas de productos"><p className="text-sm text-stone-500">Página {page+1} de {Math.max(1,Math.ceil(total/PAGE_SIZE))}</p><div className="flex gap-2"><button className="button-secondary" type="button" disabled={page===0||query.isFetching} onClick={()=>setPage(value=>Math.max(0,value-1))}>Anterior</button><button className="button-secondary" type="button" disabled={(page+1)*PAGE_SIZE>=total||query.isFetching} onClick={()=>setPage(value=>value+1)}>Siguiente</button></div></nav>:null}
   </>
 }

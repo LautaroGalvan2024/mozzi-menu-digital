@@ -1,15 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { routePublicCatalog } from './public-catalog-fixture'
 
 const restaurantId = '11000000-0000-4000-8000-000000000001'
 const categoryId = '12000000-0000-4000-8000-000000000001'
 const productId = '13000000-0000-4000-8000-000000000001'
 
-test('shows unambiguous hours and applies reusable quantity prices', async ({ page }) => {
-  await page.route('**/rest/v1/rpc/get_public_menu', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+const catalog = {
         restaurant: {
           id: restaurantId,
           name: 'El Nieto E2E',
@@ -75,9 +71,10 @@ test('shows unambiguous hours and applies reusable quantity prices', async ({ pa
         }],
         paymentMethods: [],
         deliveryZones: [],
-      }),
-    })
-  })
+}
+
+test('shows unambiguous hours and applies reusable quantity prices', async ({ page }) => {
+  await routePublicCatalog(page, catalog, 'horarios-precios-test')
 
   await page.goto('/r/horarios-precios-test')
 

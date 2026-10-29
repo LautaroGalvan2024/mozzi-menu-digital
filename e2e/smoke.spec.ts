@@ -15,7 +15,7 @@ test('an unknown route renders a controlled 404', async ({ page }) => {
 })
 
 test('an unavailable public menu fails safely with or without local configuration', async ({ page }) => {
-  await page.route('**/rest/v1/rpc/get_public_menu', async (route) => {
+  await page.route('**/rest/v1/rpc/get_public_*', async (route) => {
     await route.fulfill({
       status: 404,
       contentType: 'application/json',

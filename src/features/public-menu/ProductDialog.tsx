@@ -2,7 +2,7 @@ import { Minus, Package, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { formatMoney, currentProductPrice } from '../../lib/money'
 import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
-import { publicAssetUrl } from '../../lib/supabase/client'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
 import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/domain'
 import { cartProductName, variantLabel } from '../../lib/catalog-presentation'
 
@@ -92,7 +92,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
     dialogRef.current?.close()
   }
 
-  const imageUrl = publicAssetUrl(product.imagePath ?? product.family?.imagePath ?? null)
+  const image = responsiveAssetUrls(product.imagePath ?? product.family?.imagePath ?? null)
   const titleId = `product-dialog-title-${product.id}`
   return (
     <dialog
@@ -112,8 +112,8 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
           >
             <X className="h-5 w-5" aria-hidden />
           </button>
-          {imageUrl ? (
-            <img src={imageUrl} className="h-52 w-full object-cover sm:h-64" alt={product.name} />
+          {image.src ? (
+            <img src={image.src} srcSet={image.srcSet} sizes="(min-width: 640px) 640px, 100vw" decoding="async" className="h-52 w-full object-cover sm:h-64" alt={product.name} />
           ) : restaurant.channel === 'store' ? (
             <div className="grid h-32 place-items-center bg-stone-100 sm:h-44"><Package className="h-14 w-14 text-stone-400" aria-hidden /><span className="sr-only">Producto sin foto</span></div>
           ) : (

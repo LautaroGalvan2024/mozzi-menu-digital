@@ -5,19 +5,27 @@ export const inventoryItemSchema = z.object({
   productId: z.string().uuid(), code: z.string(), name: z.string(), archived: z.boolean().default(false), initialized: z.boolean(),
   onHand: quantity.nullable(), reserved: quantity.nullable(), available: quantity.nullable(), version: quantity.nullable(),
 })
-export const inventorySchema = z.object({
-  policy: z.object({
+export const inventoryPolicySchema = z.object({
     mode: z.enum(['never_enabled', 'enforced', 'paused']), version: quantity,
     activatedAt: z.string().nullable(), pausedAt: z.string().nullable(),
     cutoverId: z.string().uuid().nullable(), countStartedAt: z.string().nullable(),
     businessConfirmed: z.boolean(), businessPolicy: z.record(z.string(), z.unknown()).nullable(),
-  }),
-  items: z.array(inventoryItemSchema), nextCursor: z.string().uuid().nullable(),
-  operations: z.array(z.object({
+})
+export const inventoryOperationSchema = z.object({
     id: z.string().uuid(), kind: z.string(), orderId: z.string().uuid().nullable(), sourceOperationId: z.string().uuid().nullable(),
     reason: z.string(), externalReference: z.string().nullable().optional(), actorUserId: z.string().uuid().nullable(), actorName: z.string().nullable().optional(), createdAt: z.string(), result: z.unknown(),
     movements: z.array(z.object({ productId: z.string().uuid(), deltaOnHand: z.string(), deltaReserved: z.string(), returnedQuantity: quantity, onHandAfter: quantity, reservedAfter: quantity })).default([]),
-  })),
+})
+export const inventoryOverviewSchema = z.object({
+  policy: inventoryPolicySchema,
+  operations: z.array(inventoryOperationSchema),
+})
+export const inventoryItemsSchema = z.object({
+  items: z.array(inventoryItemSchema),
+  nextCursor: z.string().uuid().nullable(),
+})
+export const inventorySchema = inventoryOverviewSchema.extend({
+  items: z.array(inventoryItemSchema), nextCursor: z.string().uuid().nullable(),
 })
 
 export const operationLabels: Record<string, string> = {

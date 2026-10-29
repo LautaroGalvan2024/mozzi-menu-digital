@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
+import { routePublicCatalog } from './public-catalog-fixture'
 
 const restaurantId = '11000000-0000-4000-8000-000000000001'
 const categoryId = '12000000-0000-4000-8000-000000000001'
@@ -22,10 +23,7 @@ const catalog = {
 const summary = { order: { actionId, displayNumber: 'CM-001', status: 'generated', totalCents: 1050000, currencyCode: 'ARS', createdAt: new Date().toISOString() }, payment: { status: 'pending', checkoutUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=test', expiresAt: until }, recoveryToken: token, recoveryExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString() }
 
 async function fixture(page: Page) {
-  await page.route('**/rest/v1/rpc/get_public_catalog', async route => {
-    expect(route.request().postDataJSON()).toEqual({ p_restaurant_slug: 'casa-movil', p_channel: 'store' })
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(catalog) })
-  })
+  await routePublicCatalog(page, catalog, 'casa-movil', 'store')
 }
 async function addRedVariant(page: Page, testInfo?: TestInfo) {
   await page.goto('/t/casa-movil')

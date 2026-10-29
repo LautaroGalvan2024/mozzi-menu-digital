@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProductFamilies } from './ProductFamilies'
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), save: vi.fn(), stock: vi.fn() }))
+const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), save: vi.fn(), stock: vi.fn(), query: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { from: mocks.from, rpc: mocks.rpc } }))
 vi.mock('../restaurants/RestaurantScope', () => ({ useRestaurantScope: () => ({ selected: { id: '20000000-0000-4000-8000-000000000001' } }) }))
 const category = '30000000-0000-4000-8000-000000000001'
@@ -27,7 +27,7 @@ describe('variant family editing', () => {
   afterEach(() => { cleanup(); localStorage.clear() })
   beforeEach(() => {
     localStorage.clear(); familyRows = []; existingFamily = null
-    mocks.rpc.mockReset(); mocks.from.mockReset(); mocks.save.mockReset(); mocks.stock.mockReset()
+    mocks.rpc.mockReset(); mocks.from.mockReset(); mocks.save.mockReset(); mocks.stock.mockReset(); mocks.query.mockReset()
     mocks.save.mockResolvedValue({ data: { id: 'family', variants: 2 }, error: null })
     mocks.stock.mockResolvedValue({ data: stockData(), error: null })
     mocks.rpc.mockImplementation((name: string, payload: unknown) => name === 'get_catalog_stock' ? mocks.stock(payload) : mocks.save(name, payload))
@@ -37,8 +37,8 @@ describe('variant family editing', () => {
         { id: red, code: 'RED', name: 'Funda roja', category_id: category, family_id: null, variant_attributes: {}, image_path: null, base_price_cents: 1200 },
       ]
       const chain: Record<string, unknown> = {}
-      for (const method of ['select', 'eq', 'is', 'order', 'limit']) chain[method] = () => chain
-      chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null }).then(resolve)
+      for (const method of ['select', 'eq', 'is', 'in', 'order', 'limit', 'range', 'or', 'abortSignal']) chain[method] = (...args: unknown[]) => { mocks.query(table, method, args); return chain }
+      chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data, error: null, count: data.length }).then(resolve)
       return chain
     })
   })
@@ -56,6 +56,23 @@ describe('variant family editing', () => {
     await user.type(screen.getByLabelText('Modelo'), 'iPhone 15')
     await user.type(screen.getByLabelText('Color'), 'Negro')
   }
+  it('requests stable pages of 50 and debounces family and candidate searches', async () => {
+    const user = userEvent.setup()
+    renderManager()
+    await user.click(screen.getByRole('button', { name: /Productos con variantes/ }))
+    await screen.findByRole('button', { name: 'Nueva ficha con variantes' })
+    expect(mocks.query).toHaveBeenCalledWith('product_families', 'order', ['name'])
+    expect(mocks.query).toHaveBeenCalledWith('product_families', 'order', ['id'])
+    expect(mocks.query).toHaveBeenCalledWith('product_families', 'range', [0, 49])
+
+    await user.type(screen.getByLabelText('Buscar familias'), 'silicona')
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('product_families', 'or', ['name.ilike.%silicona%,code.ilike.%silicona%']))
+
+    await user.click(screen.getByRole('button', { name: 'Nueva ficha con variantes' }))
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('products', 'range', [0, 49]))
+    await user.type(screen.getByLabelText('Buscar productos sin familia'), 'negra')
+    await waitFor(() => expect(mocks.query).toHaveBeenCalledWith('products', 'or', ['name.ilike.%negra%,code.ilike.%negra%']))
+  })
   it('contains keyboard focus in the variant editor and returns it after Escape', async () => {
     const user = await openFamily()
     const close = screen.getByRole('button', { name: 'Cerrar ficha' })
@@ -125,7 +142,7 @@ describe('variant family editing', () => {
     renderManager()
     await user.click(screen.getByRole('button', { name: /Productos con variantes/ }))
     await user.click(await screen.findByRole('button', { name: 'Funda silicona' }))
-    expect(screen.getByLabelText('Cantidad en stock')).toHaveValue('10')
+    expect(await screen.findByLabelText('Cantidad en stock')).toHaveValue('10')
     await user.clear(screen.getByLabelText('Cantidad en stock'))
     await user.type(screen.getByLabelText('Cantidad en stock'), '20')
     await user.click(screen.getByRole('button', { name: 'Guardar ficha y variantes' }))

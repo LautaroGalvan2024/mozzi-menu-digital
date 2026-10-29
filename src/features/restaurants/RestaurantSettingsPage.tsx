@@ -4,6 +4,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { Link } from 'react-router'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from './RestaurantScope'
 import { useRestaurant } from './useRestaurant'
@@ -55,8 +56,7 @@ function RestaurantSettings({ restaurantId }: { restaurantId: string | undefined
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['restaurant', restaurantId] }),
         queryClient.invalidateQueries({ queryKey: ['restaurant-scope-choices'] }),
-        queryClient.invalidateQueries({ queryKey: ['public-menu'] }),
-        queryClient.invalidateQueries({ queryKey: ['public-catalog'] }),
+        invalidateCatalogQueries(queryClient, restaurantId),
       ])
     } catch { setError('No se pudo guardar la configuración. Verificá tu conexión e intentá nuevamente.') }
     finally { setSaving(false) }

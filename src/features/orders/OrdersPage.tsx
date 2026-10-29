@@ -9,8 +9,10 @@ import { FilterBar } from '../../components/FilterBar'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { orderSearchFilter } from '../../lib/orders'
+import { queryKeys } from '../../lib/queryKeys'
 import { supabase } from '../../lib/supabase/client'
 import { dateInTimeZone, dateRangeForLocalDates } from '../../lib/timezone'
+import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { adminOrderSchema, statusLabel, type AdminOrderRow } from './orderSchemas'
@@ -32,6 +34,7 @@ export function OrdersPage() {
   const [status, setStatus] = useState<'' | AdminOrderRow['status']>('')
   const [fulfillment, setFulfillment] = useState<'' | AdminOrderRow['fulfillment_type']>('')
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search, 300)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [dates, setDates] = useState({ restaurantId: '', from: '', to: '' })
@@ -53,21 +56,20 @@ export function OrdersPage() {
       dates.to,
   )
   const dateError = datesReady ? orderDateRangeError(dates.from, dates.to) : null
-  const query = useQuery({
+  const query = useQuery<{ rows: AdminOrderRow[]; count: number }>({
     queryKey: [
-      'orders',
-      scope.selected?.id,
+      ...queryKeys.orders(scope.selected?.id),
       restaurant.data?.timezone,
       page,
       status,
       fulfillment,
-      search,
+      debouncedSearch,
       dates.from,
       dates.to,
     ],
-    enabled: datesReady && !dateError,
+    enabled: datesReady && !dateError && search === debouncedSearch,
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === scope.selected?.id ? keepPreviousData(previous) : undefined,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const range = dateRangeForLocalDates(
         dates.from,
         dates.to,
@@ -84,9 +86,9 @@ export function OrdersPage() {
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
       if (status) request = request.eq('status', status)
       if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
-      const filter = orderSearchFilter(search)
+      const filter = orderSearchFilter(debouncedSearch)
       if (filter) request = request.ilike(filter.field, `%${filter.value}%`)
-      const { data, error, count } = await request
+      const { data, error, count } = await request.abortSignal(signal)
       if (error) throw new Error('No se pudieron cargar los pedidos.')
       return { rows: z.array(adminOrderSchema).parse(data), count: count ?? 0 }
     },
@@ -105,8 +107,8 @@ export function OrdersPage() {
           filter: `restaurant_id=eq.${scope.selected.id}`,
         },
         () => {
-          void client.invalidateQueries({ queryKey: ['orders', scope.selected?.id] })
-          void client.invalidateQueries({ queryKey: ['dashboard-orders', scope.selected?.id] })
+          void client.invalidateQueries({ queryKey: queryKeys.orders(scope.selected?.id) })
+          void client.invalidateQueries({ queryKey: queryKeys.dashboardOrders(scope.selected?.id) })
         },
       )
       .subscribe()
@@ -143,7 +145,7 @@ export function OrdersPage() {
           .range(offset, offset + batchSize - 1)
         if (status) request = request.eq('status', status)
         if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
-        const filter = orderSearchFilter(search)
+        const filter = orderSearchFilter(debouncedSearch)
         if (filter) request = request.ilike(filter.field, `%${filter.value}%`)
         const { data, error: loadError } = await request
         if (loadError) throw loadError
@@ -188,7 +190,7 @@ export function OrdersPage() {
           <button
             className="button-secondary"
             title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
-            disabled={!rows.length || exporting || query.isFetching || Boolean(dateError)}
+            disabled={!rows.length || exporting || query.isFetching || search !== debouncedSearch || Boolean(dateError)}
             onClick={() => void exportCsv()}
           >
             <Download className="h-4 w-4" aria-hidden />
@@ -280,7 +282,7 @@ export function OrdersPage() {
           </div>
         </details>
       </FilterBar>
-      {query.isFetching ? <p className="mb-3 text-xs text-stone-500" role="status">Actualizando pedidos…</p> : null}
+      {search !== debouncedSearch ? <p className="mb-3 text-xs text-stone-500" role="status">Buscando…</p> : query.isFetching ? <p className="mb-3 text-xs text-stone-500" role="status">Actualizando pedidos…</p> : null}
       {dateError ? (
         <p className="form-error mb-5" role="alert">{dateError}</p>
       ) : rows.length === 0 ? (

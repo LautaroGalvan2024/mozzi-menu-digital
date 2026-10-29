@@ -6,9 +6,11 @@ import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
+import { assetVariantPaths, responsiveAssetUrls } from '../../lib/images/responsive'
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { parsePriceCents } from '../../lib/money'
-import { publicAssetUrl, supabase } from '../../lib/supabase/client'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
+import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { clearProductAttempt, clearProductSave, persistProductSave, recoverProductDraft, recoverProductSave, saveProductAttempt, type ProductSaveAttempt } from './product-draft'
 import { catalogStockError, catalogStockSchema, isDefinitiveCatalogError, parseStockQuantity, type CatalogStockBalance } from './catalog-stock'
@@ -283,10 +285,10 @@ export function ProductEditorPage() {
   }, [categories.data, draft, isNew, product.data, scope.selected, stock.data, productId])
   const originalGroupIds = useMemo(() => new Set(product.data?.groups.map((g) => g.id) ?? []), [product.data])
   const originalOptionIds = useMemo(() => new Set(product.data?.options.map((o) => o.id) ?? []), [product.data])
-  const imagePreview = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : publicAssetUrl(draft?.imagePath ?? null)), [draft?.imagePath, imageFile])
+  const imagePreview = useMemo(() => imageFile ? { src: URL.createObjectURL(imageFile) } : responsiveAssetUrls(draft?.imagePath ?? null), [draft?.imagePath, imageFile])
   useEffect(
     () => () => {
-      if (imagePreview?.startsWith('blob:')) URL.revokeObjectURL(imagePreview)
+      if (imagePreview.src?.startsWith('blob:')) URL.revokeObjectURL(imagePreview.src)
     },
     [imagePreview],
   )
@@ -454,7 +456,8 @@ export function ProductEditorPage() {
     let uploadedPath: string | null = null
     let catalogSaved = false
     const cleanupAsset = async (path: string) => {
-      const [storageResult, assetResult] = await Promise.all([supabase.storage.from('restaurant-assets').remove([path]), supabase.from('image_assets').update({ deleted_at: new Date().toISOString() }).eq('restaurant_id', restaurantId).eq('path', path)])
+      const paths = assetVariantPaths(path)
+      const [storageResult, assetResult] = await Promise.all([supabase.storage.from('restaurant-assets').remove(paths), supabase.from('image_assets').update({ deleted_at: new Date().toISOString() }).eq('restaurant_id', restaurantId).in('path', paths)])
       return !storageResult.error && !assetResult.error
     }
     try {
@@ -540,7 +543,7 @@ export function ProductEditorPage() {
       setDraft(value => value ? { ...value, stockQuantity: '' } : value)
       const savedCode = z.object({ code: z.string() }).safeParse(saved)
       if (savedCode.success) setDraft((value) => value ? { ...value, code: savedCode.data.code } : value)
-      await Promise.all([client.invalidateQueries({ queryKey: ['products', restaurantId] }), client.invalidateQueries({ queryKey: ['public-menu'] }), client.invalidateQueries({ queryKey: ['public-catalog'] }), client.invalidateQueries({ queryKey: ['inventory', restaurantId] }), client.invalidateQueries({ queryKey: ['catalog-stock', restaurantId] })])
+      await invalidateCatalogQueries(client, restaurantId)
       if (previousPath && previousPath !== nextPath) {
         const cleaned = await cleanupAsset(previousPath)
         if (!cleaned) {
@@ -567,6 +570,7 @@ export function ProductEditorPage() {
       setError('No se pudo dar de baja el producto.')
       return
     }
+    await invalidateCatalogQueries(client, scope.selected.id)
     navigate('/admin/catalogo/productos')
   }
   return (
@@ -604,8 +608,8 @@ export function ProductEditorPage() {
         <section className="form-card">
           <h2 className="form-card-title mb-4">Foto</h2>
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            {imagePreview ? (
-              <img className="h-24 w-24 rounded-2xl object-cover" src={imagePreview} alt="Previsualización del producto" />
+            {imagePreview.src ? (
+              <img className="h-24 w-24 rounded-2xl object-cover" src={imagePreview.src} srcSet={imagePreview.srcSet} sizes="96px" decoding="async" alt="Previsualización del producto" />
             ) : (
               <div className="grid h-24 w-24 place-items-center rounded-2xl bg-stone-100">
                 <ImagePlus className="h-6 w-6 text-stone-300" />
@@ -617,7 +621,7 @@ export function ProductEditorPage() {
                 Elegir o tomar foto
                 <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => setImageFile(e.target.files?.[0] ?? null)} />
               </label>
-              {imagePreview ? (
+              {imagePreview.src ? (
                 <button
                   className="button-quiet"
                   type="button"

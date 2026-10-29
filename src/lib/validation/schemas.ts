@@ -68,7 +68,7 @@ const quantityPricesSchema = z.array(quantityPriceSchema).max(19).superRefine((r
   })
 })
 
-const productSchema = z.object({
+export const publicProductSchema = z.object({
   family: z.object({ id: z.string().uuid(), name: z.string(), description: z.string(), imagePath: z.string().nullable(), axes: z.array(z.string()) }).nullable().optional(),
   variantAttributes: z.record(z.string(), z.string()).optional(),
   id: z.string().uuid(),
@@ -86,6 +86,15 @@ const productSchema = z.object({
   sortOrder: z.number().int(),
   quantityPrices: quantityPricesSchema.default([]),
   optionGroups: z.array(optionGroupSchema),
+})
+
+const publicCategoryMetaSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string(),
+  imagePath: z.string().nullable(),
+  sortOrder: z.number().int(),
 })
 
 export const publicMenuSchema = z.object({
@@ -117,15 +126,7 @@ export const publicMenuSchema = z.object({
     nextOpeningAt: z.string().nullable(),
   }),
   categories: z.array(
-    z.object({
-      id: z.string().uuid(),
-      name: z.string(),
-      slug: z.string(),
-      description: z.string(),
-      imagePath: z.string().nullable(),
-      sortOrder: z.number().int(),
-      products: z.array(productSchema),
-    }),
+    publicCategoryMetaSchema.extend({ products: z.array(publicProductSchema) }),
   ),
   businessHours: z.array(
     z.object({
@@ -178,6 +179,45 @@ export const publicMenuSchema = z.object({
       sortOrder: z.number().int(),
     }),
   ),
+})
+
+export const catalogRevisionSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  updatedAt: z.string(),
+})
+
+export const publicCatalogMetaSchema = publicMenuSchema.extend({
+  revision: z.number().int().nonnegative(),
+  categories: z.array(publicCategoryMetaSchema),
+})
+
+export const publicCatalogGroupSchema = z.object({
+  id: z.string(),
+  categoryId: z.string().uuid(),
+  family: z.object({
+    id: z.string().uuid(),
+    name: z.string(),
+    description: z.string(),
+    imagePath: z.string().nullable(),
+    axes: z.array(z.string()),
+  }).nullable(),
+  variants: z.array(publicProductSchema).min(1),
+})
+
+export const publicCatalogPageSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  items: z.array(publicCatalogGroupSchema),
+  nextCursor: z.string().nullable(),
+})
+
+export const publicCatalogGroupResultSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  group: publicCatalogGroupSchema,
+})
+
+export const publicProductsByIdsSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  products: z.array(publicProductSchema),
 })
 
 export const generatedOrderSchema = z.object({

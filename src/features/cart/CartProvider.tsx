@@ -6,7 +6,6 @@ import {
   useState,
   type PropsWithChildren,
 } from 'react'
-import { z } from 'zod'
 import { currentProductPrice } from '../../lib/money'
 import { calculateCartLineTotal, cartLineConfigurationKey } from '../../lib/quantity-pricing'
 import type { CartLine, PublicProduct } from '../../types/domain'
@@ -15,39 +14,60 @@ import { cartProductName } from '../../lib/catalog-presentation'
 
 const MAX_CART_LINE_QUANTITY = 100
 
-const cartQuantityPricesSchema = z.array(z.object({
-  quantity: z.number().int().min(2).max(20),
-  totalPriceCents: z.number().int().min(0).max(1_000_000_000_000),
-})).max(19).superRefine((rules, context) => {
-  const seen = new Set<number>()
-  rules.forEach((rule, index) => {
-    if (seen.has(rule.quantity)) context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: [index, 'quantity'],
-      message: 'Cantidad repetida.',
-    })
-    seen.add(rule.quantity)
-  })
-})
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const MAX_MONEY_CENTS = 1_000_000_000_000
 
-const lineSchema = z.object({
-  key: z.string().uuid(),
-  productId: z.string().uuid(),
-  productName: z.string().max(160),
-  productImagePath: z.string().max(1_024).nullable(),
-  quantity: z.number().int().min(1).max(MAX_CART_LINE_QUANTITY),
-  notes: z.string().max(300),
-  unitPriceCents: z.number().int().min(0).max(1_000_000_000_000),
-  quantityPrices: cartQuantityPricesSchema.default([]),
-  selectedOptions: z.array(
-    z.object({
-      id: z.string().uuid(),
-      groupName: z.string().max(120),
-      name: z.string().max(120),
-      priceDeltaCents: z.number().int().min(0).max(1_000_000_000_000),
-    }),
-  ).max(30),
-})
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validMoney(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= MAX_MONEY_CENTS
+}
+
+function validText(value: unknown, maximum: number): value is string {
+  return typeof value === 'string' && value.length <= maximum
+}
+
+function parseCartLine(value: unknown): CartLine | null {
+  if (!isRecord(value) || typeof value.key !== 'string' || !UUID.test(value.key) || typeof value.productId !== 'string' || !UUID.test(value.productId)) return null
+  if (!validText(value.productName, 160) || !(value.productImagePath === null || validText(value.productImagePath, 1_024))) return null
+  if (!Number.isInteger(value.quantity) || Number(value.quantity) < 1 || Number(value.quantity) > MAX_CART_LINE_QUANTITY || !validText(value.notes, 300) || !validMoney(value.unitPriceCents)) return null
+
+  const rawPrices = value.quantityPrices === undefined ? [] : value.quantityPrices
+  if (!Array.isArray(rawPrices) || rawPrices.length > 19) return null
+  const seenQuantities = new Set<number>()
+  const quantityPrices: CartLine['quantityPrices'] = []
+  for (const price of rawPrices) {
+    if (!isRecord(price) || !Number.isInteger(price.quantity) || Number(price.quantity) < 2 || Number(price.quantity) > 20 || !validMoney(price.totalPriceCents) || seenQuantities.has(Number(price.quantity))) return null
+    seenQuantities.add(Number(price.quantity))
+    quantityPrices.push({ quantity: Number(price.quantity), totalPriceCents: Number(price.totalPriceCents) })
+  }
+
+  if (!Array.isArray(value.selectedOptions) || value.selectedOptions.length > 30) return null
+  const selectedOptions: CartLine['selectedOptions'] = []
+  for (const option of value.selectedOptions) {
+    if (!isRecord(option) || typeof option.id !== 'string' || !UUID.test(option.id) || !validText(option.groupName, 120) || !validText(option.name, 120) || !validMoney(option.priceDeltaCents)) return null
+    selectedOptions.push({
+      id: option.id,
+      groupName: option.groupName,
+      name: option.name,
+      priceDeltaCents: Number(option.priceDeltaCents),
+    })
+  }
+
+  return {
+    key: value.key,
+    productId: value.productId,
+    productName: value.productName,
+    productImagePath: value.productImagePath,
+    quantity: Number(value.quantity),
+    notes: value.notes,
+    unitPriceCents: Number(value.unitPriceCents),
+    quantityPrices,
+    selectedOptions,
+  }
+}
 
 interface CartContextValue {
   channel: CommerceChannel
@@ -73,8 +93,10 @@ function storageKey(slug: string, channel: CommerceChannel = 'menu') {
 export function parseStoredCart(value: string | null): CartLine[] {
   if (!value) return []
   try {
-    const parsed = z.array(lineSchema).safeParse(JSON.parse(value))
-    return parsed.success ? normalizeCartLines(parsed.data) : []
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    const lines = parsed.map(parseCartLine)
+    return lines.every((line): line is CartLine => line !== null) ? normalizeCartLines(lines) : []
   } catch {
     return []
   }

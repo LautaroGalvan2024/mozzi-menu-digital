@@ -1,12 +1,15 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
+import { queryKeys } from '../../lib/queryKeys'
 import { supabase } from '../../lib/supabase/client'
+import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
-import { countedQuantity, countRows, inventoryError, inventorySchema, operationLabels, readCountDraft, type CountDraft } from './inventory'
+import { countedQuantity, countRows, inventoryError, inventoryItemsSchema, inventoryOverviewSchema, operationLabels, readCountDraft, type CountDraft } from './inventory'
 
 const uuid = z.string().uuid()
 const businessPolicy = z.object({
@@ -37,6 +40,8 @@ function readPending(restaurantId: string) {
 const orderSchema = z.object({ id: uuid, display_number: z.string(), status: z.string() })
 const externalReferenceSchema = z.array(z.object({ id: uuid, external_reference: z.string().min(1) })).max(100)
 const externalReferenceError = 'No se pudieron cargar las referencias de las ventas externas. Reintentá la carga para consultar el historial completo.'
+const INVENTORY_OVERSCAN = 8
+const INVENTORY_VIEWPORT_HEIGHT = 640
 
 export function InventoryPage() {
   const scope = useRestaurantScope()
@@ -67,41 +72,59 @@ function InventoryWorkspace() {
   const [movementReason, setMovementReason] = useState('')
   const [externalReference, setExternalReference] = useState('')
   const [externalRows, setExternalRows] = useState<ExternalSaleRow[]>(() => [emptyExternalSaleRow()])
-  const query = useQuery({
-    queryKey: ['inventory', restaurantId], enabled: Boolean(restaurantId),
+  const [search, setSearch] = useState('')
+  const inventoryViewport = useRef<HTMLDivElement>(null)
+  const [compactInventoryRows, setCompactInventoryRows] = useState(false)
+  const [inventoryWindow, setInventoryWindow] = useState({ scrollTop: 0, height: INVENTORY_VIEWPORT_HEIGHT })
+  const debouncedSearch = useDebouncedValue(search, 300).trim().slice(0, 120)
+  const overviewQuery = useQuery({
+    queryKey: queryKeys.inventoryOverview(restaurantId), enabled: Boolean(restaurantId),
     queryFn: async () => {
-      let after: string | undefined
-      let combined: z.infer<typeof inventorySchema> | undefined
-      for (let page = 0; page < 10; page++) {
-        const result = await supabase.rpc('get_inventory', { p_restaurant_id: restaurantId, ...(after ? { p_after: after } : {}), p_limit: 500 })
-        if (result.error) throw new Error(inventoryError(result.error))
-        const parsed = inventorySchema.parse(result.data)
-        if (!combined) combined = parsed
-        else {
-          if (parsed.policy.version !== combined.policy.version) throw new Error('El inventario cambió mientras se cargaba. Actualizá la pantalla.')
-          combined.items.push(...parsed.items)
-        }
-        if (!parsed.nextCursor) {
-          const ids = combined.operations.filter(operation => operation.kind === 'external_sale').map(operation => operation.id)
-          if (ids.length) {
-            if (ids.length > 100) throw new Error(externalReferenceError)
-            try {
-              const references = await supabase.from('inventory_operations').select('id,external_reference').eq('restaurant_id', restaurantId).in('id', ids)
-              const parsedReferences = externalReferenceSchema.safeParse(references.data)
-              if (references.error || !parsedReferences.success) throw new Error(externalReferenceError)
-              const byId = new Map(parsedReferences.data.map(row => [row.id, row.external_reference]))
-              if (byId.size !== ids.length || ids.some(id => !byId.has(id))) throw new Error(externalReferenceError)
-              combined.operations = combined.operations.map(operation => operation.kind === 'external_sale' ? { ...operation, externalReference: byId.get(operation.id)! } : operation)
-            } catch { throw new Error(externalReferenceError) }
-          }
-          return combined
-        }
-        after = parsed.nextCursor
+      const result = await supabase.rpc('get_inventory_overview', { p_restaurant_id: restaurantId })
+      if (result.error) throw new Error(inventoryError(result.error))
+      const overview = inventoryOverviewSchema.parse(result.data)
+      const ids = overview.operations.filter(operation => operation.kind === 'external_sale').map(operation => operation.id)
+      if (!ids.length) return overview
+      if (ids.length > 100) throw new Error(externalReferenceError)
+      try {
+        const references = await supabase.from('inventory_operations').select('id,external_reference').eq('restaurant_id', restaurantId).in('id', ids)
+        const parsedReferences = externalReferenceSchema.safeParse(references.data)
+        if (references.error || !parsedReferences.success) throw new Error(externalReferenceError)
+        const byId = new Map(parsedReferences.data.map(row => [row.id, row.external_reference]))
+        if (byId.size !== ids.length || ids.some(id => !byId.has(id))) throw new Error(externalReferenceError)
+        return { ...overview, operations: overview.operations.map(operation => operation.kind === 'external_sale' ? { ...operation, externalReference: byId.get(operation.id)! } : operation) }
+      } catch {
+        throw new Error(externalReferenceError)
       }
-      throw new Error('El catálogo supera los 5.000 productos admitidos en esta pantalla. No se cargó una lista incompleta.')
     },
   })
-  const countId = query.data?.policy.cutoverId
+  const itemsQuery = useInfiniteQuery({
+    queryKey: queryKeys.inventoryItems(restaurantId, debouncedSearch),
+    enabled: Boolean(restaurantId),
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const result = await supabase.rpc('get_inventory_items', {
+        p_restaurant_id: restaurantId,
+        ...(pageParam ? { p_after: pageParam } : {}),
+        p_limit: 50,
+        ...(debouncedSearch ? { p_search: debouncedSearch } : {}),
+      })
+      if (result.error) throw new Error(inventoryError(result.error))
+      return inventoryItemsSchema.parse(result.data)
+    },
+    getNextPageParam: page => page.nextCursor ?? undefined,
+  })
+  const fetchNextItemsPage = itemsQuery.fetchNextPage
+  const hasNextItemsPage = itemsQuery.hasNextPage
+  const isFetchingNextItemsPage = itemsQuery.isFetchingNextPage
+  const items = itemsQuery.data?.pages.flatMap(page => page.items) ?? []
+  const inventory = overviewQuery.data && itemsQuery.data ? { ...overviewQuery.data, items } : undefined
+  const inventoryErrorState = overviewQuery.error ?? itemsQuery.error
+  const inventoryLoading = overviewQuery.isLoading || itemsQuery.isLoading
+  const inventoryFetching = overviewQuery.isFetching || itemsQuery.isFetching
+  const refetchInventory = () => Promise.all([overviewQuery.refetch(), itemsQuery.refetch()])
+  const countId = inventory?.policy.cutoverId
+  const allItemsLoaded = Boolean(itemsQuery.data && !hasNextItemsPage && !debouncedSearch)
   const openOrders = useQuery({
     queryKey: ['inventory-pending-orders', restaurantId, countId], enabled: Boolean(countId && isAdmin),
     queryFn: async () => {
@@ -135,6 +158,31 @@ function InventoryWorkspace() {
     setCounts(countId ? readCountDraft(restaurantId, countId) : {})
     setNoMovements(false); setActivate(false); setNote(''); setReviewedOrders([])
   }, [restaurantId, countId])
+  useEffect(() => {
+    if (!countId) return
+    if (search) {
+      setSearch('')
+      return
+    }
+    if (hasNextItemsPage && !isFetchingNextItemsPage) void fetchNextItemsPage()
+  }, [countId, fetchNextItemsPage, hasNextItemsPage, isFetchingNextItemsPage, search])
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia('(max-width: 639px)')
+    const update = () => setCompactInventoryRows(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    if (inventoryViewport.current) inventoryViewport.current.scrollTop = 0
+    setInventoryWindow(current => ({ ...current, scrollTop: 0 }))
+  }, [debouncedSearch, restaurantId])
+
+  async function loadAllItems() {
+    let snapshot = await fetchNextItemsPage()
+    while (snapshot.hasNextPage) snapshot = await fetchNextItemsPage()
+  }
 
   async function execute(command: Command) {
     if (inFlight.current || !isAdmin) return
@@ -149,7 +197,10 @@ function InventoryWorkspace() {
         if (/^(22|23|40|42|P0)/.test(result.error.code ?? '')) {
           sessionStorage.removeItem(pendingKey(restaurantId)); setPending(null)
         }
-        if (result.error.code === '40001') await client.invalidateQueries({ queryKey: ['inventory', restaurantId] })
+        if (result.error.code === '40001') await Promise.all([
+          client.invalidateQueries({ queryKey: queryKeys.inventoryOverview(restaurantId) }),
+          client.invalidateQueries({ queryKey: queryKeys.inventoryItems(restaurantId) }),
+        ])
         setError(inventoryError(result.error))
         return
       }
@@ -158,12 +209,10 @@ function InventoryWorkspace() {
       if (command.name === 'inventory_adjust' && command.args.p_kind === 'external_sale') setExternalRows([emptyExternalSaleRow()])
       setMessage(command.name === 'activate_inventory_from_product_stock' ? 'Control de stock activado. Ya se limita la venta a las unidades disponibles.' : 'Operación registrada.'); setMovementQuantity(''); setMovementReason(''); setExternalReference(''); setReason('')
       await Promise.all([
-        client.invalidateQueries({ queryKey: ['inventory', restaurantId] }),
+        invalidateCatalogQueries(client, restaurantId),
         client.invalidateQueries({ queryKey: ['inventory-pending-orders', restaurantId] }),
-        client.invalidateQueries({ queryKey: ['orders', restaurantId] }),
-        client.invalidateQueries({ queryKey: ['public-menu'] }),
-        client.invalidateQueries({ queryKey: ['restaurant', restaurantId] }),
-        client.invalidateQueries({ queryKey: ['catalog-stock', restaurantId] }),
+        client.invalidateQueries({ queryKey: queryKeys.orders(restaurantId) }),
+        client.invalidateQueries({ queryKey: queryKeys.restaurant(restaurantId) }),
       ])
     } catch {
       setError('No se pudo confirmar la operación. Conservamos el intento para que puedas reintentarlo sin duplicar movimientos.')
@@ -178,9 +227,10 @@ function InventoryWorkspace() {
     } catch { setError('No se pudo guardar el conteo en este dispositivo. No cierres la pantalla; comprobá que permita guardar datos.') }
   }
   function finishCount() {
-    if (!query.data || !countId) return
+    if (!inventory || !countId) return
     try {
-      const rows = countRows(query.data.items, counts)
+      if (!allItemsLoaded) throw new Error('Esperá a que termine de cargar el catálogo completo antes de registrar el conteo.')
+      const rows = countRows(inventory.items, counts)
       void execute({ name: 'finish_inventory_count', args: { p_count_id: countId, p_rows: rows, p_pending_order_ids: activate ? reviewedOrders : [], p_no_movements_confirmed: noMovements, p_note: note.trim(), p_activate: activate } })
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Revisá las cantidades.') }
   }
@@ -197,7 +247,7 @@ function InventoryWorkspace() {
       }
       const rows = []
       for (const row of externalRows) {
-        const item = query.data?.items.find(item => item.productId === row.productId)
+        const item = inventory?.items.find(item => item.productId === row.productId)
         if (!item?.initialized || !item.version || !/^\d{1,13}$/.test(row.quantity) || BigInt(row.quantity) === 0n) {
           setError('Elegí un producto con stock cargado y una cantidad entera mayor que cero en cada fila de la venta.'); return
         }
@@ -206,23 +256,29 @@ function InventoryWorkspace() {
       void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: rows, p_reason: movementReason.trim() || 'Venta fuera de la app', p_external_reference: externalReference.trim() } })
       return
     }
-    const item = query.data?.items.find(row => row.productId === productId)
+    const item = inventory?.items.find(row => row.productId === productId)
     if (!item?.initialized || !item.version || !/^-?\d{1,13}$/.test(movementQuantity) || BigInt(movementQuantity) === 0n || (movementKind !== 'adjustment' && BigInt(movementQuantity) < 0n)) {
       setError('Elegí un producto con stock cargado y una cantidad entera válida.'); return
     }
     void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: [{ productId, quantity: movementQuantity, expectedVersion: item.version }], p_reason: movementReason.trim() } })
   }
 
-  if (query.isLoading) return <LoadingScreen />
-  if (query.error || !query.data) return <ErrorPanel action={<button className="button-secondary" disabled={query.isFetching} onClick={() => void query.refetch()}>Reintentar carga</button>}>{query.error?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
-  const { policy, items, operations } = query.data
+  if (inventoryLoading) return <LoadingScreen />
+  if (inventoryErrorState || !inventory) return <ErrorPanel action={<button className="button-secondary" disabled={inventoryFetching} onClick={() => void refetchInventory()}>Reintentar carga</button>}>{inventoryErrorState?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
+  const { policy, operations } = inventory
+  const inventoryRowHeight = compactInventoryRows ? 190 : 68
+  const firstInventoryRow = Math.max(0, Math.floor(inventoryWindow.scrollTop / inventoryRowHeight) - INVENTORY_OVERSCAN)
+  const inventoryRowsInView = Math.ceil(inventoryWindow.height / inventoryRowHeight) + INVENTORY_OVERSCAN * 2
+  const lastInventoryRow = Math.min(items.length, firstInventoryRow + inventoryRowsInView)
+  const visibleInventoryItems = items.slice(firstInventoryRow, lastInventoryRow)
+  const inventoryColumnCount = 5 + (isAdmin ? 1 : 0)
   const initializedItems = items.filter(item => item.initialized)
   const missingItems = items.filter(item => !item.initialized)
   const activationOtherChannels = policy.businessPolicy?.otherChannels === 'none' ? 'none' : 'record_before_handoff'
   const disabled = busy || Boolean(pending)
   const modeLabel = countId ? 'Conteo en curso' : policy.mode === 'enforced' ? 'Activo' : policy.mode === 'paused' ? 'Pausado' : 'Sin activar'
   return <>
-    <PageHeader eyebrow="Operación" title="Stock" description="Consultá las cantidades disponibles y actualizá el stock de tus productos." actions={<button className="button-secondary" disabled={busy} onClick={() => void query.refetch()}>Actualizar</button>} />
+    <PageHeader eyebrow="Operación" title="Stock" description="Consultá las cantidades disponibles y actualizá el stock de tus productos." actions={<button className="button-secondary" disabled={busy} onClick={() => void refetchInventory()}>Actualizar</button>} />
     <p className="mb-5 text-sm text-stone-500">Control de stock: <strong className="font-medium text-stone-800">{modeLabel}</strong>{policy.mode === 'paused' || countId ? ' · Las operaciones afectadas están pausadas; los movimientos y las reservas se conservan.' : null}</p>
     {error ? <p className="form-error mb-4" role="alert">{error}</p> : null}
     {message ? <p className="form-success mb-4" role="status">{message}</p> : null}
@@ -236,18 +292,30 @@ function InventoryWorkspace() {
         <h3 className="font-bold">Activar control de stock</h3>
         <p className="mt-2 text-sm">Cargá la cantidad de cada producto, incluyendo 0 si está agotado. Después activá el control para evitar vender de más. No hace falta iniciar un conteo.</p>
         {missingItems.length ? <><p className="mt-3 text-sm font-semibold">Falta cargar stock en {missingItems.length} {missingItems.length === 1 ? 'producto' : 'productos'}:</p><ul className="mt-2 flex flex-wrap gap-2">{missingItems.slice(0, 5).map(item => <li key={item.productId}><Link className="text-sm font-semibold text-orange-700 underline" to={`/admin/catalogo/productos/${item.productId}`}>{item.name}</Link></li>)}</ul>{missingItems.length > 5 ? <p className="mt-2 text-sm">Los demás aparecen en la tabla de abajo.</p> : null}</> : null}
+        {!allItemsLoaded ? <p className="mt-3 text-sm text-amber-800">Cargá todos los productos antes de activar para comprobar que ninguno quede sin stock inicial.</p> : null}
         <p className="mt-3 text-sm text-stone-600">Al activar, los pedidos ya aceptados reservarán sus unidades. Registrá también las ventas realizadas fuera de Mozzi para mantener el saldo al día.</p>
-        <button className="button-primary mt-4" disabled={disabled || missingItems.length > 0 || items.length === 0} onClick={() => void execute({ name: 'activate_inventory_from_product_stock', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_expected_policy_version: Number(policy.version), p_other_channels: activationOtherChannels } })}>Activar control de stock</button>
+        <button className="button-primary mt-4" disabled={disabled || !allItemsLoaded || missingItems.length > 0 || items.length === 0} onClick={() => void execute({ name: 'activate_inventory_from_product_stock', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_expected_policy_version: Number(policy.version), p_other_channels: activationOtherChannels } })}>Activar control de stock</button>
       </div> : null}
     </section> : null}
     {countId ? <p className="mb-4 rounded-2xl bg-amber-50 p-4">Ventana iniciada: {new Date(policy.countStartedAt!).toLocaleString('es-AR')}. Registrá cada cantidad mientras contás. Si hubo movimientos físicos durante la ventana, detené el registro y conciliá antes de cerrar.</p> : null}
     <section className="form-card">
-      <h2 className="form-card-title">Existencias · {items.length} productos</h2>
-      <p className="mb-4 text-sm">Total menos reservado = disponible para vender.</p>
-      <div className="relative overflow-x-auto">
-        <table className="data-table inventory-balances-table" role="table" aria-label="Existencias de productos">
-          <thead role="rowgroup"><tr role="row"><th scope="col">Producto</th><th scope="col">Código / SKU</th><th scope="col">Existencia</th><th scope="col">Reservado</th><th scope="col">Disponible</th>{isAdmin && !countId ? <th scope="col"><span className="sr-only">Editar</span></th> : null}{countId && isAdmin ? <th scope="col">Conteo físico</th> : null}</tr></thead>
-          <tbody role="rowgroup">{items.map(item => <tr key={item.productId} role="row">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div><h2 className="form-card-title">Existencias · {items.length} productos cargados</h2><p className="text-sm">Total menos reservado = disponible para vender.</p></div>
+        <label className="field w-full sm:max-w-xs"><span>Buscar producto o código</span><input value={search} maxLength={120} disabled={Boolean(countId)} onChange={event => setSearch(event.target.value)} placeholder="Buscar en inventario" /></label>
+      </div>
+      {countId && !allItemsLoaded ? <p className="mt-3 text-sm text-amber-800" role="status">Cargando el catálogo completo para garantizar un conteo sin productos omitidos…</p> : null}
+      <div
+        ref={inventoryViewport}
+        className="relative mt-4 max-h-[70vh] overflow-auto"
+        tabIndex={0}
+        aria-label="Lista desplazable de existencias"
+        onScroll={event => setInventoryWindow({ scrollTop: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight || INVENTORY_VIEWPORT_HEIGHT })}
+      >
+        <table className="data-table inventory-balances-table" role="table" aria-label="Existencias de productos" aria-rowcount={items.length + 1}>
+          <thead className="sticky top-0 z-10" role="rowgroup"><tr role="row"><th scope="col">Producto</th><th scope="col">Código / SKU</th><th scope="col">Existencia</th><th scope="col">Reservado</th><th scope="col">Disponible</th>{isAdmin && !countId ? <th scope="col"><span className="sr-only">Editar</span></th> : null}{countId && isAdmin ? <th scope="col">Conteo físico</th> : null}</tr></thead>
+          <tbody role="rowgroup">
+          {firstInventoryRow > 0 ? <tr className="inventory-virtual-spacer" aria-hidden="true"><td colSpan={inventoryColumnCount} style={{ height: firstInventoryRow * inventoryRowHeight }} /></tr> : null}
+          {visibleInventoryItems.map((item, index) => <tr key={item.productId} role="row" aria-rowindex={firstInventoryRow + index + 2} data-inventory-row style={{ height: inventoryRowHeight }}>
             <td className="inventory-product" role="cell">{item.name}{item.archived ? <span className="ml-2 text-xs text-stone-500">Archivado</span> : null}</td>
             <td className="inventory-code" role="cell">{item.code}</td>
             <td className="inventory-quantity" role="cell"><span className="inventory-balance-label" aria-hidden="true">Total</span>{item.initialized ? item.onHand : 'Sin cargar'}</td>
@@ -255,15 +323,18 @@ function InventoryWorkspace() {
             <td className="inventory-quantity" role="cell"><span className="inventory-balance-label" aria-hidden="true">Disponible</span>{item.available ?? '—'}</td>
             {isAdmin && !countId ? <td className="inventory-edit" role="cell"><Link className="inventory-edit-link font-semibold text-orange-700 underline" aria-label={`Editar stock de ${item.name}`} to={`/admin/catalogo/productos/${item.productId}`}>Editar stock</Link></td> : null}
             {countId && isAdmin ? <td className="inventory-count" role="cell"><span className="inventory-balance-label" aria-hidden="true">Conteo físico</span><input className="w-28 rounded-lg border p-2" aria-label={`Conteo de ${item.name}`} inputMode="numeric" value={counts[item.productId]?.quantity ?? ''} disabled={disabled} onChange={event => updateCount(item.productId, event.target.value)} /></td> : null}
-          </tr>)}</tbody>
+          </tr>)}
+          {lastInventoryRow < items.length ? <tr className="inventory-virtual-spacer" aria-hidden="true"><td colSpan={inventoryColumnCount} style={{ height: (items.length - lastInventoryRow) * inventoryRowHeight }} /></tr> : null}
+          </tbody>
         </table>
       </div>
+      {hasNextItemsPage ? <div className="mt-4 flex justify-center"><button className="button-secondary" type="button" disabled={isFetchingNextItemsPage} onClick={() => void (countId ? loadAllItems() : fetchNextItemsPage())}>{isFetchingNextItemsPage ? 'Cargando…' : countId ? 'Cargar catálogo completo' : 'Ver más productos'}</button></div> : null}
     </section>
     {isAdmin ? <details className="admin-disclosure mt-5" open={Boolean(countId) || policy.mode === 'paused' || undefined}>
       <summary>Herramientas avanzadas de inventario</summary><div className="mt-4">
     {!policy.businessConfirmed && isAdmin ? <section className="form-card mb-5"><h2 className="form-card-title">Reglas para activar el stock</h2><p>Esta versión admite unidades enteras, un saldo por SKU o variante y entregas y devoluciones completas. La app será la fuente principal del stock. Las reservas aceptadas o pagadas se liberan al cancelar, sin vencimiento automático. Los pagos online pendientes reservan durante 30 minutos. El conteo incluye mercadería en tránsito pendiente de recepción o retiro.</p><p className="mt-3">Si necesitás cajas y unidades del mismo saldo, fracciones o entregas/devoluciones parciales, deben incorporarse antes de activar.</p><label className="field mt-4"><span>Ventas fuera de la app</span><select value={otherChannels} disabled={disabled} onChange={event => setOtherChannels(event.target.value as typeof otherChannels)}><option value="none">No hay otros canales</option><option value="record_before_handoff">Se registran aquí al entregar, antes de cerrar la venta</option></select></label><label className="check-field mt-4"><input type="checkbox" checked={businessAccepted} disabled={disabled} onChange={event => setBusinessAccepted(event.target.checked)} />Confirmo que estas reglas describen la operación del comercio.</label><button className="button-primary mt-4" disabled={disabled || !businessAccepted} onClick={() => void execute({ name: 'confirm_inventory_business_policy', args: { p_restaurant_id: restaurantId, p_policy: { unitModel: 'whole_product', sourceOfTruth: 'app', otherChannels, returns: 'full_only', acceptance: 'reserve', delivery: 'physical_handoff', partialDeliveries: 'none', physicalScope: 'until_handoff_including_transit', acceptedReservationsExpire: false } } })}>Guardar reglas</button></section> : null}
     {isAdmin && !countId ? <section className="form-card mb-5"><h2 className="form-card-title">{policy.mode === 'enforced' ? 'Pausar para contar o resolver una contingencia' : 'Conteo físico'}</h2><p>Para contar, detené movimientos físicos en todos los canales, incluidos ingresos y devoluciones. El sistema también pausará pedidos, aceptación y entregas hasta finalizar.</p><label className="field mt-4"><span>Motivo</span><input value={reason} maxLength={500} disabled={disabled} onChange={event => setReason(event.target.value)} /></label><div className="mt-4 flex flex-wrap gap-3">{policy.mode === 'enforced' ? <button className="button-secondary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'change_inventory_policy', args: { p_restaurant_id: restaurantId, p_mode: 'paused', p_reason: reason.trim(), p_expected_policy_version: Number(policy.version) } })}>Pausar operaciones</button> : <button className="button-primary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'begin_inventory_count', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_reason: reason.trim() } })}>Iniciar ventana de conteo</button>}{policy.mode === 'paused' ? <button className="button-secondary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'change_inventory_policy', args: { p_restaurant_id: restaurantId, p_mode: 'enforced', p_reason: reason.trim(), p_expected_policy_version: Number(policy.version) } })}>Reanudar operaciones</button> : null}</div></section> : null}
-    {countId && isAdmin ? <section className="form-card mt-5"><h2 className="form-card-title">Revisar y registrar conteo</h2><p>{Object.values(counts).filter(row => row.quantity !== '').length} cantidades cargadas. Revisá la tabla: cero es una cantidad explícita; un campo vacío sigue sin contar.</p><label className="field mt-4"><span>Observación del conteo</span><textarea maxLength={2000} value={note} disabled={disabled} onChange={event => setNote(event.target.value)} placeholder="Responsable, alcance contado y comprobación de todos los canales" /></label><label className="check-field mt-4"><input type="checkbox" checked={noMovements} disabled={disabled} onChange={event => setNoMovements(event.target.checked)} />Confirmo que no hubo movimientos físicos entre contar y registrar, en ningún canal.</label>{policy.mode === 'never_enabled' ? <><label className="check-field mt-4"><input type="checkbox" checked={activate} disabled={disabled || !policy.businessConfirmed} onChange={event => setActivate(event.target.checked)} />Activar el stock con este conteo.</label>{!policy.businessConfirmed ? <p className="mt-2 text-sm">Primero confirmá las reglas comerciales.</p> : null}{activate ? <div className="mt-4"><h3 className="font-bold">Pedidos pendientes que se incorporarán</h3><p className="text-sm">Revisá cada pedido. Los ya aceptados reservarán mercadería al activar; los demás reservarán al aceptarlos.</p>{openOrders.error ? <ErrorPanel>{openOrders.error.message}</ErrorPanel> : null}{openOrders.data?.map(order => <label className="check-field mt-2" key={order.id}><input type="checkbox" checked={reviewedOrders.includes(order.id)} disabled={disabled} onChange={event => setReviewedOrders(rows => event.target.checked ? [...rows, order.id] : rows.filter(id => id !== order.id))} /><Link to={`/admin/pedidos/${order.id}`}>{order.display_number}</Link> · {order.status === 'accepted' ? 'Aceptado: reservar' : 'Pendiente de aceptación'}</label>)}</div> : null}</> : <p className="mt-3 text-sm">Finalizar el conteo conserva la pausa. Reanudá cuando la contingencia esté resuelta.</p>}<button className="button-primary mt-4" disabled={disabled || !noMovements || note.trim().length < 10 || (activate && (openOrders.isLoading || Boolean(openOrders.error) || reviewedOrders.length !== openOrders.data?.length))} onClick={finishCount}>Registrar conteo{activate ? ' y activar stock' : ''}</button></section> : null}
+    {countId && isAdmin ? <section className="form-card mt-5"><h2 className="form-card-title">Revisar y registrar conteo</h2><p>{Object.values(counts).filter(row => row.quantity !== '').length} cantidades cargadas. Revisá la tabla: cero es una cantidad explícita; un campo vacío sigue sin contar.</p><label className="field mt-4"><span>Observación del conteo</span><textarea maxLength={2000} value={note} disabled={disabled} onChange={event => setNote(event.target.value)} placeholder="Responsable, alcance contado y comprobación de todos los canales" /></label><label className="check-field mt-4"><input type="checkbox" checked={noMovements} disabled={disabled} onChange={event => setNoMovements(event.target.checked)} />Confirmo que no hubo movimientos físicos entre contar y registrar, en ningún canal.</label>{policy.mode === 'never_enabled' ? <><label className="check-field mt-4"><input type="checkbox" checked={activate} disabled={disabled || !policy.businessConfirmed} onChange={event => setActivate(event.target.checked)} />Activar el stock con este conteo.</label>{!policy.businessConfirmed ? <p className="mt-2 text-sm">Primero confirmá las reglas comerciales.</p> : null}{activate ? <div className="mt-4"><h3 className="font-bold">Pedidos pendientes que se incorporarán</h3><p className="text-sm">Revisá cada pedido. Los ya aceptados reservarán mercadería al activar; los demás reservarán al aceptarlos.</p>{openOrders.error ? <ErrorPanel>{openOrders.error.message}</ErrorPanel> : null}{openOrders.data?.map(order => <label className="check-field mt-2" key={order.id}><input type="checkbox" checked={reviewedOrders.includes(order.id)} disabled={disabled} onChange={event => setReviewedOrders(rows => event.target.checked ? [...rows, order.id] : rows.filter(id => id !== order.id))} /><Link to={`/admin/pedidos/${order.id}`}>{order.display_number}</Link> · {order.status === 'accepted' ? 'Aceptado: reservar' : 'Pendiente de aceptación'}</label>)}</div> : null}</> : <p className="mt-3 text-sm">Finalizar el conteo conserva la pausa. Reanudá cuando la contingencia esté resuelta.</p>}<button className="button-primary mt-4" disabled={disabled || !allItemsLoaded || !noMovements || note.trim().length < 10 || (activate && (openOrders.isLoading || Boolean(openOrders.error) || reviewedOrders.length !== openOrders.data?.length))} onClick={finishCount}>Registrar conteo{activate ? ' y activar stock' : ''}</button></section> : null}
     </div></details> : null}
     {isAdmin && policy.mode === 'enforced' && !countId ? <details className="admin-disclosure mt-5" open={pending?.name === 'inventory_adjust' || undefined}>
       <summary>Ingresos, ajustes y ventas externas</summary>

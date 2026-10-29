@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,20 +12,36 @@ const PRODUCT = '10000000-0000-4000-8000-000000000001'
 const OPTION = '10000000-0000-4000-8000-000000000002'
 const GROUP = '10000000-0000-4000-8000-000000000003'
 const category = '10000000-0000-4000-8000-000000000004'
-const mocks = vi.hoisted(() => ({ menu: {} as PublicMenu, fetching: false, updatedAt: 1 }))
-vi.mock('../public-menu/usePublicMenu', () => ({ usePublicMenu: () => ({ data: mocks.menu, dataUpdatedAt: mocks.updatedAt, isLoading: false, isFetching: mocks.fetching, error: null }) }))
+const mocks = vi.hoisted(() => ({ menu: {} as PublicMenu, groupProducts: [] as PublicProduct[], fetching: false, updatedAt: 1 }))
+vi.mock('../public-menu/usePublicMenu', () => ({ usePublicMenu: () => ({ data: mocks.menu, dataUpdatedAt: mocks.updatedAt, isLoading: false, isFetching: mocks.fetching, error: null, refreshError: null }) }))
+vi.mock('../public-menu/api', () => ({
+  fetchPublicCatalogGroup: async () => {
+    const first = mocks.groupProducts[0]!
+    return {
+      revision: 1,
+      group: {
+        id: first.family?.id ?? first.id,
+        categoryId: first.categoryId,
+        family: first.family ?? null,
+        variants: mocks.groupProducts,
+      },
+    }
+  },
+}))
 vi.mock('../../lib/supabase/client', () => ({ publicAssetUrl: () => null }))
 const product: PublicProduct = { id: PRODUCT, categoryId: category, code: 'P-1', name: 'Arroz', description: '', basePriceCents: 1000, promotionalPriceCents: null, promotionStartsAt: null, promotionEndsAt: null, imagePath: null, available: true, featured: false, sortOrder: 0, quantityPrices: [], optionGroups: [{ id: GROUP, name: 'Preparación', required: true, minSelect: 1, maxSelect: 1, sortOrder: 0, options: [{ id: OPTION, name: 'Integral', priceDeltaCents: 100, sortOrder: 0 }] }] }
 const line: CartLine = { key: '20000000-0000-4000-8000-000000000001', productId: PRODUCT, productName: 'Arroz', productImagePath: null, quantity: 2, notes: 'Sin sal, por favor', unitPriceCents: 1000, quantityPrices: [], selectedOptions: [{ id: OPTION, groupName: 'Preparación', name: 'Integral', priceDeltaCents: 100 }] }
 function fixture(products: PublicProduct[] = [product]): PublicMenu {
   return { restaurant: { id: '30000000-0000-4000-8000-000000000001', slug: 'mozzi', name: 'Mozzi', tradeName: 'Mozzi', description: '', address: 'Calle Uno', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', pickupEnabled: true, deliveryEnabled: false, isOpen: true, minimumOrderCents: 0, whatsappPhone: '+5493492123456', currencyCode: 'ARS', locale: 'es-AR', logoPath: null, coverPath: null, primaryColor: '#000000', secondaryColor: '#ffffff', defaultPreparationMinutes: 30, nextOpeningAt: null }, categories: [{ id: category, name: 'Platos', slug: 'platos', description: '', imagePath: null, sortOrder: 0, products }], paymentMethods: [], deliveryZones: [], businessHours: [], specialHours: [] }
 }
-function app() { return <MemoryRouter initialEntries={['/r/mozzi/carrito']}><CartProvider><Routes><Route path="/r/:restaurantSlug/carrito" element={<CartPage />} /><Route path="/r/:restaurantSlug/checkout" element={<p>Checkout habilitado</p>} /></Routes></CartProvider></MemoryRouter> }
+let queryClient: QueryClient
+function app() { return <QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/r/mozzi/carrito']}><CartProvider><Routes><Route path="/r/:restaurantSlug/carrito" element={<CartPage />} /><Route path="/r/:restaurantSlug/checkout" element={<p>Checkout habilitado</p>} /></Routes></CartProvider></MemoryRouter></QueryClientProvider> }
 function stored(): CartLine[] { return JSON.parse(localStorage.getItem('mozzi:cart:mozzi')!) }
 
 describe('cart validation and deliberate reconfiguration', () => {
   beforeEach(() => {
-    localStorage.clear(); mocks.menu = fixture(); mocks.fetching = false; mocks.updatedAt = 1
+    localStorage.clear(); mocks.menu = fixture(); mocks.groupProducts = [product]; mocks.fetching = false; mocks.updatedAt = 1
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     localStorage.setItem('mozzi:cart:mozzi', JSON.stringify([line]))
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', '') } })
     Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); this.dispatchEvent(new Event('close')) } })
@@ -106,10 +123,11 @@ describe('cart validation and deliberate reconfiguration', () => {
     const family = { id: '50000000-0000-4000-8000-000000000001', name: 'Funda', description: '', imagePath: null, axes: ['Color'] }
     const black: PublicProduct = { ...product, name: 'Negro', family, variantAttributes: { Color: 'Negro' }, optionGroups: [] }
     const blue: PublicProduct = { ...black, id: '50000000-0000-4000-8000-000000000002', name: 'Azul', basePriceCents: 1500, variantAttributes: { Color: 'Azul' } }
-    mocks.menu = fixture([black, blue])
+    mocks.menu = fixture([black])
+    mocks.groupProducts = [black, blue]
     mocks.menu.restaurant.channel = 'store'
     localStorage.setItem('mozzi:cart:store:mozzi', JSON.stringify([{ ...line, productName: 'Funda · Negro', selectedOptions: [] }]))
-    render(<MemoryRouter initialEntries={['/t/mozzi/carrito']}><CartProvider><Routes><Route path="/t/:restaurantSlug/carrito" element={<CartPage />} /></Routes></CartProvider></MemoryRouter>)
+    render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/t/mozzi/carrito']}><CartProvider><Routes><Route path="/t/:restaurantSlug/carrito" element={<CartPage />} /></Routes></CartProvider></MemoryRouter></QueryClientProvider>)
     await userEvent.click(await screen.findByRole('button', { name: /Editar Funda/ }))
     const selector = screen.getByLabelText('Elegí tu variante')
     expect(within(selector).getAllByRole('option')).toHaveLength(2)

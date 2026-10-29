@@ -1,35 +1,51 @@
 import { ArrowLeft, ArrowRight, Check, Clock3, Package, Search, ShoppingBag, Store, Truck, X } from 'lucide-react'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Link, useParams } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
-import { groupCatalogProducts, productVariants, variantLabel } from '../../lib/catalog-presentation'
 import { commercePath } from '../../lib/commerce-channel'
 import { currentProductPrice, formatMoney } from '../../lib/money'
-import { publicAssetUrl } from '../../lib/supabase/client'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { queryKeys } from '../../lib/queryKeys'
+import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import type { PublicProduct } from '../../types/domain'
 import { useCart } from '../cart/CartProvider'
 import { ProductDialog } from '../public-menu/ProductDialog'
 import { RestaurantHoursDialog } from '../public-menu/RestaurantHoursDialog'
-import { usePublicMenu } from '../public-menu/usePublicMenu'
+import { fetchPublicCatalogGroup } from '../public-menu/api'
+import { usePublicCatalog } from '../public-menu/usePublicCatalog'
 import { readPaymentRecovery } from './payment-recovery'
 import './public-store.css'
 
+const INITIAL_VISIBLE_GROUPS = 12
+
 function ProductImage({ product, detail = false }: { product: PublicProduct; detail?: boolean }) {
-  const url = publicAssetUrl(product.family?.imagePath ?? product.imagePath)
-  return url ? <img src={url} alt={detail ? product.family?.name ?? product.name : ''} loading={detail ? 'eager' : 'lazy'} /> : (
+  const image = responsiveAssetUrls(product.family?.imagePath ?? product.imagePath)
+  return image.src ? <img src={image.src} srcSet={image.srcSet} sizes={detail ? '(min-width: 900px) 50vw, 100vw' : '(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw'} alt={detail ? product.family?.name ?? product.name : ''} loading={detail ? 'eager' : 'lazy'} decoding="async" /> : (
     <div className="store-image-placeholder" aria-label="Imagen no disponible" role="img"><Package aria-hidden /><span>Imagen no disponible</span></div>
   )
 }
 
 export function PublicStorePage() {
   const { restaurantSlug, productId } = useParams()
-  const query = usePublicMenu(restaurantSlug, 'store')
   const cart = useCart()
   const { activateRestaurant, reconcileProducts } = cart
   const [search, setSearch] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [selected, setSelected] = useState<PublicProduct | null>(null)
   const [showHours, setShowHours] = useState(false)
+  const debouncedSearch = useDebouncedValue(search, 300)
+  const catalog = usePublicCatalog(restaurantSlug, 'store', categoryId, debouncedSearch)
+  const filterKey = `${restaurantSlug ?? ''}:${categoryId}:${debouncedSearch.trim()}`
+  const [visibleState, setVisibleState] = useState({ key: filterKey, count: INITIAL_VISIBLE_GROUPS })
+  const visibleCount = visibleState.key === filterKey ? visibleState.count : INITIAL_VISIBLE_GROUPS
+  const groupQuery = useQuery({
+    queryKey: queryKeys.publicCatalog.group(restaurantSlug, 'store', productId),
+    queryFn: () => fetchPublicCatalogGroup(restaurantSlug ?? '', productId ?? '', 'store'),
+    enabled: Boolean(restaurantSlug && productId),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: 1,
+  })
 
   useEffect(() => {
     if (restaurantSlug) activateRestaurant(restaurantSlug, 'store')
@@ -39,22 +55,23 @@ export function PublicStorePage() {
     setShowHours(false)
   }, [restaurantSlug, activateRestaurant])
   useEffect(() => {
-    if (query.data && cart.restaurantSlug === restaurantSlug && cart.channel === 'store') reconcileProducts(query.data.categories.flatMap(category => category.products))
-  }, [query.data, query.dataUpdatedAt, cart.restaurantSlug, cart.channel, restaurantSlug, reconcileProducts])
+    if (catalog.meta.data && cart.restaurantSlug === restaurantSlug && cart.channel === 'store') reconcileProducts(catalog.groups.flatMap((group) => group.variants))
+  }, [catalog.groups, catalog.meta.data, cart.restaurantSlug, cart.channel, restaurantSlug, reconcileProducts])
 
-  if (query.isLoading) return <LoadingScreen label="Preparando la tienda…" />
-  if (!query.data) return <main className="page-shell py-16"><ErrorPanel title="Tienda no disponible">No encontramos una tienda publicada con esta dirección.<button className="button-secondary mt-4" onClick={() => void query.refetch()}>Reintentar</button></ErrorPanel></main>
+  if (catalog.isLoading || (productId && groupQuery.isLoading)) return <LoadingScreen label="Preparando la tienda…" />
+  if (!catalog.meta.data || !catalog.pages.data) return <main className="page-shell py-16"><ErrorPanel title="Tienda no disponible">No encontramos una tienda publicada con esta dirección.<button className="button-secondary mt-4" onClick={() => void Promise.all([catalog.meta.refetch(), catalog.pages.refetch()])}>Reintentar</button></ErrorPanel></main>
 
-  const { restaurant, categories } = query.data
-  const products = categories.flatMap(category => category.products)
-  const detail = productId ? products.find(product => product.id === productId || product.family?.id === productId) : null
-  const detailVariants = detail ? productVariants(detail, products) : []
+  const { restaurant, categories } = catalog.meta.data
+  const detailGroup = productId ? groupQuery.data?.group : null
+  const detailVariants = detailGroup?.variants ?? []
+  const detail = detailGroup ? { ...detailVariants[0]!, family: detailGroup.family ?? detailVariants[0]!.family } : null
   const availableVariants = detailVariants.filter(variant => variant.available)
-  const phrase = search.trim().toLocaleLowerCase('es')
-  const visible = groupCatalogProducts(products.filter(product => (!categoryId || product.categoryId === categoryId) && `${product.family?.name ?? ''} ${product.name} ${product.family?.description ?? ''} ${product.description} ${product.code} ${variantLabel(product)}`.toLocaleLowerCase('es').includes(phrase)))
+  const phrase = debouncedSearch.trim()
+  const visibleGroups = catalog.groups.slice(0, visibleCount)
+  const visible = visibleGroups.map((group) => ({ ...group.variants[0]!, family: group.family ?? group.variants[0]!.family }))
   const hasFilters = Boolean(search || categoryId)
-  const cover = publicAssetUrl(restaurant.coverPath)
-  const logo = publicAssetUrl(restaurant.logoPath)
+  const cover = responsiveAssetUrls(restaurant.coverPath)
+  const logo = responsiveAssetUrls(restaurant.logoPath)
   const money = (amount: number) => formatMoney(amount, restaurant.currencyCode, restaurant.locale)
   const acceptsOrders = restaurant.acceptsOrders ?? restaurant.isOpen
   const recovery = readPaymentRecovery(restaurant.slug)
@@ -62,6 +79,15 @@ export function PublicStorePage() {
   const itemCount = isCurrentCart ? cart.itemCount : 0
   const storePath = commercePath(restaurant.slug, 'store')
   const clearFilters = () => { setSearch(''); setCategoryId('') }
+  const hasMoreProducts = visibleCount < catalog.groups.length || catalog.pages.hasNextPage
+  const loadMoreProducts = () => {
+    if (visibleCount < catalog.groups.length) {
+      setVisibleState({ key: filterKey, count: Math.min(catalog.groups.length, visibleCount + 12) })
+      return
+    }
+    setVisibleState({ key: filterKey, count: visibleCount + 24 })
+    if (catalog.pages.hasNextPage) void catalog.pages.fetchNextPage()
+  }
 
   return <div className="public-store" style={{ '--brand': restaurant.primaryColor } as CSSProperties}>
     <a href="#store-catalog" className="store-skip-link">Ir a los productos</a>
@@ -69,14 +95,14 @@ export function PublicStorePage() {
       <div className="page-shell">
         <div className="store-topbar">
           <Link to={storePath} className="store-identity">
-            <span className="store-logo">{logo ? <img src={logo} alt="" /> : <Store aria-hidden />}</span>
+            <span className="store-logo">{logo.src ? <img src={logo.src} srcSet={logo.srcSet} sizes="96px" decoding="async" alt="" /> : <Store aria-hidden />}</span>
             <div className="min-w-0"><span className="store-eyebrow">Tienda online</span><h1>{restaurant.tradeName}</h1></div>
           </Link>
           <Link to={commercePath(restaurant.slug, 'store', '/carrito')} className="store-cart-link" aria-label={`Ver carrito, ${itemCount} productos`}>
             <ShoppingBag aria-hidden /><span className="hidden sm:inline">Carrito</span><span className="store-cart-count">{itemCount}</span>
           </Link>
         </div>
-        <div className={`store-intro ${cover ? 'store-intro-with-cover' : ''}`}>
+        <div className={`store-intro ${cover.src ? 'store-intro-with-cover' : ''}`}>
           <div className="store-intro-content">
             {restaurant.description ? <p className="store-description">{restaurant.description}</p> : null}
             <div className="store-attention">
@@ -88,7 +114,7 @@ export function PublicStorePage() {
               {restaurant.deliveryEnabled ? <span><Truck aria-hidden />Envíos locales</span> : null}
             </div> : null}
           </div>
-          {cover ? <img className="store-cover" src={cover} alt="" /> : null}
+          {cover.src ? <img className="store-cover" src={cover.src} srcSet={cover.srcSet} sizes="(min-width: 1024px) 50vw, 100vw" decoding="async" fetchPriority="high" alt="" /> : null}
         </div>
       </div>
     </header>
@@ -100,6 +126,8 @@ export function PublicStorePage() {
         <ArrowRight aria-hidden />
       </Link> : null}
 
+      {catalog.isUpdating ? <p className="mb-3 text-sm text-stone-500" role="status">Actualizando…</p> : null}
+      {catalog.refreshError ? <p className="mb-3 text-sm text-amber-800" role="status">No se pudo actualizar ahora. Seguís viendo la última versión disponible.</p> : null}
       {productId ? detail ? <section aria-labelledby="store-product-title">
         <Link className="store-back" to={storePath}><ArrowLeft aria-hidden />Todos los productos</Link>
         <div className="store-product-detail">
@@ -138,8 +166,8 @@ export function PublicStorePage() {
         </nav> : null}
         {hasFilters ? <div className="store-active-filters"><p>{categoryId ? categories.find(category => category.id === categoryId)?.name : 'Todos los productos'}{phrase ? <> · “{search.trim()}”</> : null}</p><button onClick={clearFilters}>Limpiar filtros<X aria-hidden /></button></div> : null}
 
-        {visible.length ? <div className={`store-grid ${visible.length === 1 ? 'is-single' : ''}`}>{visible.map(product => {
-          const variants = productVariants(product, products)
+        {visible.length ? <><div className={`store-grid ${visible.length === 1 ? 'is-single' : ''}`}>{visible.map((product, index) => {
+          const variants = visibleGroups[index]!.variants
           const available = variants.some(variant => variant.available)
           const price = Math.min(...variants.map(variant => currentProductPrice(variant)))
           return <article key={product.family?.id ?? product.id} className="store-product-card">
@@ -152,7 +180,7 @@ export function PublicStorePage() {
               </div>
             </Link>
           </article>
-        })}</div> : <section className="store-empty" aria-labelledby="store-empty-title">
+        })}</div>{hasMoreProducts ? <div className="mt-7 flex justify-center"><button type="button" className="button-secondary min-w-44" disabled={catalog.pages.isFetchingNextPage} onClick={loadMoreProducts}>{catalog.pages.isFetchingNextPage ? 'Cargando…' : 'Ver más productos'}</button></div> : null}</> : <section className="store-empty" aria-labelledby="store-empty-title">
           <span className="store-empty-icon">{hasFilters ? <Search aria-hidden /> : <Package aria-hidden />}</span>
           <h3 id="store-empty-title">{hasFilters ? 'No encontramos productos' : 'El catálogo está en preparación'}</h3>
           <p>{hasFilters ? 'Probá con otro nombre, modelo o color, o explorá todas las categorías.' : 'Este comercio todavía no tiene productos publicados. Volvé a visitarnos más adelante.'}</p>
@@ -162,7 +190,7 @@ export function PublicStorePage() {
     </main>
 
     {itemCount > 0 ? <div className="store-cart-dock"><Link to={commercePath(restaurant.slug, 'store', '/carrito')}><span><ShoppingBag aria-hidden />Ver carrito · {itemCount}</span><span>{money(cart.subtotalCents)}<ArrowRight aria-hidden /></span></Link></div> : null}
-    {selected ? <ProductDialog product={selected} variants={productVariants(selected, products)} restaurant={restaurant} onClose={() => setSelected(null)} onAdd={line => { cart.addLine(line); setSelected(null) }} /> : null}
-    {showHours ? <RestaurantHoursDialog restaurantName={restaurant.tradeName} timeZone={restaurant.timezone} locale={restaurant.locale} businessHours={query.data.businessHours} specialHours={query.data.specialHours} onClose={() => setShowHours(false)} /> : null}
+    {selected ? <ProductDialog product={selected} variants={detailVariants} restaurant={restaurant} onClose={() => setSelected(null)} onAdd={line => { cart.addLine(line); setSelected(null) }} /> : null}
+    {showHours ? <RestaurantHoursDialog restaurantName={restaurant.tradeName} timeZone={restaurant.timezone} locale={restaurant.locale} businessHours={catalog.meta.data.businessHours} specialHours={catalog.meta.data.specialHours} onClose={() => setShowHours(false)} /> : null}
   </div>
 }

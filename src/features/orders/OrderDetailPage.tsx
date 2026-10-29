@@ -6,6 +6,7 @@ import { Link, useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
@@ -120,6 +121,7 @@ export function OrderDetailPage() {
       client.invalidateQueries({ queryKey: ['dashboard-orders', order.restaurant_id] }),
       client.invalidateQueries({ queryKey: ['inventory', order.restaurant_id] }),
       client.invalidateQueries({ queryKey: ['claim-order', order.action_id] }),
+      invalidateCatalogQueries(client, order.restaurant_id),
     ])
   }
 

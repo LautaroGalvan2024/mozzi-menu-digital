@@ -56,9 +56,12 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean }
     }]
     else if (request.method() === 'GET' && ['/rest/v1/order_events', '/rest/v1/order_item_options'].includes(path)) body = []
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_by_action') body = { replacementOrderId: null, inventoryOperations: [] }
-    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory') body = {
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_overview') body = {
       policy: { mode: options.inventoryCounting ? 'paused' : 'enforced', version: '1', activatedAt: '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
-      items: ['Funda negra', 'Funda roja', 'Cable USB'].map((name, index) => ({ productId: '28000000-0000-4000-8000-00000000000' + (index + 1), name, code: 'PROD-00' + index, initialized: true, onHand: '10', reserved: '2', available: '8', version: '1' })), nextCursor: null, operations: [],
+      operations: [],
+    }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_items') body = {
+      items: ['Funda negra', 'Funda roja', 'Cable USB'].map((name, index) => ({ productId: '28000000-0000-4000-8000-00000000000' + (index + 1), name, code: 'PROD-00' + index, archived: false, initialized: true, onHand: '10', reserved: '2', available: '8', version: '1' })), nextCursor: null,
     }
     else {
       unexpected.push(`${request.method()} ${path}`)

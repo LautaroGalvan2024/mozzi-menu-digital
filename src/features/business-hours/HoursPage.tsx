@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { supabase } from '../../lib/supabase/client'
 import { dateInTimeZone } from '../../lib/timezone'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
@@ -70,7 +71,7 @@ export function HoursPage() {
       setDraft(null);setSpecials(null)
       await Promise.all([
         queryClient.invalidateQueries({queryKey:['hours',restaurantId]}),
-        queryClient.invalidateQueries({queryKey:['public-menu']}),
+        invalidateCatalogQueries(queryClient,restaurantId),
       ])
       setMessage('Horarios guardados. Se aplican según la zona horaria del comercio.')
     }catch{
