@@ -130,6 +130,23 @@ describe('new product route', () => {
     expect(screen.queryByRole('heading', { name: 'Listado de productos' })).not.toBeInTheDocument()
   })
 
+  it('saves a threshold and keeps bundle configuration when switching modes', async () => {
+    const user = userEvent.setup()
+    mockExistingProduct(() => [{ id: '50000000-0000-4000-8000-000000000001', quantity: 2, total_price_cents: 18000 }])
+    renderExistingProductRoute(existingId)
+    await screen.findByLabelText('Nombre')
+    await openSection('Promociones y precios especiales')
+    await user.selectOptions(screen.getByLabelText('Modalidad por cantidad'), 'threshold')
+    await user.type(screen.getByLabelText('Precio unitario desde el mínimo'), '80')
+    await user.selectOptions(screen.getByLabelText('Modalidad por cantidad'), 'bundles')
+    expect(screen.getByLabelText('Precio total para 2 unidades')).toHaveValue(180)
+    await user.selectOptions(screen.getByLabelText('Modalidad por cantidad'), 'threshold')
+    expect(screen.getByLabelText('Precio unitario desde el mínimo')).toHaveValue(80)
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog_with_stock', expect.objectContaining({ p_product: expect.objectContaining({ quantityThreshold: { minimumQuantity: 3, unitPriceCents: 8000 } }) }))
+    expect(mocks.rpc.mock.calls[0]?.[1].p_product).not.toHaveProperty('quantityPrices')
+  })
+
   it('keeps essentials visible and optional configuration folded until requested', async () => {
     renderNewProductRoute()
     expect(await screen.findByLabelText('Nombre')).toBeVisible()

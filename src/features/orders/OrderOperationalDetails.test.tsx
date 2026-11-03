@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,12 +14,14 @@ const PAYMENT_ID = '40000000-0000-4000-8000-000000000001'
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
+  realtime: vi.fn(),
+  removeChannel: vi.fn(),
   selectRestaurant: vi.fn(),
   role: 'restaurant_admin' as 'restaurant_admin' | 'order_manager',
 }))
 
 vi.mock('../../lib/supabase/client', () => ({
-  supabase: { from: mocks.from, rpc: mocks.rpc },
+  supabase: { from: mocks.from, rpc: mocks.rpc, channel: () => ({ on(...args: unknown[]) { mocks.realtime(...args); return this }, subscribe() { return this } }), removeChannel: mocks.removeChannel },
 }))
 
 vi.mock('../restaurants/RestaurantScope', () => ({
@@ -44,13 +46,13 @@ vi.mock('../restaurants/RestaurantScope', () => ({
 
 function wrapper(initialEntry: string, path: string, element: React.ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  return { queryClient, ...render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes><Route path={path} element={element} /></Routes>
       </MemoryRouter>
     </QueryClientProvider>,
-  )
+  ) }
 }
 
 const claimOrder = {
@@ -156,6 +158,8 @@ describe('operational order details', () => {
     mocks.from.mockReset()
     mocks.rpc.mockReset()
     mocks.selectRestaurant.mockReset()
+    mocks.realtime.mockReset()
+    mocks.removeChannel.mockReset()
   })
 
   it('renders the frozen variant attributes without changing the historical item title', async () => {
@@ -178,7 +182,7 @@ describe('operational order details', () => {
     fireEvent.click(button)
     fireEvent.click(button)
     expect(mocks.rpc.mock.calls.filter(([name]) => name === 'claim_order')).toHaveLength(1)
-    finish?.({ data: { claimed: true, alreadyClaimed: false }, error: null })
+    finish?.({ data: { claimed: true, alreadyClaimed: false, status: 'accepted' }, error: null })
     expect(await screen.findByRole('status')).toHaveTextContent('todavía no se descontó la existencia física')
   })
 
@@ -190,6 +194,81 @@ describe('operational order details', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Aceptar y reservar' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('No hay stock disponible suficiente')
     expect(screen.getByRole('alert')).not.toHaveTextContent('private')
+  })
+
+  it.each(['restaurant_admin', 'order_manager'] as const)('lets %s accept and reserve directly from the detail', async role => {
+    mocks.role = role
+    const order = setupInventoryOrder('whatsapp_opened')
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name !== 'claim_order') return { data: inventoryDetail, error: null }
+      order.status = 'accepted'
+      return { data: { claimed: true, alreadyClaimed: false, status: 'accepted' }, error: null }
+    })
+    const { queryClient } = wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    const otherKeys = [['claim-order', ACTION_ID], ['orders', RESTAURANT_ID], ['dashboard-orders', RESTAURANT_ID], ['inventory-overview', RESTAURANT_ID], ['inventory-items', RESTAURANT_ID, '']]
+    for (const key of otherKeys) queryClient.setQueryData(key, { cached: true })
+    fireEvent.click(await screen.findByRole('button', { name: 'Aceptar y reservar' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Aceptar y reservar' })).not.toBeInTheDocument())
+    expect(mocks.rpc).toHaveBeenCalledWith('claim_order', { p_action_id: ACTION_ID })
+    expect(screen.getByRole('status')).toHaveTextContent('todavía no se descontó la existencia física')
+    for (const key of otherKeys) expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+
+  it.each(['expired', 'cancelled'] as const)('reports an order that became %s without claiming it was accepted', async status => {
+    const order = { ...claimOrder, inventoryTracked: true }
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name !== 'claim_order') return { data: order, error: null }
+      order.status = status
+      return { data: { claimed: false, alreadyClaimed: false, status }, error: null }
+    })
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Aceptar y reservar' }))
+    expect(await screen.findByRole('status')).toHaveTextContent(status === 'expired' ? 'está expirado' : 'está cancelado')
+    expect(screen.getByRole('status')).not.toHaveTextContent('ya había sido aceptado')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Aceptar y reservar' })).not.toBeInTheDocument())
+  })
+
+  it('refreshes an open detail when the WhatsApp entry point accepts the order', async () => {
+    const order = setupInventoryOrder('generated')
+    mocks.rpc.mockResolvedValue({ data: inventoryDetail, error: null })
+    const view = wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    await screen.findByRole('button', { name: 'Aceptar y reservar' })
+    const [, filter, notify] = mocks.realtime.mock.calls.at(-1)!
+    expect(filter).toMatchObject({ table: 'orders', filter: `id=eq.${ORDER_ID}` })
+    order.status = 'accepted'
+    await act(async () => { notify({ new: { action_id: ACTION_ID } }) })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Aceptar y reservar' })).not.toBeInTheDocument())
+    expect(mocks.rpc.mock.calls.filter(([name]) => name === 'claim_order')).toHaveLength(0)
+    view.unmount()
+    expect(mocks.removeChannel).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes an open WhatsApp link when the administrator accepts the order', async () => {
+    const order = { ...claimOrder, inventoryTracked: true }
+    mocks.rpc.mockImplementation(async () => ({ data: order, error: null }))
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    await screen.findByRole('button', { name: 'Aceptar y reservar' })
+    const notify = mocks.realtime.mock.calls.at(-1)![2]
+    order.status = 'accepted'
+    await act(async () => { notify({ new: { action_id: ACTION_ID } }) })
+    expect(await screen.findByRole('heading', { name: 'Aceptado' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Aceptar y reservar' })).not.toBeInTheDocument()
+  })
+
+  it.each(['pending', 'rejected', 'refunded'])('prevents accepting an online payment in state %s', async paymentStatus => {
+    mocks.rpc.mockResolvedValue({ data: { ...claimOrder, checkoutMode: 'online', paymentStatus, inventoryTracked: true }, error: null })
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    await screen.findByRole('heading', { name: 'Resumen' })
+    expect(screen.queryByRole('button', { name: /Aceptar/ })).not.toBeInTheDocument()
+  })
+
+  it('uses the existing payment reservation when accepting an approved online order', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'claim_order'
+      ? { claimed: true, alreadyClaimed: false, status: 'accepted' }
+      : { ...claimOrder, checkoutMode: 'online', paymentStatus: 'approved', inventoryTracked: true }, error: null }))
+    wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Aceptar para preparar' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Se conserva la reserva del pago')
   })
 
   it('requires physical receipt confirmation and sends one delivery on double click', async () => {

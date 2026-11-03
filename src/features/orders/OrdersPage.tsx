@@ -1,5 +1,5 @@
 import { AdminOrderStatus } from './CommerceOrderStatus'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Download, Eye, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
@@ -17,6 +17,8 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { adminOrderSchema, statusLabel, type AdminOrderRow } from './orderSchemas'
 import { OrderWhatsAppAction } from './OrderWhatsAppAction'
+import { OrderAcceptAction } from './OrderAcceptAction'
+import { acceptanceOrder, useOrderUpdates } from './orderAcceptance'
 import { orderCommercialReport } from './inventoryOrder'
 
 const PAGE_SIZE = 25
@@ -29,7 +31,6 @@ export function orderDateRangeError(from: string, to: string) {
 export function OrdersPage() {
   const scope = useRestaurantScope()
   const restaurant = useRestaurant(scope.selected?.id)
-  const client = useQueryClient()
   const [page, setPage] = useState(0)
   const [status, setStatus] = useState<'' | AdminOrderRow['status']>('')
   const [fulfillment, setFulfillment] = useState<'' | AdminOrderRow['fulfillment_type']>('')
@@ -40,6 +41,7 @@ export function OrdersPage() {
   const [dates, setDates] = useState({ restaurantId: '', from: '', to: '' })
   const restaurantId = scope.selected?.id
   const restaurantTimeZone = restaurant.data?.timezone
+  useOrderUpdates(restaurantId)
 
   useEffect(() => {
     if (!restaurantId || !restaurantTimeZone) return
@@ -93,29 +95,6 @@ export function OrdersPage() {
       return { rows: z.array(adminOrderSchema).parse(data), count: count ?? 0 }
     },
   })
-
-  useEffect(() => {
-    if (!scope.selected) return
-    const channel = supabase
-      .channel(`orders:${scope.selected.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
-          filter: `restaurant_id=eq.${scope.selected.id}`,
-        },
-        () => {
-          void client.invalidateQueries({ queryKey: queryKeys.orders(scope.selected?.id) })
-          void client.invalidateQueries({ queryKey: queryKeys.dashboardOrders(scope.selected?.id) })
-        },
-      )
-      .subscribe()
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [client, scope.selected])
 
   if (!scope.selected) return <ErrorPanel>Falta seleccionar un comercio.</ErrorPanel>
   if (restaurant.error || query.error) {
@@ -185,7 +164,7 @@ export function OrdersPage() {
       <PageHeader
         eyebrow="Tiempo real"
         title="Pedidos"
-        description="Consultá tus pedidos y contactá a cada cliente."
+        description="Aceptá tus pedidos, reservá las unidades y contactá a cada cliente."
         actions={
           <button
             className="button-secondary"
@@ -308,13 +287,13 @@ export function OrdersPage() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td className="font-display font-bold text-stone-950">{row.display_number}</td>
+                    <td className="whitespace-nowrap font-display font-bold text-stone-950">{row.display_number}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
                     <td><AdminOrderStatus order={row} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
-                    <td><div className="flex items-center justify-end gap-1"><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
+                    <td><div className="flex flex-wrap items-center justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -346,7 +325,7 @@ export function OrdersPage() {
                   </strong>
                 </div>
                 </Link>
-                <div className="mt-3 flex justify-end"><OrderWhatsAppAction order={row} businessName={businessName} showLabel /></div>
+                <div className="mt-3 flex flex-wrap items-start justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} showLabel /></div>
               </article>
             ))}
           </div>

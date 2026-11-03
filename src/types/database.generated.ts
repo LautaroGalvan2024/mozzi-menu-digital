@@ -1215,6 +1215,8 @@ export type Database = {
       }
       products: {
         Row: {
+          quantity_threshold_minimum: number | null
+          quantity_threshold_unit_price_cents: number | null
           active: boolean
           available: boolean
           base_price_cents: number
@@ -1239,6 +1241,8 @@ export type Database = {
           variant_attributes: Json
         }
         Insert: {
+          quantity_threshold_minimum?: number | null
+          quantity_threshold_unit_price_cents?: number | null
           active?: boolean
           available?: boolean
           base_price_cents: number
@@ -1263,6 +1267,8 @@ export type Database = {
           variant_attributes?: Json
         }
         Update: {
+          quantity_threshold_minimum?: number | null
+          quantity_threshold_unit_price_cents?: number | null
           active?: boolean
           available?: boolean
           base_price_cents?: number

@@ -1,10 +1,11 @@
-import type { CartLine, QuantityPrice } from '../types/domain'
+import type { CartLine, QuantityPrice, QuantityThreshold } from '../types/domain'
 
 export interface QuantityPricingBreakdown {
   productSubtotalCents: number
   optionsSubtotalCents: number
   totalCents: number
   appliedQuantityPrices: Array<QuantityPrice & { uses: number }>
+  appliedQuantityThreshold?: QuantityThreshold
 }
 
 interface PricingBundle extends QuantityPrice {
@@ -30,11 +31,13 @@ export function calculateQuantityPricing({
   quantity,
   unitPriceCents,
   quantityPrices,
+  quantityThreshold = null,
   optionUnitCents = 0,
 }: {
   quantity: number
   unitPriceCents: number
   quantityPrices: readonly QuantityPrice[]
+  quantityThreshold?: QuantityThreshold | null
   optionUnitCents?: number
 }): QuantityPricingBreakdown {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
@@ -42,6 +45,21 @@ export function calculateQuantityPricing({
   }
   assertSafeMoney(unitPriceCents, 'El precio unitario')
   assertSafeMoney(optionUnitCents, 'El adicional unitario')
+
+  if (quantityThreshold) {
+    if (!Number.isInteger(quantityThreshold.minimumQuantity) || quantityThreshold.minimumQuantity < 2 || quantityThreshold.minimumQuantity > 100) {
+      throw new RangeError('La cantidad mínima debe estar entre 2 y 100.')
+    }
+    assertSafeMoney(quantityThreshold.unitPriceCents, 'El precio unitario por cantidad')
+    const applied = quantity >= quantityThreshold.minimumQuantity && quantityThreshold.unitPriceCents < unitPriceCents
+    const productSubtotalCents = quantity * (applied ? quantityThreshold.unitPriceCents : unitPriceCents)
+    const optionsSubtotalCents = quantity * optionUnitCents
+    const totalCents = productSubtotalCents + optionsSubtotalCents
+    assertSafeMoney(productSubtotalCents, 'El subtotal del producto')
+    assertSafeMoney(optionsSubtotalCents, 'El subtotal de adicionales')
+    assertSafeMoney(totalCents, 'El total de la línea')
+    return { productSubtotalCents, optionsSubtotalCents, totalCents, appliedQuantityPrices: [], ...(applied ? { appliedQuantityThreshold: quantityThreshold } : {}) }
+  }
 
   const bundles: PricingBundle[] = [{ quantity: 1, totalPriceCents: unitPriceCents, isUnit: true }]
   const seenQuantities = new Set<number>()
@@ -97,16 +115,21 @@ export function calculateQuantityPricing({
   }
 }
 
-export function calculateCartLineTotal(line: CartLine) {
+export function calculateCartLinePricing(line: CartLine) {
   return calculateQuantityPricing({
     quantity: line.quantity,
     unitPriceCents: line.unitPriceCents,
     quantityPrices: line.quantityPrices,
+    quantityThreshold: line.quantityThreshold ?? null,
     optionUnitCents: line.selectedOptions.reduce(
       (total, option) => total + option.priceDeltaCents,
       0,
     ),
-  }).totalCents
+  })
+}
+
+export function calculateCartLineTotal(line: CartLine) {
+  return calculateCartLinePricing(line).totalCents
 }
 
 /**

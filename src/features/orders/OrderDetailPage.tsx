@@ -6,13 +6,14 @@ import { Link, useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
-import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { adminOrderSchema, eventSchema, itemOptionSchema, itemSchema } from './orderSchemas'
 import { StatusPill } from './OrderStatus'
 import { OrderWhatsAppAction } from './OrderWhatsAppAction'
+import { OrderAcceptAction } from './OrderAcceptAction'
+import { acceptanceOrder, invalidateOrderQueries, useOrderUpdates } from './orderAcceptance'
 import { clearReverseAttempt, inventoryDetailSchema, inventoryOrderError, inventoryOutcomeLabel, isReversed, loadReverseAttempt, saveReverseAttempt, type ReverseAttempt } from './inventoryOrder'
 
 export function OrderDetailPage() {
@@ -90,6 +91,7 @@ export function OrderDetailPage() {
       return { order, items, options, events: z.array(eventSchema).parse(eventsResult.data), inventory }
     },
   })
+  useOrderUpdates(query.data?.order.restaurant_id, query.data?.order.id, query.data?.order.action_id)
   const replacements = useQuery({
     queryKey: ['order-replacements', scope.selected?.id, orderId, replacementSearch],
     enabled: Boolean(isAdmin && query.data && isReversed(query.data.order) && !query.data.inventory.replacementOrderId),
@@ -115,17 +117,7 @@ export function OrderDetailPage() {
   }
 
   async function refreshOrder() {
-    await Promise.all([
-      // Replacement/reversal operations can update more than the order that is
-      // currently open, so stale every detail and candidate list for this tenant.
-      client.invalidateQueries({ queryKey: ['order-detail', order.restaurant_id] }),
-      client.invalidateQueries({ queryKey: ['order-replacements', order.restaurant_id] }),
-      client.invalidateQueries({ queryKey: ['orders', order.restaurant_id] }),
-      client.invalidateQueries({ queryKey: ['dashboard-orders', order.restaurant_id] }),
-      client.invalidateQueries({ queryKey: ['inventory', order.restaurant_id] }),
-      client.invalidateQueries({ queryKey: ['claim-order', order.action_id] }),
-      invalidateCatalogQueries(client, order.restaurant_id),
-    ])
+    await invalidateOrderQueries(client, order.restaurant_id, order.action_id)
   }
 
   async function mutate(name: 'complete_order' | 'cancel_order') {
@@ -206,7 +198,7 @@ export function OrderDetailPage() {
     {error ? <p className="form-error mb-5" role="alert">{error}</p> : null}
     <section className="admin-toolbar mb-5 flex flex-wrap items-center justify-between gap-4" aria-label="Estado del pedido">
       <div>{!isPaidAwaitingPreparation(order) ? <StatusPill status={order.status} outcome={order.inventory_outcome} /> : null}<CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={isPaidAwaitingPreparation(order)} /></div>
-      {order.status === 'generated' && order.checkout_mode === 'online' && order.payment_status === 'approved' ? <Link className="button-primary" to={`/admin/pedidos/tomar/${order.action_id}`}>Aceptar para preparar</Link> : null}
+      <OrderAcceptAction key={order.id} order={acceptanceOrder(order)} showDescription disabled={busy} />
     </section>
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
       <div className="space-y-6">
@@ -220,7 +212,9 @@ export function OrderDetailPage() {
               </div>
               {Object.keys(item.variant_attributes_snapshot).length ? <p className="mt-1 text-sm text-stone-600" aria-label="Variante elegida">{Object.entries(item.variant_attributes_snapshot).map(([attribute, value]) => `${attribute}: ${value}`).join(' · ')}</p> : null}
               {options.filter((option) => option.order_item_id === item.id).map((option) => <p key={option.id} className="mt-1 pl-4 text-sm text-stone-600">· {option.group_name_snapshot}: {option.option_name_snapshot}{Number(option.price_delta_cents) ? ` (+${formatMoney(option.price_delta_cents, order.currency_code)})` : ''}</p>)}
-              {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">Promo por cantidad aplicada · base {formatMoney(item.base_subtotal_cents, order.currency_code)}</p> : null}
+              {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">{item.pricing_breakdown_snapshot.quantityPricingType === 'threshold' && item.pricing_breakdown_snapshot.appliedUnitPriceCents !== undefined
+                ? `Desde ${item.pricing_breakdown_snapshot.minimumQuantity} unidades · ${formatMoney(item.pricing_breakdown_snapshot.appliedUnitPriceCents, order.currency_code)} c/u`
+                : `Promo por cantidad aplicada · base ${formatMoney(item.base_subtotal_cents, order.currency_code)}`}</p> : null}
               {item.notes ? <p className="mt-2 text-sm italic text-stone-500">“{item.notes}”</p> : null}
             </article>)}
           </div>

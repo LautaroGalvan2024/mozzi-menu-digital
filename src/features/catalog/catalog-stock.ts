@@ -26,6 +26,7 @@ export function isDefinitiveCatalogError(error: unknown): boolean {
 export function catalogStockError(error: unknown): string {
   const result = z.object({ message: z.string() }).safeParse(error)
   const messages: Record<string, string> = {
+    PRODUCT_QUANTITY_THRESHOLD_INVALID: 'Revisá el precio por cantidad: el mínimo debe estar entre 2 y 100 y el precio unitario debe ser válido.',
     INVENTORY_VERSION_CONFLICT: 'El stock cambió mientras editabas. Revisá las cantidades actualizadas y volvé a ingresar el stock final que querés guardar.',
     INSUFFICIENT_STOCK: 'El stock final no puede ser menor que las unidades reservadas para pedidos. Revisá las cantidades actualizadas.',
     INVENTORY_PAUSED: 'El stock está pausado. Podés guardar los datos del producto sin modificar su stock.',

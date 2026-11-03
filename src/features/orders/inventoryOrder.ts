@@ -44,6 +44,7 @@ const errors: Record<string, string> = {
   INVENTORY_RETURN_QUANTITIES_INVALID: 'Revisá cuántas unidades vendibles reponés de cada producto. No pueden superar la cantidad entregada.',
   INVENTORY_FORBIDDEN: 'No tenés permisos para realizar esta operación.',
   ORDER_NOT_FOUND_OR_FORBIDDEN: 'No se encontró el pedido o no tenés permisos para modificarlo.',
+  PAYMENT_NOT_APPROVED: 'El pago todavía no está aprobado. Actualizá el pedido antes de aceptarlo.',
   IDEMPOTENCY_CONFLICT: 'Este intento ya se usó con otros datos. Recuperá el resultado anterior antes de continuar.',
 }
 export function inventoryOrderError(error: unknown): string {

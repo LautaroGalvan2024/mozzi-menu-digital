@@ -24,7 +24,12 @@ const orders = [paidOrder,
   { ...paidOrder, id: '23000000-0000-4000-8000-000000000003', display_number: 'CM-0003', customer_name: 'Cliente sin teléfono válido', customer_phone: 'sin teléfono' },
 ]
 
-async function adminFixture(page: Page, options: { inventoryCounting?: boolean } = {}) {
+async function adminFixture(page: Page, options: { inventoryCounting?: boolean; whatsappOrders?: boolean; claims?: string[] } = {}) {
+  const currentOrders = orders.map((order, index) => ({ ...order,
+    action_id: `24000000-0000-4000-8000-00000000000${index + 1}`,
+    accepted_by: null as string | null, accepted_at: null as string | null,
+    ...(options.whatsappOrders ? { checkout_mode: 'whatsapp', payment_status: 'unpaid', payment_method_name_snapshot: 'Efectivo' } : {}),
+  }))
   const user = { id: userId, aud: 'authenticated', role: 'authenticated', email: 'admin@example.invalid', app_metadata: {}, user_metadata: {}, factors: [], created_at: new Date().toISOString() }
   // Synthetic local session. All provider requests below are intercepted; no credentials or remote service are used.
   const expiresAt = Math.floor(Date.now() / 1000) + 3600
@@ -48,14 +53,41 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '26000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
-    else if (request.method() === 'GET' && path === '/rest/v1/orders') body = new URL(request.url()).searchParams.has('id') ? paidOrder : orders
+    else if (request.method() === 'GET' && path === '/rest/v1/orders') {
+      const id = new URL(request.url()).searchParams.get('id')?.replace(/^eq\./, '')
+      body = id ? currentOrders.find(order => order.id === id) : currentOrders
+    }
     else if (request.method() === 'GET' && path === '/rest/v1/order_items') body = [{
       id: '27000000-0000-4000-8000-000000000001', order_id: paidOrder.id, product_name_snapshot: 'Funda de silicona', product_code_snapshot: 'FUN-NEGRO', quantity: 1,
       unit_price_cents: 1050000, base_subtotal_cents: 1050000, pricing_mode_snapshot: 'unit', options_total_unit_cents: 0, line_total_cents: 1050000, notes: null,
       pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 1050000, baseSubtotalCents: 1050000, components: [] }, variant_attributes_snapshot: { Modelo: 'iPhone 15', Color: 'Negro' },
     }]
     else if (request.method() === 'GET' && ['/rest/v1/order_events', '/rest/v1/order_item_options'].includes(path)) body = []
-    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_by_action') body = { replacementOrderId: null, inventoryOperations: [] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_by_action') {
+      const order = currentOrders.find(order => order.action_id === request.postDataJSON().p_action_id)!
+      body = {
+        replacementOrderId: null, inventoryOperations: [], id: order.id, restaurantId, actionId: order.action_id,
+        displayNumber: order.display_number, status: order.status, channel: order.channel, checkoutMode: order.checkout_mode,
+        paymentStatus: order.payment_status, inventoryTracked: order.inventory_tracked, inventoryOutcome: order.inventory_outcome,
+        customerName: order.customer_name, customerPhone: order.customer_phone, fulfillmentType: order.fulfillment_type,
+        deliveryAddress: null, deliveryCity: null, deliveryNeighborhood: null, deliveryFloor: null, deliveryApartment: null,
+        deliveryReference: null, customerNotes: null, paymentMethodName: order.payment_method_name_snapshot,
+        paymentInstructions: null, transferAlias: null, subtotalCents: order.subtotal_cents, discountCents: 0,
+        surchargeCents: 0, deliveryFeeCents: 0, totalCents: order.total_cents, currencyCode: order.currency_code,
+        whatsappOpenedAt: null, acceptedBy: order.accepted_by, acceptedByName: order.accepted_by ? 'Administración Casa Móvil' : null,
+        acceptedAt: order.accepted_at, completedBy: null, completedByName: null, completedAt: null, cancelledBy: null,
+        cancelledByName: null, cancelledAt: null, cancelReason: null, expiresAt: null, createdAt: order.created_at,
+        updatedAt: order.updated_at, items: [], events: [],
+      }
+    }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/claim_order') {
+      const actionId = request.postDataJSON().p_action_id
+      options.claims?.push(actionId)
+      const order = currentOrders.find(order => order.action_id === actionId)!
+      const claimed = ['generated', 'whatsapp_opened'].includes(order.status)
+      if (claimed) { order.status = 'accepted'; order.accepted_by = userId; order.accepted_at = new Date().toISOString() }
+      body = { claimed, alreadyClaimed: !claimed, status: order.status }
+    }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_overview') body = {
       policy: { mode: options.inventoryCounting ? 'paused' : 'enforced', version: '1', activatedAt: '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
       operations: [],
@@ -77,6 +109,29 @@ test.describe('admin WhatsApp contact', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'This suite uses only the isolated e2e.invalid mock environment.')
 
   for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 'mobile', width: 390, height: 844 }]) {
+    test(`${viewport.name} accepts from the list, detail and WhatsApp entry point with one shared action`, async ({ page }) => {
+      await page.setViewportSize(viewport)
+      const claims: string[] = []
+      const unexpected = await adminFixture(page, { whatsappOrders: true, claims })
+      for (const [index, entry] of ['list', 'detail', 'link'].entries()) {
+        const orderId = `23000000-0000-4000-8000-00000000000${index + 1}`
+        const actionId = `24000000-0000-4000-8000-00000000000${index + 1}`
+        await page.goto(entry === 'list' ? '/admin/pedidos' : entry === 'detail' ? `/admin/pedidos/${orderId}` : `/admin/pedidos/tomar/${actionId}`)
+        const acceptance = entry === 'list'
+          ? (viewport.name === 'desktop' ? page.getByRole('row').filter({ hasText: 'CM-0001' }) : page.getByRole('article').first()).getByRole('button', { name: 'Aceptar y reservar' })
+          : page.getByRole('button', { name: 'Aceptar y reservar' })
+        await acceptance.click()
+        await expect(acceptance).toHaveCount(0)
+        expect(claims).toHaveLength(index + 1)
+        expect(claims[index]).toBe(actionId)
+        await page.goto(`/admin/pedidos/tomar/${actionId}`)
+        await expect(page.getByRole('heading', { name: 'Aceptado', exact: true })).toBeVisible()
+        await expect(page.getByRole('button', { name: /Aceptar/ })).toHaveCount(0)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      }
+      expect(unexpected).toEqual([])
+    })
+
     test(`${viewport.name} shows safe contact actions and an unambiguous paid state`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       const unexpected = await adminFixture(page)
@@ -158,7 +213,7 @@ test.describe('admin WhatsApp contact', () => {
       await page.goto('/admin/pedidos/' + paidOrder.id)
       await expect(page.getByRole('heading', { name: 'CM-0001', exact: true })).toBeVisible()
       await expect(page.getByText('Pagado · Pendiente de preparación', { exact: true })).toHaveCount(1)
-      await expect(page.getByRole('link', { name: 'Aceptar para preparar' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Aceptar para preparar' })).toBeVisible()
       await expect(page.getByRole('heading', { name: 'Cliente y entrega' })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await page.screenshot({ path: testInfo.outputPath(`order-detail-${viewport.name}.png`), fullPage: true })

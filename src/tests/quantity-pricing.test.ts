@@ -25,6 +25,26 @@ const baseLine: CartLine = {
 }
 
 describe('quantity pricing', () => {
+  it.each([[1, 450_000], [2, 900_000], [3, 1_200_000], [4, 1_600_000], [5, 2_000_000], [6, 2_400_000], [100, 40_000_000]])('applies the threshold to every unit at quantity %i', (quantity, expected) => {
+    const price = calculateQuantityPricing({ quantity, unitPriceCents: 450_000, quantityPrices: [{ quantity: 2, totalPriceCents: 1 }], quantityThreshold: { minimumQuantity: 3, unitPriceCents: 400_000 } })
+    expect(price.productSubtotalCents).toBe(expected)
+    expect(price.appliedQuantityPrices).toEqual([])
+    expect(Boolean(price.appliedQuantityThreshold)).toBe(quantity >= 3)
+  })
+
+  it('keeps a cheaper current promotion and adds options to each threshold unit', () => {
+    const input = { quantity: 4, unitPriceCents: 450_000, quantityPrices: [], quantityThreshold: { minimumQuantity: 3, unitPriceCents: 400_000 }, optionUnitCents: 10_000 }
+    expect(calculateQuantityPricing(input).totalCents).toBe(1_640_000)
+    expect(calculateQuantityPricing({ ...input, unitPriceCents: 350_000 })).toMatchObject({ totalCents: 1_440_000 })
+    expect(calculateQuantityPricing({ ...input, unitPriceCents: 350_000 }).appliedQuantityThreshold).toBeUndefined()
+    expect(calculateQuantityPricing({ ...input, quantity: 2 }).totalCents).toBe(920_000)
+  })
+
+  it('validates threshold bounds independently from the legacy bundle limit', () => {
+    const input = { quantity: 100, unitPriceCents: 10_000, quantityPrices: [] }
+    expect(calculateQuantityPricing({ ...input, quantityThreshold: { minimumQuantity: 100, unitPriceCents: 9_000 } }).totalCents).toBe(900_000)
+    for (const minimumQuantity of [1, 2.5, 101]) expect(() => calculateQuantityPricing({ ...input, quantityThreshold: { minimumQuantity, unitPriceCents: 9_000 } })).toThrow(/entre 2 y 100/)
+  })
   it.each([
     [1, 10_000],
     [2, 18_000],
@@ -106,6 +126,12 @@ describe('quantity pricing', () => {
 })
 
 describe('cart line merging', () => {
+  it('restores threshold rules and rejects malformed thresholds', () => {
+    const line = { ...baseLine, quantityThreshold: { minimumQuantity: 3, unitPriceCents: 8_000 } }
+    expect(parseStoredCart(JSON.stringify([line]))[0]?.quantityThreshold).toEqual(line.quantityThreshold)
+    expect(parseStoredCart(JSON.stringify([{ ...line, quantityThreshold: { minimumQuantity: 101, unitPriceCents: 8_000 } }]))).toEqual([])
+    expect(parseStoredCart(JSON.stringify([baseLine]))[0]?.quantityThreshold).toBeNull()
+  })
   it('restores legacy cart lines with no quantity rules', () => {
     const { quantityPrices: _omitted, ...legacyLine } = baseLine
     expect(parseStoredCart(JSON.stringify([legacyLine]))[0]?.quantityPrices).toEqual([])

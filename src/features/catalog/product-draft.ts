@@ -8,6 +8,9 @@ export const productDraftSchema = z.object({
   imagePath: z.string().nullable(), active: z.boolean(), available: z.boolean(), featured: z.boolean(), sortOrder: z.number(),
   stockQuantity: z.string().default(''), stockBaseline: stockBalanceSchema.nullable().default(null),
   quantityPrices: z.array(z.object({ id: z.string().uuid(), quantity: z.number(), totalPrice: z.string() })),
+  quantityPricingMode: z.enum(['bundles', 'threshold']).default('bundles'),
+  quantityThresholdMinimum: z.number().default(3),
+  quantityThresholdPrice: z.string().default(''),
   groups: z.array(z.object({ id: z.string().uuid(), name: z.string(), required: z.boolean(), minSelect: z.number(), maxSelect: z.number(), sortOrder: z.number(), active: z.boolean(), options: z.array(option) })),
 })
 

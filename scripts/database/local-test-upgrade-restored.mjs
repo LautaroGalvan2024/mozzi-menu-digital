@@ -20,7 +20,13 @@ const before = tables.map(digest)
 const history = JSON.parse(query("select coalesce(json_agg(version order by version),'[]') from supabase_migrations.schema_migrations;"))
 const pending = readdirSync('supabase/migrations').filter(file => file.endsWith('.sql') && !history.includes(file.split('_')[0])).sort()
 assert.ok(history.length >= 23, 'Restore the complete base history first')
-assert.ok(pending.every(file => file.startsWith('20261024')), 'Unexpected migration outside this release')
+const expectedMigrations = process.argv.filter(value => value.startsWith('--migration=')).map(value => value.slice('--migration='.length)).sort()
+if (expectedMigrations.length) {
+  assert.ok(expectedMigrations.every(file => /^\d{12}_[a-z0-9_]+\.sql$/.test(file)), 'Invalid explicit migration filename')
+  assert.deepEqual(pending, expectedMigrations, 'Pending migrations must match the explicitly reviewed release')
+} else {
+  assert.ok(pending.every(file => file.startsWith('20261024')), 'Unexpected migration outside this release; specify each reviewed --migration=filename.sql')
+}
 for (const file of pending) {
   const version = file.split('_')[0]
   const sql = readFileSync(path.join('supabase/migrations', file), 'utf8')

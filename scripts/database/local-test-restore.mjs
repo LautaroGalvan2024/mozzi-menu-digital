@@ -30,7 +30,7 @@ const query = (sql, name = database) => run(psql, ['-X', '-q', '-A', '-t', '-v',
 assert.match(query('show server_version;', 'postgres'), /^17\./)
 assert.equal(query(`select count(*) from pg_database where datname='${database}';`, 'postgres'), '0', 'Restore target must be new')
 query(`create database "${database}";`, 'postgres')
-query('create schema extensions; create schema auth; create schema storage; create schema private; create schema supabase_migrations; create extension pgcrypto with schema extensions; create extension "uuid-ossp" with schema extensions; create publication supabase_realtime;')
+query('create schema extensions; create schema auth; create schema storage; create schema private; create schema supabase_migrations; create extension pgcrypto with schema extensions; create extension "uuid-ossp" with schema extensions; create extension pg_trgm with schema extensions; create publication supabase_realtime;')
 
 const restored = spawnSync(path.join(env.PG_BIN, 'pg_restore.exe'), [
   '--dbname', database, '--exit-on-error', '--single-transaction', '--no-owner', '--no-acl',

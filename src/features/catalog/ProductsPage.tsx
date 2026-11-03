@@ -14,6 +14,7 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { ProductFamilies } from './ProductFamilies'
+import { ProductImagesExport } from './ProductImagesExport'
 
 const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),description:z.string(),base_price_cents:z.union([z.number(),z.string()]),promotional_price_cents:z.union([z.number(),z.string()]).nullable(),image_path:z.string().nullable(),active:z.boolean(),available:z.boolean(),featured:z.boolean(),sort_order:z.number().int(),category_id:z.string().uuid(),categories:z.object({name:z.string()}).nullable()})
 type ToggleField='available'|'active'|'featured'
@@ -70,6 +71,7 @@ export function ProductsPage(){
       </label>
       <p className="text-sm text-stone-500">{total} {total === 1 ? 'producto' : 'productos'}{query.isFetching?' · Actualizando…':''}</p>
     </div>
+    {scope.selected ? <ProductImagesExport key={`images-${scope.selected.id}`} restaurantId={scope.selected.id} /> : null}
     <ProductFamilies key={scope.selected?.id} />
     {mutationError?<p className="form-error mb-5" role="alert">{mutationError}</p>:null}
     {products.length===0?<EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/>:<div className="admin-table-shell rounded-xl border border-stone-200 bg-white">

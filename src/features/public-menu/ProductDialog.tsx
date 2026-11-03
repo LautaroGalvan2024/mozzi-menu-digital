@@ -26,7 +26,8 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
   const unavailableSelections = initialLine?.selectedOptions.filter(option => !knownOptionIds.has(option.id) && !removedOptions.has(option.id)) ?? []
   const [error, setError] = useState<string | null>(null)
   const basePrice = currentProductPrice(product)
-  const advertisedQuantityPrices = effectiveQuantityPrices(basePrice, product.quantityPrices)
+  const advertisedQuantityPrices = product.quantityThreshold ? [] : effectiveQuantityPrices(basePrice, product.quantityPrices)
+  const advertisedThreshold = product.quantityThreshold && product.quantityThreshold.unitPriceCents < basePrice ? product.quantityThreshold : null
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -51,6 +52,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
     quantity,
     unitPriceCents: basePrice,
     quantityPrices: product.quantityPrices,
+    quantityThreshold: product.quantityThreshold ?? null,
     optionUnitCents,
   })
 
@@ -87,6 +89,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
       notes: notes.trim(),
       unitPriceCents: basePrice,
       quantityPrices: product.quantityPrices,
+      quantityThreshold: product.quantityThreshold ?? null,
       selectedOptions,
     })
     dialogRef.current?.close()
@@ -125,6 +128,8 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
               {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name} · {formatMoney(currentProductPrice(variant), restaurant.currencyCode, restaurant.locale)}{!variant.available ? ' · No disponible' : ''}</option>)}</select></label> : null}
               <p className="mt-2 text-sm leading-6 text-stone-600">{product.family?.description ?? product.description}</p>
               <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
+              {advertisedThreshold ? <p className="mt-3 text-sm font-bold text-emerald-800">Desde {advertisedThreshold.minimumQuantity} unidades: {formatMoney(advertisedThreshold.unitPriceCents, restaurant.currencyCode, restaurant.locale)} c/u</p> : null}
+              {pricing.appliedQuantityThreshold ? <p className="mt-1 text-sm text-emerald-800" role="status">Precio por cantidad aplicado a las {quantity} unidades.</p> : null}
               {advertisedQuantityPrices.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2" aria-label="Promociones por cantidad">
                   {advertisedQuantityPrices.map((rule) => (
@@ -177,7 +182,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
           <div className="flex shrink-0 items-center overflow-hidden rounded-xl border border-stone-300 bg-white">
             <button type="button" className="quantity-button" aria-label="Restar uno" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus aria-hidden /></button>
             <span className="w-8 text-center font-bold text-stone-950 sm:w-10" aria-live="polite">{quantity}</span>
-            <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(initialLine ? 100 : 20, value + 1))}><Plus aria-hidden /></button>
+            <button type="button" className="quantity-button" aria-label="Sumar uno" onClick={() => setQuantity((value) => Math.min(initialLine || product.quantityThreshold ? 100 : 20, value + 1))}><Plus aria-hidden /></button>
           </div>
           <button type="button" disabled={!product.available} className="button-primary min-w-0 flex-1 px-3 text-xs sm:px-4 sm:text-sm" onClick={add}>
             <span className="truncate">{initialLine ? 'Guardar cambios' : 'Agregar'} · {formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</span>

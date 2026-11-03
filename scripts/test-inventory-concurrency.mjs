@@ -132,6 +132,22 @@ async function race(name, { options, prepare, lock = orderLock, first, second, e
 }
 
 try {
+  await race('administrator and WhatsApp operator accept the same order only once', {
+    prepare: f => {
+      f.manager = randomUUID()
+      return `insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values('${f.manager}','manager-${f.manager}@example.test',now(),'{}');
+        insert into public.restaurant_members(restaurant_id,user_id,role,status,invited_by) values('${f.tenant}','${f.manager}','order_manager','active','${f.admin}');`
+    },
+    first: claim, second: f => claim({ ...f, admin: f.manager }), result: /"alreadyClaimed": true/,
+    verify: async f => {
+      await verifyBalance(f, 5, 4)
+      assert.equal(await observer.query(`select status::text||'/'||accepted_by::text from public.orders where id='${f.orderA}';`), `accepted/${f.admin}`)
+      assert.equal(await observer.query(`select count(*) from public.inventory_operations where order_id='${f.orderA}' and kind='reserve';`), '1')
+      assert.equal(await observer.query(`select count(*) from public.order_events where order_id='${f.orderA}' and event_type='order_claimed';`), '1')
+      assert.equal(await observer.query(`select count(*) from public.audit_logs where entity_id='${f.orderA}' and action='claim_order';`), '1')
+      assert.equal(await observer.query(`select o.accepted_at=e.created_at from public.orders o join public.order_events e on e.order_id=o.id and e.event_type='order_claimed' where o.id='${f.orderA}';`), 't')
+    },
+  })
   await race('two acceptances compete for last available units', {
     lock: f => `${orderLock(f)}select product_id from public.inventory_balances where restaurant_id='${f.tenant}' and product_id='${f.productA}' for update;`,
     first: claim, second: f => claim(f, 'B'), error: 'INSUFFICIENT_STOCK', verify: f => verifyBalance(f, 5, 4),
