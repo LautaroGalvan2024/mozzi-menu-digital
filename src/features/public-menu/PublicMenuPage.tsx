@@ -203,7 +203,7 @@ export function PublicMenuPage() {
             <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
               {cards.map(({ group, product, price, available }) => {
                 const image = responsiveAssetUrls(product.family?.imagePath ?? product.imagePath)
-                const hasQuantityPromotion = group.variants.some((variant) => effectiveQuantityPrices(currentProductPrice(variant), variant.quantityPrices).length > 0)
+                const hasQuantityPromotion = group.variants.some((variant) => variant.quantityThreshold ? variant.quantityThreshold.unitPriceCents < currentProductPrice(variant) : effectiveQuantityPrices(currentProductPrice(variant), variant.quantityPrices).length > 0)
                 return (
                   <article
                     key={group.id}

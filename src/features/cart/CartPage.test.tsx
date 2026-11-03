@@ -48,6 +48,24 @@ describe('cart validation and deliberate reconfiguration', () => {
   })
   afterEach(() => { cleanup(); vi.useRealTimers() })
 
+  it('refreshes threshold rules and reprices all units when quantity rises or falls', async () => {
+    mocks.menu = fixture([{ ...product, quantityThreshold: { minimumQuantity: 3, unitPriceCents: 800 } }])
+    render(app())
+    await screen.findByRole('link', { name: 'Continuar' })
+    const article = screen.getByRole('article', { name: 'Arroz' })
+    expect(within(article).getByText(/22,00/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Sumar Arroz' }))
+    expect(within(article).getByText(/27,00/)).toBeVisible()
+    expect(within(article).getByText(/c\/u desde 3 unidades/)).toHaveTextContent('8,00')
+    await userEvent.click(screen.getByRole('button', { name: 'Sumar Arroz' }))
+    expect(within(article).getByText(/36,00/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Restar Arroz' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Restar Arroz' }))
+    expect(within(article).getByText(/22,00/)).toBeVisible()
+    expect(within(article).queryByText(/c\/u desde/)).not.toBeInTheDocument()
+    expect(stored()[0]?.quantityThreshold).toEqual({ minimumQuantity: 3, unitPriceCents: 800 })
+  })
+
   it('keeps missing and unavailable lines with their notes and options until explicitly removed', async () => {
     mocks.menu = fixture([])
     const view = render(app())

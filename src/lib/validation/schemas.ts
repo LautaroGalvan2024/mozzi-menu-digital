@@ -85,6 +85,7 @@ export const publicProductSchema = z.object({
   featured: z.boolean(),
   sortOrder: z.number().int(),
   quantityPrices: quantityPricesSchema.default([]),
+  quantityThreshold: z.object({ minimumQuantity: z.number().int().min(2).max(100), unitPriceCents: money.refine(value => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000_000) }).nullable().default(null),
   optionGroups: z.array(optionGroupSchema),
 })
 

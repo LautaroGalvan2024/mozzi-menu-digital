@@ -35,6 +35,9 @@ function parseCartLine(value: unknown): CartLine | null {
   if (!Number.isInteger(value.quantity) || Number(value.quantity) < 1 || Number(value.quantity) > MAX_CART_LINE_QUANTITY || !validText(value.notes, 300) || !validMoney(value.unitPriceCents)) return null
 
   const rawPrices = value.quantityPrices === undefined ? [] : value.quantityPrices
+  const threshold = value.quantityThreshold ?? null
+  if (threshold !== null && (!isRecord(threshold) || !Number.isInteger(threshold.minimumQuantity) || Number(threshold.minimumQuantity) < 2 || Number(threshold.minimumQuantity) > 100 || !validMoney(threshold.unitPriceCents))) return null
+  const quantityThreshold = threshold === null ? null : { minimumQuantity: Number(threshold.minimumQuantity), unitPriceCents: Number(threshold.unitPriceCents) }
   if (!Array.isArray(rawPrices) || rawPrices.length > 19) return null
   const seenQuantities = new Set<number>()
   const quantityPrices: CartLine['quantityPrices'] = []
@@ -65,6 +68,7 @@ function parseCartLine(value: unknown): CartLine | null {
     notes: value.notes,
     unitPriceCents: Number(value.unitPriceCents),
     quantityPrices,
+    quantityThreshold,
     selectedOptions,
   }
 }
@@ -179,6 +183,7 @@ export function reconcileCartLines(
       productImagePath: product.imagePath,
       unitPriceCents: currentProductPrice(product),
       quantityPrices: product.quantityPrices,
+      quantityThreshold: product.quantityThreshold ?? null,
       selectedOptions: line.selectedOptions.map((option) => optionById.get(option.id) ?? option),
     }
   }))

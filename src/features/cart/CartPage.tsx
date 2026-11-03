@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { EmptyState, ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { formatMoney } from '../../lib/money'
-import { calculateCartLineTotal } from '../../lib/quantity-pricing'
+import { calculateCartLinePricing } from '../../lib/quantity-pricing'
 import { responsiveAssetUrls } from '../../lib/images/responsive'
 import { queryKeys } from '../../lib/queryKeys'
 import { fetchPublicCatalogGroup } from '../public-menu/api'
@@ -63,13 +63,15 @@ export function CartPage() {
         const image = responsiveAssetUrls(line.productImagePath)
         const product = products.find(row => row.id === line.productId)
         const lineIssues = issues.get(line.key) ?? []
+        const pricing = calculateCartLinePricing(line)
         return <article key={line.key} aria-label={line.productName} className={`flex gap-4 rounded-3xl border bg-white p-4 ${lineIssues.length ? 'border-amber-400' : 'border-stone-200'}`}>
           {image.src ? <img src={image.src} srcSet={image.srcSet} sizes="96px" loading="lazy" decoding="async" alt="" className="h-16 w-16 shrink-0 rounded-2xl object-contain sm:h-24 sm:w-24" /> : channel === 'store' ? <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-stone-100 sm:h-24 sm:w-24"><Package className="h-7 w-7 text-stone-400" aria-hidden /></div> : null}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2"><div><h2 className="font-display font-bold">{line.productName}</h2>{line.selectedOptions.length > 0 ? <p className="mt-1 text-xs leading-5 text-stone-500">{line.selectedOptions.map(option => option.name).join(' · ')}</p> : null}{line.notes ? <p className="mt-1 text-xs italic text-stone-500">“{line.notes}”</p> : null}</div><button className="icon-button text-red-700" onClick={() => cart.removeLine(line.key)} aria-label={`Quitar ${line.productName}`}><Trash2 className="h-4 w-4" aria-hidden /></button></div>
             {lineIssues.length ? <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{lineIssues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}</ul> : null}
             {product && (product.available || product.family) ? <button className="mt-2 min-h-11 text-left text-sm font-semibold underline decoration-stone-300 underline-offset-4" type="button" aria-label={`${channel === 'store' ? 'Editar' : 'Reconfigurar'} ${line.productName}`} onClick={() => setEditingKey(line.key)}>{channel === 'store' ? product.family ? 'Cambiar variante y detalles' : 'Editar detalles' : `Reconfigurar ${line.productName}`}</button> : null}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center rounded-xl border border-stone-300"><button className="quantity-button-small h-11 w-11" onClick={() => cart.updateQuantity(line.key, line.quantity - 1)} aria-label={`Restar ${line.productName}`}><Minus aria-hidden /></button><span className="w-8 text-center text-sm font-bold" aria-live="polite">{line.quantity}</span><button className="quantity-button-small h-11 w-11" onClick={() => cart.updateQuantity(line.key, line.quantity + 1)} aria-label={`Sumar ${line.productName}`}><Plus aria-hidden /></button></div><p className="font-bold">{formatMoney(calculateCartLineTotal(line), restaurant.currencyCode, restaurant.locale)}</p></div>
+            {pricing.appliedQuantityThreshold ? <p className="mt-2 text-sm text-emerald-800">{formatMoney(pricing.appliedQuantityThreshold.unitPriceCents, restaurant.currencyCode, restaurant.locale)} c/u desde {pricing.appliedQuantityThreshold.minimumQuantity} unidades{line.selectedOptions.some(option => option.priceDeltaCents > 0) ? ' · adicionales aparte' : ''}</p> : null}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center rounded-xl border border-stone-300"><button className="quantity-button-small h-11 w-11" onClick={() => cart.updateQuantity(line.key, line.quantity - 1)} aria-label={`Restar ${line.productName}`}><Minus aria-hidden /></button><span className="w-8 text-center text-sm font-bold" aria-live="polite">{line.quantity}</span><button className="quantity-button-small h-11 w-11" onClick={() => cart.updateQuantity(line.key, line.quantity + 1)} aria-label={`Sumar ${line.productName}`}><Plus aria-hidden /></button></div><p className="font-bold">{formatMoney(pricing.totalCents, restaurant.currencyCode, restaurant.locale)}</p></div>
           </div>
         </article>
       })}</section>

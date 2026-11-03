@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import JSZip from 'jszip'
 import { ImportProductsPage } from './ImportProductsPage'
 
 const mocks = vi.hoisted(() => ({
@@ -11,17 +12,13 @@ const mocks = vi.hoisted(() => ({
   storageFrom: vi.fn(),
   processImage: vi.fn(),
   uploadImage: vi.fn(),
-  loadZip: vi.fn(),
   parseImportSheets: vi.fn(),
   readXlsxFile: vi.fn(),
 }))
 
-vi.mock('jszip', () => ({
-  default: { loadAsync: mocks.loadZip },
-}))
-
-vi.mock('read-excel-file/browser', () => ({
-  default: mocks.readXlsxFile,
+vi.mock('../../lib/import-file', () => ({
+  readImportFile: mocks.readXlsxFile,
+  MAX_SPREADSHEET_BYTES: 10 * 1024 * 1024,
 }))
 
 vi.mock('../../lib/import-products', () => ({
@@ -89,6 +86,10 @@ function renderPage() {
   )
 }
 
+async function reviewFile() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Revisar importación' }))
+}
+
 describe('catalog import file state', () => {
   afterEach(cleanup)
 
@@ -101,9 +102,8 @@ describe('catalog import file state', () => {
     mocks.storageFrom.mockReset()
     mocks.processImage.mockReset()
     mocks.uploadImage.mockReset()
-    mocks.loadZip.mockReset()
     mocks.parseImportSheets.mockReset().mockReturnValue(parsedImport)
-    mocks.readXlsxFile.mockReset().mockResolvedValue([{ sheet: 'Productos', data: [] }])
+    mocks.readXlsxFile.mockReset().mockResolvedValue({ Productos: [['codigo', 'nombre', 'categoria', 'precio'], ['P-1', 'Milanesa', 'Platos', '1200']] })
   })
 
   it('reuses the persisted batch after an ambiguous reply and a null recovery', async () => {
@@ -115,7 +115,9 @@ describe('catalog import file state', () => {
     }, error: null }))
     const { container } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     expect(await screen.findByText(/1 filas sin código ni identificador/)).toBeVisible()
+    await user.click(screen.getByRole('checkbox', { name: /Entiendo que las filas sin código/ }))
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Conservamos el mismo lote')
     const firstBody = mocks.invoke.mock.calls[0]![1].body
@@ -141,6 +143,7 @@ describe('catalog import file state', () => {
     const { container, unmount } = renderPage()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Cómo importar' }), rejectedMode)
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     expect(await screen.findByText(/El servidor rechazó la importación sin guardar cambios/)).toBeVisible()
@@ -165,6 +168,7 @@ describe('catalog import file state', () => {
       .mockImplementationOnce((_name, request) => Promise.resolve({ data: { ...response, batchId: request.body.batchId }, error: null }))
     const { container } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     await screen.findByText(/Conservamos el mismo lote/)
@@ -180,6 +184,7 @@ describe('catalog import file state', () => {
     mocks.invoke.mockRejectedValueOnce(new Error('connection lost')).mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code: 'IMPORT_CONFLICT', message: 'El código ya existe.' } }), { status: 409 }) } })
     const { container } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     await screen.findByRole('alert')
@@ -200,6 +205,7 @@ describe('catalog import file state', () => {
     mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code, message: 'No se pudo confirmar.' } }), { status }) } })
     const { container, unmount } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     await screen.findByText(/Conservamos el mismo lote/)
@@ -219,6 +225,7 @@ describe('catalog import file state', () => {
     }, error: null }))
     const { container, unmount } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     await screen.findByText(/Importación terminada: 1 creados/)
@@ -239,17 +246,20 @@ describe('catalog import file state', () => {
       batchId: request.body.batchId, summary: { created: 1, updated: 0, skipped: 0 }, errors: [],
       products: [{ rowRef: '2', id: productId, code: 'P-1', outcome: 'created' }],
     }, error: null }))
-    mocks.loadZip.mockResolvedValue({ file: () => ({ dir: false, async: () => Promise.resolve(new Uint8Array([1])) }) })
+    const zip = new JSZip().file('carpeta/milanesa.jpg', new Uint8Array([255, 216, 255, 0]))
+    const zipBytes = Uint8Array.from(await zip.generateAsync({ type: 'uint8array' }))
     mocks.processImage.mockResolvedValue({ filename: 'new.webp' })
     mocks.uploadImage.mockResolvedValue('restaurants/test/products/new.webp')
-    const list = { select: vi.fn().mockReturnThis(), in: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [{ id: productId, image_path: null }], error: null }) }
+    const list = { select: vi.fn().mockReturnThis(), in: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockResolvedValue({ data: [{ id: productId, image_path: null }], error: null }) }
     const update = { update: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), maybeSingle: vi.fn().mockResolvedValue({ data: null, error: { message: 'reply lost' } }) }
-    const check = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { image_path: 'restaurants/test/products/new.webp' }, error: null }) }
+    const check = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), is: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { image_path: 'restaurants/test/products/new.webp' }, error: null }) }
     mocks.from.mockReturnValueOnce(list).mockReturnValueOnce(update).mockReturnValueOnce(check)
     const { container } = renderPage()
     fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')!, { target: { files: [new File(['workbook'], 'catalogo.xlsx')] } })
+    await reviewFile()
     await screen.findByRole('heading', { name: 'Vista previa' })
-    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".zip"]')!, { target: { files: [new File(['zip'], 'images.zip')] } })
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[accept^=".zip"]')!, { target: { files: [new File([zipBytes.buffer], 'images.zip')] } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Importar catálogo' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
     await waitFor(() => expect(check.single).toHaveBeenCalled())
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continuar imágenes pendientes' })).toBeEnabled())
@@ -267,6 +277,7 @@ describe('catalog import file state', () => {
     fireEvent.change(spreadsheetInput!, {
       target: { files: [new File(['workbook'], 'catalogo.xlsx')] },
     })
+    await reviewFile()
     expect(await screen.findByRole('heading', { name: 'Vista previa' })).toBeVisible()
     expect(screen.getByText('catalogo.xlsx')).toBeVisible()
 
@@ -281,7 +292,6 @@ describe('catalog import file state', () => {
 
   it('rejects an unreadable ZIP before invoking the metadata import', async () => {
     const user = userEvent.setup()
-    mocks.loadZip.mockRejectedValue(new Error('invalid zip'))
     const { container } = renderPage()
     const spreadsheetInput = container.querySelector<HTMLInputElement>('input[accept^=".xlsx"]')
     const zipInput = container.querySelector<HTMLInputElement>('input[accept^=".zip"]')
@@ -289,6 +299,7 @@ describe('catalog import file state', () => {
     fireEvent.change(spreadsheetInput!, {
       target: { files: [new File(['workbook'], 'catalogo.xlsx')] },
     })
+    await reviewFile()
     expect(await screen.findByRole('heading', { name: 'Vista previa' })).toBeVisible()
     fireEvent.change(zipInput!, {
       target: { files: [new File(['not-a-zip'], 'imagenes.zip', { type: 'application/zip' })] },
@@ -296,7 +307,7 @@ describe('catalog import file state', () => {
     await user.click(screen.getByRole('button', { name: 'Importar catálogo' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'No pudimos abrir el ZIP de imágenes. La metadata no fue importada.',
+      'No pudimos abrir el ZIP de imágenes.',
     )
     await waitFor(() => expect(mocks.invoke).not.toHaveBeenCalled())
   })

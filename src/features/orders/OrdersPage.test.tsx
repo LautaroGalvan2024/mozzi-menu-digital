@@ -77,6 +77,39 @@ function renderOrders(rows: unknown[]) {
 }
 
 describe('customer WhatsApp actions', () => {
+  it.each(['desktop', 'mobile'])('accepts and reserves from the %s list without opening WhatsApp', async layout => {
+    const pending = { ...order, checkout_mode: 'whatsapp', payment_status: 'unpaid', inventory_tracked: true }
+    let finish!: (value: unknown) => void
+    mocks.rpc.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    renderOrders([pending])
+    const table = await screen.findByRole('table')
+    const container = layout === 'desktop' ? table : screen.getByRole('article')
+    const button = within(container).getByRole('button', { name: 'Aceptar y reservar' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('claim_order', { p_action_id: order.action_id })
+    expect(button).toBeDisabled()
+    pending.status = 'accepted'
+    finish({ data: { claimed: true, alreadyClaimed: false, status: 'accepted' }, error: null })
+    await waitFor(() => expect(within(container).queryByRole('button', { name: 'Aceptar y reservar' })).not.toBeInTheDocument())
+    expect(within(container).getByText('Aceptado')).toBeInTheDocument()
+  })
+
+  it('does not offer acceptance for pending online payments or terminal orders', async () => {
+    renderOrders([{ ...order, payment_status: 'pending' }, { ...order, id: '20000000-0000-4000-8000-000000000002', status: 'cancelled' }])
+    await screen.findByRole('table')
+    expect(screen.queryByRole('button', { name: /Aceptar/ })).not.toBeInTheDocument()
+  })
+
+  it('accepts an order without inventory without promising a stock reservation', async () => {
+    renderOrders([{ ...order, checkout_mode: 'whatsapp', payment_status: 'unpaid' }])
+    const table = await screen.findByRole('table')
+    mocks.rpc.mockResolvedValue({ data: { claimed: true, alreadyClaimed: false, status: 'accepted' }, error: null })
+    fireEvent.click(within(table).getByRole('button', { name: 'Aceptar pedido' }))
+    expect(await within(table).findByRole('status')).toHaveTextContent('Pedido aceptado correctamente.')
+    expect(within(table).getByRole('status')).not.toHaveTextContent('reservadas')
+  })
+
   it('provides separate desktop and mobile chat links without accepting or mutating the order', async () => {
     renderOrders([order])
     const table = await screen.findByRole('table')

@@ -8,6 +8,12 @@ En Productos, las fichas agrupan SKU existentes o nuevos por atributos como mode
 
 La importación acepta columnas opcionales `familia_codigo`, `familia_nombre` y hasta tres pares `atributo_1`/`valor_1`, `atributo_2`/`valor_2`, `atributo_3`/`valor_3`. Ejemplo: `Modelo`/`iPhone 15` y `Color`/`Negro`. Los archivos anteriores no desagrupan SKU; `skip_existing` conserva sus relaciones. El lote confirma productos y agrupaciones en una transacción. El snapshot del pedido conserva los atributos vendidos aunque luego se edite la ficha.
 
+## Promociones por cantidad
+
+En **Promociones y precios especiales → Modalidad por cantidad**, cada SKU permite elegir combos por precio total o un precio unitario desde un mínimo de 2 a 100 unidades. Por ejemplo, con precio regular de $4.500 y mínimo 3 a $4.000 c/u, 2 unidades cuestan $9.000 y 4 cuestan $16.000. Al bajar del mínimo vuelve el precio regular vigente. Si existe una oferta temporal más barata, se conserva ese menor precio. Los adicionales se cobran por unidad.
+
+El mínimo suma únicamente unidades de la misma configuración: mismo SKU, extras y observaciones. Los combos se conservan al cambiar de modalidad, pero no se combinan con el umbral. Las importaciones preservan las promociones existentes. La migración `202611030001` no modifica precios ni pedidos históricos; agrega el campo opcional `quantityThreshold` al catálogo y al guardado. Omitirlo conserva la modalidad; `null` vuelve a combos. Publicar el frontend compatible antes de configurar umbrales: un cliente anterior mantiene el cálculo regular estimado, y el servidor sigue calculando el total definitivo correcto.
+
 ## Stock desde los productos
 
 Al crear o editar un producto, **Stock (unidades)** guarda la cantidad total: escribir 10 deja 10 unidades, no suma 10. Cada variante tiene su propio campo. Cero indica agotado; dejar vacío conserva el saldo anterior, o deja sin inicializar un producto nuevo. Cambiar sólo el nombre, precio o foto no modifica cantidades. El total incluye las unidades reservadas: 10 totales y 2 reservadas dejan 8 disponibles. El servidor rechaza totales inferiores a las reservas.

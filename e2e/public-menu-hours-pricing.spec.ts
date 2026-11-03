@@ -101,3 +101,33 @@ test('shows unambiguous hours and applies reusable quantity prices', async ({ pa
 
   await expect(page.getByRole('link', { name: /Ver carrito · 3/ })).toContainText(/28\.000,00/)
 })
+
+test('applies an all-units threshold in the product dialog and cart', async ({ page }) => {
+  const thresholdCatalog = {
+    ...catalog,
+    restaurant: { ...catalog.restaurant, isOpen: true, nextOpeningAt: null },
+    categories: [{ ...catalog.categories[0]!, products: [{ ...catalog.categories[0]!.products[0]!, name: 'Yerba', basePriceCents: 450_000, quantityPrices: [], quantityThreshold: { minimumQuantity: 3, unitPriceCents: 400_000 } }] }],
+  }
+  await routePublicCatalog(page, thresholdCatalog, 'horarios-precios-test')
+  await page.goto('/r/horarios-precios-test')
+  await page.getByRole('button', { name: /Yerba/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Yerba' })
+  await expect(dialog).toContainText(/Desde 3 unidades:.*4\.000,00 c\/u/)
+  await dialog.getByRole('button', { name: 'Sumar uno' }).click()
+  await expect(dialog.getByRole('button', { name: /Agregar/ })).toContainText(/9\.000,00/)
+  await dialog.getByRole('button', { name: 'Sumar uno' }).click()
+  await expect(dialog.getByRole('button', { name: /Agregar/ })).toContainText(/12\.000,00/)
+  await dialog.getByRole('button', { name: 'Sumar uno' }).click()
+  await expect(dialog.getByRole('button', { name: /Agregar/ })).toContainText(/16\.000,00/)
+  await dialog.getByRole('button', { name: /Agregar/ }).click()
+  await page.getByRole('link', { name: /Ver carrito · 4/ }).click()
+  const item = page.getByRole('article', { name: 'Yerba' })
+  await expect(item).toContainText(/4\.000,00 c\/u desde 3 unidades/)
+  await expect(item).toContainText(/16\.000,00/)
+  await page.getByRole('button', { name: 'Restar Yerba' }).click()
+  await page.getByRole('button', { name: 'Restar Yerba' }).click()
+  await expect(item).toContainText(/9\.000,00/)
+  await expect(item).not.toContainText(/c\/u desde/)
+  await page.reload()
+  await expect(page.getByRole('article', { name: 'Yerba' })).toContainText(/9\.000,00/)
+})

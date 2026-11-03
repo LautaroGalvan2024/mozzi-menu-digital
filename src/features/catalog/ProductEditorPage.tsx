@@ -56,6 +56,9 @@ interface ProductDraft {
   stockQuantity: string
   stockBaseline: CatalogStockBalance | null
   quantityPrices: QuantityPriceDraft[]
+  quantityPricingMode: 'bundles' | 'threshold'
+  quantityThresholdMinimum: number
+  quantityThresholdPrice: string
   groups: GroupDraft[]
 }
 const categorySchema = z.array(z.object({ id: z.string().uuid(), name: z.string() }))
@@ -75,6 +78,8 @@ const productSchema = z.object({
   featured: z.boolean(),
   sort_order: z.number().int(),
   family_id: z.string().nullable().optional(),
+  quantity_threshold_minimum: z.number().nullable().default(null),
+  quantity_threshold_unit_price_cents: z.union([z.number(), z.string()]).nullable().default(null),
 })
 const groupSchema = z.array(
   z.object({
@@ -241,6 +246,9 @@ export function ProductEditorPage() {
         stockQuantity: '',
         stockBaseline: null,
         quantityPrices: [],
+        quantityPricingMode: 'bundles',
+        quantityThresholdMinimum: 3,
+        quantityThresholdPrice: '',
         groups: [],
       })
     } else if (product.data) {
@@ -262,6 +270,9 @@ export function ProductEditorPage() {
         sortOrder: p.sort_order,
         stockQuantity: stock.data.items.find(item => item.productId === p.id)?.onHand ?? '',
         stockBaseline: stock.data.items.find(item => item.productId === p.id) ?? null,
+        quantityPricingMode: p.quantity_threshold_minimum === null ? 'bundles' : 'threshold',
+        quantityThresholdMinimum: p.quantity_threshold_minimum ?? 3,
+        quantityThresholdPrice: p.quantity_threshold_unit_price_cents === null ? '' : (Number(p.quantity_threshold_unit_price_cents) / 100).toString(),
         quantityPrices: product.data.quantityPrices.map((rule) => ({
           id: rule.id,
           quantity: rule.quantity,
@@ -439,7 +450,13 @@ export function ProductEditorPage() {
       totalPriceCents: parsePriceCents(rule.totalPrice) ?? Number.NaN,
     }))
     const quantityValues = new Set(quantityPrices.map((rule) => rule.quantity))
-    if (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents))) {
+    const quantityThreshold = currentDraft.quantityPricingMode === 'threshold' ? { minimumQuantity: currentDraft.quantityThresholdMinimum, unitPriceCents: parsePriceCents(currentDraft.quantityThresholdPrice) ?? Number.NaN } : null
+    if (quantityThreshold && (!Number.isInteger(quantityThreshold.minimumQuantity) || quantityThreshold.minimumQuantity < 2 || quantityThreshold.minimumQuantity > 100 || !moneyIsValid(quantityThreshold.unitPriceCents))) {
+      showEditorError('Revisá el precio por cantidad: el mínimo debe estar entre 2 y 100 y el precio unitario debe ser válido.')
+      setSaving(false)
+      return
+    }
+    if (currentDraft.quantityPricingMode === 'bundles' && (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents)))) {
       showEditorError('Revisá los precios por cantidad: cada cantidad entre 2 y 20 debe aparecer una sola vez y tener un precio válido.')
       setSaving(false)
       return
@@ -502,7 +519,8 @@ export function ProductEditorPage() {
           available: currentDraft.available,
           featured: currentDraft.featured,
           sortOrder: currentDraft.sortOrder,
-          quantityPrices,
+          ...(currentDraft.quantityPricingMode === 'bundles' ? { quantityPrices } : {}),
+          quantityThreshold,
         },
         p_groups: groups.map((group) => ({
           id: group.id,
@@ -642,7 +660,7 @@ export function ProductEditorPage() {
             </div>
           </div>
         </section>
-          <details ref={promotionsSection} className="admin-disclosure" open={Boolean(draft.promotionalPrice || draft.quantityPrices.length) || undefined}>
+          <details ref={promotionsSection} className="admin-disclosure" open={Boolean(draft.promotionalPrice || draft.quantityPrices.length || draft.quantityPricingMode === 'threshold') || undefined}>
             <summary>Promociones y precios especiales</summary>
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-3">
@@ -651,6 +669,12 @@ export function ProductEditorPage() {
                 <label className="field"><span>Promoción hasta</span><input type="datetime-local" value={draft.promotionEndsAt} onChange={e => patch('promotionEndsAt', e.target.value)} /></label>
               </div>
               <div className="border-t border-stone-100 pt-5">
+          <label className="field mb-5"><span>Modalidad por cantidad</span><select value={draft.quantityPricingMode} onChange={event => patch('quantityPricingMode', event.target.value as 'bundles' | 'threshold')}><option value="bundles">Combos por precio total</option><option value="threshold">Precio unitario desde una cantidad mínima</option></select></label>
+          {draft.quantityPricingMode === 'threshold' ? <div className="space-y-4">
+            <p className="text-sm text-stone-500">Al alcanzar el mínimo, este precio se aplica a todas las unidades de la misma configuración. Al bajar del mínimo, vuelve el precio regular vigente. Se conserva cualquier oferta vigente que sea más barata.</p>
+            <div className="grid gap-4 sm:grid-cols-2"><label className="field"><span>Cantidad mínima</span><input type="number" min="2" max="100" value={draft.quantityThresholdMinimum} onChange={event => patch('quantityThresholdMinimum', Number(event.target.value))} /></label><label className="field"><span>Precio unitario desde el mínimo</span><input type="number" min="0" step="0.01" value={draft.quantityThresholdPrice} onChange={event => patch('quantityThresholdPrice', event.target.value)} /></label></div>
+            <p className="text-xs text-stone-500">Los combos guardados se conservan y volverán a aplicarse si elegís esa modalidad.</p>
+          </div> : <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="font-semibold">Precios por cantidad</h3>
@@ -704,6 +728,7 @@ export function ProductEditorPage() {
               ))}
             </div>
           )}
+          </>}
 </div>
             </div>
           </details>

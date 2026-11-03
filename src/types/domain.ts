@@ -47,6 +47,11 @@ export interface QuantityPrice {
   totalPriceCents: number
 }
 
+export interface QuantityThreshold {
+  minimumQuantity: number
+  unitPriceCents: number
+}
+
 export interface PublicProduct {
   family?: { id: string; name: string; description: string; imagePath: string | null; axes: string[] } | null | undefined
   variantAttributes?: Record<string, string> | undefined
@@ -64,6 +69,7 @@ export interface PublicProduct {
   featured: boolean
   sortOrder: number
   quantityPrices: QuantityPrice[]
+  quantityThreshold?: QuantityThreshold | null
   optionGroups: PublicOptionGroup[]
 }
 
@@ -198,6 +204,7 @@ export interface CartLine {
   notes: string
   unitPriceCents: number
   quantityPrices: QuantityPrice[]
+  quantityThreshold?: QuantityThreshold | null
   selectedOptions: Array<{
     id: string
     groupName: string
@@ -270,6 +277,9 @@ export interface OrderItemSnapshot {
   base_subtotal_cents: number | string
   pricing_mode_snapshot: 'unit' | 'quantity'
   pricing_breakdown_snapshot: {
+    quantityPricingType?: 'threshold'
+    minimumQuantity?: number
+    appliedUnitPriceCents?: number | string
     mode: 'unit' | 'quantity'
     unitPriceCents: number | string
     baseSubtotalCents: number | string

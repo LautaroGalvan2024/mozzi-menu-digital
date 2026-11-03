@@ -80,14 +80,24 @@ La plantilla versionada está en `public/templates/importacion-productos.xlsx` y
 1. Usá códigos estables, no nombres, para reconciliar actualizaciones.
 2. Expresá precios como números en la moneda del restaurante, sin símbolo ni separador de miles.
 3. Usá `true`/`false`, fechas ISO y límites `minimo`/`maximo` enteros entre 0 y 20, con máximo no menor que mínimo.
-4. Si hay ZIP, `imagen_archivo` debe coincidir exactamente, no puede empezar con `/` o `\` ni contener un segmento `..`. Solo JPEG, PNG o WebP; cada original puede pesar hasta 15 MB y el resultado reprocesado no supera 1 MiB.
+4. Si hay ZIP, `imagen_archivo` se busca primero por ruta y después por nombre de archivo único, incluyendo carpetas internas. Una coincidencia ambigua requiere indicar la ruta completa. No puede empezar con `/` o `\` ni contener un segmento `..`. Solo JPEG, PNG o WebP; cada original puede pesar hasta 15 MB y el resultado reprocesado no supera 1 MiB.
 5. Revisá la vista previa y los errores de prevalidación por fila. El navegador valida columnas obligatorias, tipos, fechas, duplicados y referencias entre productos, grupos y opciones; no confirmes con errores críticos.
 6. Elegí de forma explícita `create_only`, `create_or_update` o `skip_existing`; la reconciliación usa el código dentro del tenant. `create_only` enumera todos los códigos ya existentes detectados y no escribe el lote. `skip_existing` deja intactos producto, categoría, grupos, opciones e imagen de cada código existente, y todavía crea el grafo completo de los códigos nuevos.
-7. Verificá resumen, auditoría y assets fallidos. La metadata se confirma antes de subir imágenes: si una falla, descargá el CSV de errores y usá **Reintentar imágenes**; no hace falta repetir la importación de productos. El reintento actual recorre todas las imágenes no omitidas referenciadas por ese lote, incluidas las que ya habían terminado bien, y reemplaza sus assets.
+7. Verificá resumen, auditoría y assets fallidos. El ZIP se valida antes de enviar metadata; las imágenes se suben después de confirmar el catálogo. Si una falla, usá **Reintentar imágenes**: recupera lo pendiente y conserva las asociaciones ya confirmadas. Una modificación concurrente de la imagen bloquea su reemplazo; no hace falta repetir la importación de productos.
 
 La planilla puede pesar hasta 10 MB y la solicitud JSON a la Edge Function hasta 2 MiB. El lote admite 500 productos, 2.500 grupos y 10.000 opciones. El ZIP opcional admite 100 MB comprimidos, 250 MB extraídos acumulados y, como máximo, una imagen referenciada por producto. Dividí archivos grandes antes de alcanzar cualquiera de esos límites. Un CSV importa solo productos; usá XLSX para grupos y opciones.
 
 El CSV reúne errores de prevalidación, conflictos `create_only`, errores estructurados de Edge/RPC y fallos de imágenes. La pantalla muestra código, campo y fila cuando el servidor puede determinarlos; una respuesta no estructurada conserva un mensaje genérico sin exponer internals. Las celdas peligrosas para planillas se neutralizan al exportar.
+
+La modalidad **Sólo imágenes** permite cargar un ZIP sin planilla. Propone asociaciones por SKU exacto o prefijo único `SKU_descripción`, conserva los ceros iniciales y permite corregir o excluir archivos antes de confirmar. Sólo modifica imágenes de productos existentes del comercio seleccionado. Para recuperar una carga, volvé a seleccionar el mismo ZIP; las asociaciones e intentos se conservan por comercio en el navegador. Ver [importación de productos](importacion-productos.md).
+
+## Descargar imágenes del catálogo
+
+En **Productos → Descargar imágenes** se exportan todas las imágenes principales de los productos no eliminados, incluidos ocultos y agotados. La búsqueda y la página visible no limitan la descarga. Se exporta la imagen actualmente almacenada, normalmente WebP; el original previo al procesamiento no se conserva.
+
+El ZIP incluye nombres sin colisiones y `images-manifest.json` con comercio, SKU, identificador y archivo para reimportación. El manifiesto también informa productos sin imagen y descargas fallidas. La interfaz distingue un resultado completo de uno incompleto; reintentar la exportación vuelve a generar un único ZIP.
+
+La escritura fluye a un archivo seleccionado cuando el navegador lo permite. En otros navegadores modernos utiliza un archivo temporal OPFS, conservado hasta la siguiente limpieza de archivos de más de 24 horas. Sólo cuando ambas opciones faltan usa memoria, con un límite de 250 MB y un mensaje para cambiar de navegador. No hay límite de productos por exportación. La cancelación detiene las solicitudes y elimina temporales incompletos; el espacio disponible del dispositivo sigue siendo necesario.
 
 ## Operar pedidos
 
@@ -98,7 +108,7 @@ El CSV reúne errores de prevalidación, conflictos `create_only`, errores estru
 - `cancelled`: terminal y con motivo.
 - `expired`: no fue tomado dentro de la ventana.
 
-Para tomar un pedido, abrir el link, iniciar sesión si corresponde, revisar y pulsar **Tomar pedido**. Nunca interpretes una vista previa o carga del link como aceptación. Si otra persona ganó, la UI muestra actor y hora y no los reemplaza.
+Para tomar un pedido, usá la acción de la lista o el detalle de **Pedidos**, o abrí el enlace recibido por WhatsApp. Los tres accesos ejecutan la misma RPC: **Aceptar y reservar** reserva stock cuando el pedido controla inventario; **Aceptar pedido** confirma pedidos sin inventario. Los pedidos online aprobados muestran **Aceptar para preparar** y conservan la reserva del pago. La existencia física se descuenta al entregar. Nunca interpretes la carga del enlace como aceptación. Si otra persona ganó, no se duplican reservas ni se reemplazan actor y hora. Las vistas se actualizan ante cambios de otros operadores.
 
 Para cancelar, escribí un motivo operativo no sensible. Para completar, verificá primero entrega/retiro. No edites campos `*_by` o `*_at` manualmente.
 

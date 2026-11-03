@@ -58,6 +58,23 @@ describe('ProductDialog quantity promotions', () => {
 
   afterEach(cleanup)
 
+  it('shows a threshold and recalculates when crossing it in both directions', async () => {
+    const user = userEvent.setup()
+    render(<ProductDialog product={{ ...product, basePriceCents: 450_000, promotionalPriceCents: null, quantityThreshold: { minimumQuantity: 3, unitPriceCents: 400_000 } }} restaurant={restaurant} onClose={() => undefined} onAdd={() => undefined} />)
+    expect(screen.getByText(/Desde 3 unidades/)).toHaveTextContent(/4\.000,00/)
+    const add = () => screen.getByRole('button', { name: /Agregar/ })
+    await user.click(screen.getByRole('button', { name: 'Sumar uno' }))
+    expect(add()).toHaveTextContent(/9\.000,00/)
+    await user.click(screen.getByRole('button', { name: 'Sumar uno' }))
+    expect(add()).toHaveTextContent(/12\.000,00/)
+    await user.click(screen.getByRole('button', { name: 'Sumar uno' }))
+    expect(add()).toHaveTextContent(/16\.000,00/)
+    await user.click(screen.getByRole('button', { name: 'Restar uno' }))
+    await user.click(screen.getByRole('button', { name: 'Restar uno' }))
+    expect(add()).toHaveTextContent(/9\.000,00/)
+    expect(screen.queryByText(/Precio por cantidad aplicado/)).not.toBeInTheDocument()
+  })
+
   it('does not advertise an obsolete bundle and keeps the cheaper active promotion', async () => {
     const user = userEvent.setup()
     render(<ProductDialog product={product} restaurant={restaurant} onClose={() => undefined} onAdd={() => undefined} />)
