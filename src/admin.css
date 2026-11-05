@@ -4,9 +4,10 @@
   --admin-ink: #24272e;
   --admin-muted: #656b76;
   --admin-border: #e6e8ec;
-  --admin-accent: #bc4b24;
-  --admin-accent-hover: #9e3d1c;
-  --admin-accent-soft: #fcf0e9;
+  --admin-accent: #ff6d00;
+  --admin-accent-strong: #b94700;
+  --admin-accent-hover: #e55f00;
+  --admin-accent-soft: #fff2e8;
   --font-display: "Inter", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --shadow-card: 0 1px 2px rgb(24 32 48 / 2%);
   min-height: 100dvh;
@@ -17,11 +18,7 @@
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
 }
-.admin-app :focus-visible { outline: 2px solid var(--admin-accent); outline-offset: 3px; }
-.mozzi-brand { display: inline-flex; align-items: center; gap: 10px; color: #bc4b24; }
-.mozzi-brand-mark { width: 32px; height: 32px; flex: 0 0 auto; }
-.mozzi-brand-word { color: #24272e; font-size: 27px; font-weight: 700; letter-spacing: -.065em; line-height: 1; }
-.mozzi-brand-word > span { color: #bc4b24; }
+.admin-app :focus-visible { outline: 2px solid var(--admin-accent-strong); outline-offset: 3px; }
 .admin-sidebar { display: none; position: fixed; inset: 0 auto 0 0; z-index: 60; width: 244px; max-width: calc(100vw - 44px); flex-direction: column; border-right: 1px solid var(--admin-border); background: #fff; }
 .admin-sidebar.is-open { display: flex; }
 .admin-sidebar-brand { display: flex; min-height: 84px; flex-shrink: 0; align-items: center; justify-content: space-between; padding: 20px 24px; }
@@ -34,7 +31,7 @@
 .admin-nav-link { display: flex; min-height: 42px; align-items: center; gap: 11px; border-radius: 7px; padding: 9px 12px; color: #5b626e; font-size: 13px; font-weight: 500; text-decoration: none; transition: background-color .15s, color .15s; }
 .admin-nav-link > svg, .admin-nav-group > summary > svg { width: 18px; height: 18px; flex-shrink: 0; stroke-width: 1.7px; }
 .admin-nav-link:hover, .admin-nav-group > summary:hover { background: #f5f6f8; color: var(--admin-ink); }
-.admin-nav-link.is-active { color: #a6401e; background: var(--admin-accent-soft); font-weight: 650; }
+.admin-nav-link.is-active { color: #923a00; background: var(--admin-accent-soft); font-weight: 650; }
 .admin-nav-secondary { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--admin-border); }
 .admin-nav-group > summary { display: flex; min-height: 42px; cursor: pointer; list-style: none; align-items: center; gap: 11px; border-radius: 7px; padding: 9px 12px; color: var(--admin-muted); font-size: 12px; font-weight: 500; }
 .admin-nav-group > summary::-webkit-details-marker { display: none; }
@@ -49,7 +46,7 @@
 .admin-account-person strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .admin-account-person > div > span { font-size: 11px; color: var(--admin-muted); }
 .admin-account-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; font-size: 11px; color: var(--admin-muted); }
-.admin-account-action:hover { color: var(--admin-accent); }
+.admin-account-action:hover { color: var(--admin-accent-strong); }
 .admin-account-action > svg { width: 14px; height: 14px; }
 .admin-nav-backdrop { position: fixed; inset: 0; z-index: 55; background: rgb(24 32 48 / 30%); }
 .admin-topbar { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 16px; border-bottom: 1px solid var(--admin-border); background: #fff; }
@@ -59,7 +56,7 @@
 .admin-breadcrumb > strong { color: var(--admin-ink); font-weight: 500; white-space: nowrap; }
 .admin-workspace-label { display: none; margin-left: auto; color: #656b76; font-size: 11px; }
 .admin-content { width: 100%; max-width: 1440px; margin: 0 auto; padding: 28px 20px 56px; outline: none; }
-.admin-skip-link { position: fixed; z-index: 100; top: 10px; left: 10px; transform: translateY(-180%); border-radius: 6px; background: var(--admin-accent); padding: 10px 16px; color: white; }
+.admin-skip-link { position: fixed; z-index: 100; top: 10px; left: 10px; transform: translateY(-180%); border-radius: 6px; background: var(--admin-accent); padding: 10px 16px; color: #121212; }
 .admin-skip-link:focus { transform: none; }
 
 /* Consistent hierarchy and quiet surfaces across administration routes. */
@@ -73,19 +70,19 @@
 .admin-app .surface-card > header h2 { font-size: 15px; font-weight: 650; }
 .admin-app .surface-card > header p { font-size: 12px; line-height: 1.6; }
 .admin-app .button-primary, .admin-app .button-secondary, .admin-app .button-danger, .admin-app .button-secondary-dark, .admin-app .button-danger-dark { min-height: 40px; border-radius: 7px; padding: 9px 15px; font-size: 12px; line-height: 1.5; font-weight: 600; box-shadow: none; transform: none; }
-.admin-app .button-primary { background: var(--admin-accent); color: #fff; }
+.admin-app .button-primary { background: var(--admin-accent); color: #121212; }
 .admin-app .button-primary:hover { background: var(--admin-accent-hover); box-shadow: none; }
 .admin-app .button-primary:disabled { background: #e6e8ec; color: #727983; }
 .admin-app .button-secondary, .admin-app .button-secondary-dark { border: 1px solid #dfe2e7; background: #fff; color: #434a55; }
 .admin-app .button-secondary:hover, .admin-app .button-secondary-dark:hover { border-color: #c6cbd3; background: #fafbfc; }
 .admin-app .button-danger, .admin-app .button-danger-dark { border: 1px solid #f0d2d1; background: #fff; color: #a42e2b; }
 .admin-app .button-danger:hover, .admin-app .button-danger-dark:hover { background: #fff4f3; }
-.admin-app .button-quiet { color: var(--admin-accent); border-radius: 7px; font-size: 12px; min-height: 36px; font-weight: 600; }
+.admin-app .button-quiet { color: var(--admin-accent-strong); border-radius: 7px; font-size: 12px; min-height: 36px; font-weight: 600; }
 .admin-app .button-quiet:hover { background: var(--admin-accent-soft); }
 .admin-app .icon-button { width: 44px; height: 44px; border-radius: 7px; color: #68707c; }
 .admin-app .field { gap: 7px; color: #444b56; font-size: 12px; font-weight: 500; }
 .admin-app .field > input, .admin-app .field > textarea, .admin-app .field > select, .admin-app .field > span > input { min-height: 40px; border-color: #dadee5; border-radius: 7px; background: #fff; color: var(--admin-ink); font-size: 13px; box-shadow: none; }
-.admin-app .field > input:focus, .admin-app .field > textarea:focus, .admin-app .field > select:focus { border-color: #c06949; box-shadow: 0 0 0 3px #fcf0e9; }
+.admin-app .field > input:focus, .admin-app .field > textarea:focus, .admin-app .field > select:focus { border-color: var(--admin-accent-strong); box-shadow: 0 0 0 3px var(--admin-accent-soft); }
 .admin-app .field > :disabled { background: #f5f6f8; color: #727983; }
 .admin-app .field > small { font-size: 11px; color: #ad3430; line-height: 1.6; }
 .admin-app .field > small[role="alert"], .admin-app .field > input[aria-invalid="true"] ~ small { color: #ad3430; }
@@ -144,7 +141,6 @@
   .admin-breadcrumb > span:first-child { max-width: 100%; font-size: 10px; }
   .admin-breadcrumb > span:nth-child(2) { display: none; }
   .admin-breadcrumb > strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .admin-topbar .mozzi-brand-mark { width: 26px; height: 26px; }
   .admin-app .icon-button { width: 44px; height: 44px; }
   .admin-nav-link, .admin-nav-group > summary, .admin-account-action { min-height: 44px; }
   .admin-auth-card { padding: 24px; }

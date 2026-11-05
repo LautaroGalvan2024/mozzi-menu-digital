@@ -1,0 +1,10 @@
+.mozzi-logo {
+  display: inline-flex;
+  width: 180px;
+  max-width: 100%;
+  flex: 0 1 auto;
+  align-items: center;
+  vertical-align: middle;
+}
+.mozzi-logo img { display: block; width: 100%; height: auto; }
+.mozzi-logo--compact { width: 34px; flex-shrink: 0; }

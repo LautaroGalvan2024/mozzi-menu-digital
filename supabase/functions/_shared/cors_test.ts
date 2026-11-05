@@ -37,3 +37,39 @@ Deno.test("CORS rejects an unlisted request origin and never emits wildcard", as
     (error) => error instanceof ApiError && error.code === "ORIGIN_NOT_ALLOWED",
   );
 });
+
+Deno.test("domain transition permits exact checkout origins and rejects lookalikes and missing origins", async () => {
+  const origins = [
+    "https://www.mozzi-comercio.online",
+    "https://mozzi-comercio.online",
+    "https://mozzi-menu-digital.vercel.app",
+    "http://localhost:5173",
+  ];
+  const allowed = parseAllowedOrigins(origins.join(","));
+  for (const origin of origins) {
+    const request = new Request("https://functions.example.test/create-payment", {
+      method: "POST",
+      headers: { Origin: origin },
+    });
+    assertEquals(validateOrigin(request, allowed), origin);
+    assertEquals(corsHeaders(origin).get("Access-Control-Allow-Origin"), origin);
+  }
+  for (
+    const origin of [
+      undefined,
+      "null",
+      "http://www.mozzi-comercio.online",
+      "https://www.mozzi-comercio.online.evil.example",
+      "https://mozzi-menu-digital-preview.vercel.app",
+    ]
+  ) {
+    const request = new Request("https://functions.example.test/create-payment", {
+      method: "POST",
+      headers: origin ? { Origin: origin } : {},
+    });
+    await assertRejects(
+      () => validateOrigin(request, allowed),
+      (error) => error instanceof ApiError && error.code === "ORIGIN_NOT_ALLOWED",
+    );
+  }
+});

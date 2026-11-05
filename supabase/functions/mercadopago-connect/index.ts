@@ -11,7 +11,7 @@ import { parseInput } from "../_shared/schemas.ts";
 
 serve({
   maxBodyBytes: 2048,
-  handler: async (request) => {
+  handler: async (request, context) => {
     const input = parseInput(
       z.object({
         restaurantId: z.string().uuid(),
@@ -32,6 +32,7 @@ serve({
       restaurantId: input.restaurantId,
       actorId: actor.user.id,
       superAdminAal2: actor.authorization.isSuperAdmin,
+      returnOrigin: context.origin,
     });
   },
 });

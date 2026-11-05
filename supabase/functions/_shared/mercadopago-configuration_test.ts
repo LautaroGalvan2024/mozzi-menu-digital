@@ -5,6 +5,7 @@ import { base64url, decryptCredentials } from "./mercadopago-core.ts";
 import {
   beginPaymentConnection,
   exchangeAuthorizationCode,
+  paymentAdminReturnUrl,
   paymentConnectionConfiguration,
   requireMercadoPagoClientId,
 } from "./mercadopago.ts";
@@ -14,6 +15,7 @@ const actor = {
   restaurantId: "21000000-0000-4000-8000-000000000001",
   actorId: "51000000-0000-4000-8000-000000000001",
   superAdminAal2: false,
+  returnOrigin: "https://mozzi-menu-digital.vercel.app",
 };
 const key = base64url(new Uint8Array(32).fill(8));
 const fixtureClientId = "1234567890123456";
@@ -25,6 +27,8 @@ async function withConfiguration(action: () => Promise<void> | void) {
     MERCADOPAGO_ENCRYPTION_KEY: key,
     MERCADOPAGO_WEBHOOK_SECRET: "webhook-fixture-for-configuration",
     APP_BASE_URL: "https://mozzi.example.test",
+    APP_ALLOWED_ORIGINS:
+      "https://mozzi.example.test,https://mozzi-menu-digital.vercel.app,https://www.mozzi-comercio.online",
     SUPABASE_URL: "https://supabase.example.test",
   };
   const previous = new Map(Object.keys(values).map((name) => [name, Deno.env.get(name)]));
@@ -146,8 +150,57 @@ Deno.test("valid numeric application IDs stay lossless and produce one encrypted
     assertEquals(payload.restaurantId, actor.restaurantId);
     assertEquals(payload.actorId, actor.actorId);
     assertEquals(payload.superAdminAal2, false);
+    assertEquals(payload.returnOrigin, actor.returnOrigin);
     assertEquals(payload.liveMode, Deno.env.get("MERCADOPAGO_MODE") !== "test");
     assert(typeof payload.verifier === "string");
     assert(!String(calls[0]!.args.p_encrypted_payload).includes(actor.actorId));
+  });
+});
+
+Deno.test("payment connection keeps each validated administration origin", async () => {
+  await withConfiguration(async () => {
+    for (
+      const returnOrigin of [
+        "https://mozzi-menu-digital.vercel.app",
+        "https://www.mozzi-comercio.online",
+      ]
+    ) {
+      const { client, calls } = fakeAdmin();
+      const result = await beginPaymentConnection(client, { ...actor, returnOrigin });
+      const authorization = new URL(result.authorizationUrl);
+      const stateHash = await sha256Hex(authorization.searchParams.get("state")!);
+      const payload = await decryptCredentials(
+        String(calls[0]!.args.p_encrypted_payload),
+        key,
+        stateHash,
+      ) as Record<string, unknown>;
+      assertEquals(payload.returnOrigin, returnOrigin);
+      assertEquals(
+        paymentAdminReturnUrl(returnOrigin, "connected").href,
+        `${returnOrigin}/admin/medios-de-pago?mp=connected`,
+      );
+      assertEquals(
+        paymentAdminReturnUrl(returnOrigin, "cancelled").href,
+        `${returnOrigin}/admin/medios-de-pago?mp=cancelled`,
+      );
+    }
+  });
+});
+
+Deno.test("payment connection rejects unsafe return origins before persisting OAuth state", async () => {
+  await withConfiguration(async () => {
+    for (
+      const returnOrigin of [
+        "http://attacker.example",
+        "https://attacker.example",
+        "https://www.mozzi-comercio.online/otra-ruta",
+        "https://user:pass@www.mozzi-comercio.online",
+        "https://www.mozzi-comercio.online,https://attacker.example",
+      ]
+    ) {
+      const { client, calls } = fakeAdmin();
+      await assertRejects(() => beginPaymentConnection(client, { ...actor, returnOrigin }));
+      assertEquals(calls, []);
+    }
   });
 });

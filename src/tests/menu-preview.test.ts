@@ -73,10 +73,11 @@ describe('menu preview metadata', () => {
       },
       canonicalUrl: 'https://menu.example.com/r/la-rotiseria',
       imageUrl: 'https://project.supabase.co/cover.webp',
-      faviconUrl: 'https://menu.example.com/favicon.svg',
+      faviconUrl: 'https://menu.example.com/favicon.png',
     })
 
     expect(html).toContain('property="og:title"')
+    expect(html).toContain('property="og:site_name" content="Mozzi Comercio"')
     expect(html).toContain('property="og:image"')
     expect(html).toContain('https://project.supabase.co/cover.webp')
     expect(html).not.toContain('<script>alert(1)</script>')
