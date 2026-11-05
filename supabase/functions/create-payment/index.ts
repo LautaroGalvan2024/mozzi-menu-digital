@@ -80,7 +80,7 @@ serve({
           "Estamos preparando este pago. Esperá unos segundos y reintentá la misma compra.",
         );
       }
-      const returnUrl = paymentReturnUrl(input.restaurantSlug, attempt.actionId);
+      const returnUrl = paymentReturnUrl(context.origin, input.restaurantSlug, attempt.actionId);
       const preference = z.object({
         id: z.string(),
         init_point: z.string(),

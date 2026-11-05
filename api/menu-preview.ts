@@ -120,7 +120,7 @@ export function renderMenuPreviewHtml({
     <meta property="og:image" content="${safe.imageUrl}" />
     <meta property="og:image:secure_url" content="${safe.imageUrl}" />
     <meta property="og:image:alt" content="${safe.imageAlt}" />
-    <meta property="og:site_name" content="Mozzi" />
+    <meta property="og:site_name" content="Mozzi Comercio" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${safe.title}" />
     <meta name="twitter:description" content="${safe.description}" />
@@ -283,7 +283,7 @@ export async function handleMenuPreviewRequest(
 
     const canonicalUrl = new URL(`/${channel === 'store' ? 't' : 'r'}/${encodeURIComponent(restaurant.slug)}${productId ? `/producto/${productId}` : ''}`, configuration.appBaseUrl)
       .toString()
-    const faviconUrl = new URL('/favicon.svg', configuration.appBaseUrl).toString()
+    const faviconUrl = new URL('/favicon.png', configuration.appBaseUrl).toString()
     const imageUrl =
       buildPublicAssetUrl(configuration.supabaseUrl, restaurant.product?.imagePath ?? null) ??
       buildPublicAssetUrl(configuration.supabaseUrl, restaurant.coverPath) ??

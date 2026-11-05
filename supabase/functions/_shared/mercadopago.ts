@@ -1,6 +1,6 @@
 import { activeRestaurantRole, requireAal2, verifyActor } from "./auth.ts";
 import { createAdminClient } from "./clients.ts";
-import { getAppBaseUrl, getSupabaseUrl, requireEnv } from "./config.ts";
+import { getAllowedOrigins, getSupabaseUrl, parseAllowedOrigins, requireEnv } from "./config.ts";
 import { randomToken, sha256Hex } from "./crypto.ts";
 import { type SupabaseClient, z } from "./deps.ts";
 import { ApiError, databaseApiError } from "./errors.ts";
@@ -150,6 +150,22 @@ export function oauthRedirectUri(): string {
 export function providerLiveMode(): boolean {
   return Deno.env.get("MERCADOPAGO_MODE") !== "test";
 }
+
+/** Revalidate an encrypted return origin before using it in a browser redirect. */
+export function paymentAdminReturnUrl(
+  returnOrigin: string,
+  outcome: "connected" | "cancelled",
+): URL {
+  const origins = parseAllowedOrigins(returnOrigin);
+  if (origins.size !== 1) throw new Error("Payment return origin must contain exactly one origin");
+  const origin = origins.values().next().value;
+  if (!origin) throw new Error("Payment return origin is required");
+  if (!getAllowedOrigins().has(origin)) throw new Error("Payment return origin is not allowed");
+  const result = new URL("/admin/medios-de-pago", `${origin}/`);
+  result.searchParams.set("mp", outcome);
+  return result;
+}
+
 export async function exchangeAuthorizationCode(
   code: string,
   verifier: string,
@@ -172,19 +188,24 @@ export async function exchangeAuthorizationCode(
 /** Call only after authorizing the administrator; deployment errors never create OAuth state. */
 export async function beginPaymentConnection(
   admin: SupabaseClient,
-  actor: { restaurantId: string; actorId: string; superAdminAal2: boolean },
+  actor: {
+    restaurantId: string;
+    actorId: string;
+    superAdminAal2: boolean;
+    returnOrigin: string;
+  },
 ): Promise<{ authorizationUrl: string }> {
   const clientId = requireMercadoPagoClientId();
   requireEnv("MERCADOPAGO_CLIENT_SECRET");
   requireEnv("MERCADOPAGO_WEBHOOK_SECRET");
-  getAppBaseUrl();
+  const returnOrigin = paymentAdminReturnUrl(actor.returnOrigin, "connected").origin;
   const redirectUri = oauthRedirectUri();
   const encryptionKey = mpEncryptionKey();
   const state = randomToken(32);
   const verifier = randomToken(48);
   const stateHash = await sha256Hex(state);
   const encryptedPayload = await encryptCredentials(
-    { ...actor, verifier, liveMode: providerLiveMode() },
+    { ...actor, returnOrigin, verifier, liveMode: providerLiveMode() },
     encryptionKey,
     stateHash,
   );
@@ -204,10 +225,9 @@ export async function beginPaymentConnection(
   });
   return { authorizationUrl: url.href };
 }
-export function paymentReturnUrl(slug: string, actionId: string): string {
-  return `${getAppBaseUrl()}/t/${encodeURIComponent(slug)}/pago?order=${
-    encodeURIComponent(actionId)
-  }`;
+/** Use the origin validated by serve() so checkout recovery stays in the same browser storage. */
+export function paymentReturnUrl(origin: string, slug: string, actionId: string): string {
+  return `${origin}/t/${encodeURIComponent(slug)}/pago?order=${encodeURIComponent(actionId)}`;
 }
 
 export async function authorizePaymentAdmin(request: Request, restaurantId: string) {

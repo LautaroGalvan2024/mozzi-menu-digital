@@ -1,4 +1,4 @@
-# Mozzi: identidad y experiencia administrativa
+# Mozzi Comercio: identidad y experiencia administrativa
 
 Dirección elegida por el usuario: sobria y limpia, fondos claros, tipografía cuidada y naranja como acento. La identidad de Mozzi acompaña la gestión; cada comercio conserva su propia marca pública.
 
@@ -21,7 +21,9 @@ Revisión heurística de las vistas y sus componentes, seguida de comprobación 
 
 ## Identidad visual
 
-Marca: monograma M geométrico y firma «mozzi.». El símbolo no depende de un rubro gastronómico. Implementación accesible en `src/components/MozziBrand.tsx`; símbolo exportable en `public/brand/mozzi-mark.svg`.
+Marca: isotipo M entrelazado y firma «mozzi comercio», a partir de los originales entregados por el usuario. Los PNG de `public/brand/` conservan el dibujo, los colores y la transparencia; sólo se recortaron sus márgenes vacíos. La firma horizontal oscura se usa sobre las superficies claras del panel; la firma blanca, en la portada oscura. El isotipo se reserva para espacios compactos y el favicon cuadrado. No se sustituyen los logos ni los colores propios de cada comercio.
+
+Implementación accesible en `src/components/MozziBrand.tsx`, con estilos importados por el componente para funcionar también al abrir directamente la portada o el acceso. El nombre accesible es «Mozzi Comercio». La portada presenta catálogo, tienda, stock y pedidos para comercios en general; el selector abre Tienda por defecto (`/t/`) y permite elegir Menú (`/r/`).
 
 | Token | Valor | Uso |
 | --- | --- | --- |
@@ -30,8 +32,12 @@ Marca: monograma M geométrico y firma «mozzi.». El símbolo no depende de un 
 | Fondo | `#F7F8FA` | Área de trabajo |
 | Superficie | `#FFFFFF` | Formularios, listas y navegación |
 | Borde | `#E6E8EC` | Separación discreta |
-| Acento | `#BC4B24` | Acción principal y firma de Mozzi |
-| Acento suave | `#FCF0E9` | Selección en navegación |
+| Acento | `#FF6D00` | Color exacto de la nueva marca y acciones principales |
+| Acento fuerte | `#B94700` | Enlaces, texto pequeño y foco accesible sobre superficies claras |
+| Acento suave | `#FFF2E8` | Selección en navegación |
+| Tinta del logo | `#121212` | Firma sobre fondos claros y texto de botones naranjas |
+
+Los botones con fondo naranja de marca usan texto oscuro: blanco sobre `#FF6D00` no alcanza el contraste de texto normal. El panel mantiene fondos claros; la portada utiliza `#121212` con la firma blanca y acentos naranjas.
 
 Tipografía: Inter cuando está disponible, Segoe UI y fuentes de sistema como alternativas, sin descargas externas. Un mismo estilo sans para títulos y contenido. Títulos de página entre 24–29 px, secciones 15 px y controles de escritorio 12–14 px. Inputs móviles de 16 px para evitar zoom de iOS.
 

@@ -425,10 +425,32 @@ Deno.test("browser return parameters alone cannot credit a purchase", async () =
     });
     await assertRejects(() => reconcileProviderPayment(client, Object.fromEntries(query), account));
     assertEquals(calls, []);
-    const returnUrl = new URL(paymentReturnUrl("fundas", `${orderId}&status=approved`));
+    const returnUrl = new URL(
+      paymentReturnUrl("https://www.mozzi-comercio.online", "fundas", `${orderId}&status=approved`),
+    );
     assertEquals(returnUrl.searchParams.has("status"), false);
     assertEquals(returnUrl.searchParams.get("order"), `${orderId}&status=approved`);
   });
+});
+
+Deno.test("payment returns preserve new and previous checkout origins and encode path and order", () => {
+  for (
+    const origin of [
+      "https://www.mozzi-comercio.online",
+      "https://mozzi-comercio.online",
+      "https://mozzi-menu-digital.vercel.app",
+      "http://localhost:5173",
+    ]
+  ) {
+    const slug = "tienda/niño?#";
+    const actionId = `${orderId}&status=approved#fragment`;
+    const returnUrl = new URL(paymentReturnUrl(origin, slug, actionId));
+    assertEquals(returnUrl.origin, origin);
+    assertEquals(returnUrl.pathname, `/t/${encodeURIComponent(slug)}/pago`);
+    assertEquals(returnUrl.searchParams.get("order"), actionId);
+    assertEquals([...returnUrl.searchParams.keys()], ["order"]);
+    assertEquals(returnUrl.hash, "");
+  }
 });
 
 Deno.test("verified provider statuses map to distinct payment events including refunds and disputes", async () => {

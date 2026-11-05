@@ -14,6 +14,7 @@ import {
   exchangeAuthorizationCode,
   mpEncryptionKey,
   normalizeOAuthTokenResponse,
+  paymentAdminReturnUrl,
   rpc,
   saveProviderAccount,
 } from "../_shared/mercadopago.ts";
@@ -49,6 +50,7 @@ Deno.serve(async (request) => {
       superAdminAal2: z.boolean(),
       verifier: z.string(),
       liveMode: z.boolean(),
+      returnOrigin: z.string().max(2048).optional(),
     }).parse(await decryptCredentials(stored.encryptedPayload, mpEncryptionKey(), stateHash));
     // Recheck current permissions after the browser's round trip.
     stage = "authorization_check";
@@ -72,9 +74,17 @@ Deno.serve(async (request) => {
       !(member?.role === "restaurant_admin" && member.status === "active" ||
         platform && payload.superAdminAal2)
     ) throw new ApiError(403, "FORBIDDEN", "Ya no tenés permisos para conectar esta cuenta.");
-    const resultUrl = new URL(`${getAppBaseUrl()}/admin/medios-de-pago`);
-    if (url.searchParams.has("error")) resultUrl.searchParams.set("mp", "cancelled");
-    else {
+    // States created immediately before this release expire after ten minutes. Keep their
+    // configured redirect explicit and observable while new states always carry their origin.
+    const returnOrigin = payload.returnOrigin ?? getAppBaseUrl();
+    if (!payload.returnOrigin) {
+      safeLog("warn", "payment.connection_legacy_return_origin", requestId);
+    }
+    const resultUrl = paymentAdminReturnUrl(
+      returnOrigin,
+      url.searchParams.has("error") ? "cancelled" : "connected",
+    );
+    if (!url.searchParams.has("error")) {
       const code = z.string().min(1).max(2048).parse(url.searchParams.get("code"));
       stage = "token_exchange";
       const exchange = await exchangeAuthorizationCode(code, payload.verifier, payload.liveMode);
@@ -85,7 +95,6 @@ Deno.serve(async (request) => {
       );
       stage = "account_save";
       await saveProviderAccount(admin, payload.restaurantId, validatedToken);
-      resultUrl.searchParams.set("mp", "connected");
       safeLog("info", "payment.account_connected", requestId, {
         restaurantId: payload.restaurantId,
       });

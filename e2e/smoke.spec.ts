@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('landing and administrative login are reachable', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /menús digitales/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /tu comercio, listo para vender online/i })).toBeVisible()
   await page.getByRole('link', { name: /administración/i }).click()
   await expect(page).toHaveURL(/\/login/)
   await expect(page.getByRole('heading', { name: /ingresá al panel/i })).toBeVisible()

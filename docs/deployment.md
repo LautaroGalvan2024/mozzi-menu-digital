@@ -113,17 +113,32 @@ En **Authentication > Providers / Sign In**:
 - habilitá protección de contraseñas filtradas si el plan la ofrece;
 - revisá duración de sesión y rotación de refresh tokens.
 
-En **URL Configuration** agregá entradas exactas:
+En **URL Configuration**, configurá **Site URL** como `https://www.mozzi-comercio.online`. Durante la transición, conservá también las redirecciones del dominio anterior y de desarrollo. Agregá estas entradas exactas en **Redirect URLs**:
 
 ```text
 http://localhost:5173/auth/callback
-https://staging.example.com/auth/callback
-https://menu.example.com/auth/callback
-https://menu.example.com/auth/set-password
-https://menu.example.com/auth/reset-password
+http://localhost:5173/auth/callback?next=%2Fauth%2Fset-password
+http://localhost:5173/auth/set-password
+http://localhost:5173/auth/reset-password
+http://127.0.0.1:5173/auth/callback
+http://127.0.0.1:5173/auth/callback?next=%2Fauth%2Fset-password
+http://127.0.0.1:5173/auth/set-password
+http://127.0.0.1:5173/auth/reset-password
+https://www.mozzi-comercio.online/auth/callback
+https://www.mozzi-comercio.online/auth/callback?next=%2Fauth%2Fset-password
+https://www.mozzi-comercio.online/auth/set-password
+https://www.mozzi-comercio.online/auth/reset-password
+https://mozzi-comercio.online/auth/callback
+https://mozzi-comercio.online/auth/callback?next=%2Fauth%2Fset-password
+https://mozzi-comercio.online/auth/set-password
+https://mozzi-comercio.online/auth/reset-password
+https://mozzi-menu-digital.vercel.app/auth/callback
+https://mozzi-menu-digital.vercel.app/auth/callback?next=%2Fauth%2Fset-password
+https://mozzi-menu-digital.vercel.app/auth/set-password
+https://mozzi-menu-digital.vercel.app/auth/reset-password
 ```
 
-Agregá solo previews Vercel controladas. Evitá comodines que permitan a cualquier dominio recibir un token.
+Agregá staging y previews Vercel controladas solo si se usan, con sus rutas exactas. Evitá comodines que permitan a cualquier dominio recibir un token. Revisá también que las plantillas de email no contengan el dominio anterior fijado en el HTML.
 
 En **SMTP Settings**, configurá un proveedor propio antes de invitar usuarios reales o habilitar recuperaciones a volumen. Verificá remitente, SPF, DKIM, DMARC, rate limits y enlaces de staging/producción.
 
@@ -153,7 +168,7 @@ Variables admitidas:
 ```env
 VITE_SUPABASE_URL=https://coqkgyaekenxccbxlozo.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=CLAVE_PUBLICA_DEL_PROYECTO
-VITE_APP_BASE_URL=https://menu.example.com
+VITE_APP_BASE_URL=https://www.mozzi-comercio.online
 VITE_TURNSTILE_SITE_KEY=
 ```
 
@@ -164,22 +179,45 @@ No agregues claves administrativas, `TURNSTILE_SECRET_KEY`, secretos de rate lim
 Después del deploy, verificá que el crawler reciba los metadatos del restaurante y que un navegador normal siga recibiendo la SPA:
 
 ```powershell
-curl.exe -A "facebookexternalhit/1.1" https://menu.example.com/r/slug-del-restaurante
-curl.exe -A "Mozilla/5.0" -I https://menu.example.com/r/slug-del-restaurante
+curl.exe -A "facebookexternalhit/1.1" https://www.mozzi-comercio.online/r/slug-del-restaurante
+curl.exe -A "Mozilla/5.0" -I https://www.mozzi-comercio.online/r/slug-del-restaurante
 ```
 
 La primera respuesta debe contener `og:title`, `og:url` y `og:image` absolutos. WhatsApp puede conservar en caché una vista previa ya consultada; probá primero con un enlace nuevo después de publicar.
 
 ### Dominio y orígenes
 
-El origen exacto de producción debe coincidir en cuatro lugares:
+La URL canónica es `https://www.mozzi-comercio.online`. En el proyecto Vercel `mozzi-menu-digital`, `mozzi-comercio.online` redirige con HTTP 308 a `www.mozzi-comercio.online`. Conservá las rutas y los parámetros de consulta. Mantené `mozzi-menu-digital.vercel.app` operativo y sin redirección global durante la transición: las sesiones y la recuperación de pagos del navegador están asociadas al origen donde comenzaron.
+
+El origen canónico de producción debe coincidir en cuatro lugares:
 
 1. `VITE_APP_BASE_URL` de Vercel;
 2. `APP_BASE_URL` de Edge Functions;
-3. `APP_ALLOWED_ORIGINS` de Edge Functions;
-4. Site URL y Redirect URLs de Supabase Auth.
+3. una entrada exacta de `APP_ALLOWED_ORIGINS` de Edge Functions;
+4. Site URL y las rutas de Redirect URLs de Supabase Auth indicadas arriba.
 
-Si hay staging, agregalo expresamente. No incluyas una preview abierta con patrón global.
+La configuración Edge para esta transición es:
+
+```env
+APP_BASE_URL=https://www.mozzi-comercio.online
+APP_ALLOWED_ORIGINS=http://localhost:5173,https://mozzi-menu-digital.vercel.app,https://mozzi-comercio.online,https://www.mozzi-comercio.online
+```
+
+Actualizá solamente estas dos variables públicas de Edge, preservando todos los secretos existentes. Si se vuelve a ejecutar el asistente de configuración, comprobá antes de cargar el archivo que conserve los cuatro orígenes. Si hay staging, agregalo expresamente; no uses un patrón global para previews.
+
+El dominio del frontend se conecta en Vercel. Conservá la URL `https://coqkgyaekenxccbxlozo.supabase.co`, las claves del proyecto y los endpoints de webhook y OAuth de Mercado Pago en Supabase; no hace falta contratar un dominio personalizado para la API de Supabase.
+
+Orden de publicación:
+
+1. Comprobar la activación DNS y HTTPS de apex y `www` en Vercel. Un dominio comprado allí usa `ns1.vercel-dns.com` y `ns2.vercel-dns.com`; Vercel administra los registros de los dominios asociados al proyecto.
+2. Agregar los nuevos orígenes en Edge, conservando el dominio anterior y los orígenes locales.
+3. Desplegar juntos `create-payment`, `mercadopago-connect` y `mercadopago-callback`. Las conexiones administrativas nuevas guardan el origen validado que las inició y vuelven a él; los estados OAuth creados antes de este despliegue todavía dependen del respaldo `APP_BASE_URL`.
+4. Mantener `APP_BASE_URL` con el dominio anterior durante al menos 10 minutos, que es la vigencia máxima de esos estados OAuth previos. Después actualizarlo al dominio canónico.
+5. Actualizar Site URL y Redirect URLs de Auth, conservando las entradas anteriores, y cambiar `VITE_APP_BASE_URL` al dominio canónico antes de publicar el frontend. La variable `VITE_*` se incorpora durante el build.
+6. Probar OPTIONS y una operación real en staging desde cada origen admitido; un origen no listado debe seguir recibiendo 403 sin `Access-Control-Allow-Origin`. Verificar invitación, recuperación de contraseña, enlaces públicos, acceso directo a rutas y vistas previas compartidas.
+7. Probar pagos nuevos desde el dominio nuevo y el anterior. `create-payment` construye `back_urls` con `context.origin`, validado por la allowlist de `serve()`, para regresar al almacenamiento del navegador que conserva el token de recuperación. Las preferencias ya creadas mantienen sus URLs; no retirar el dominio anterior mientras existan intentos pendientes que dependan de él.
+
+Referencias: [dominios y nameservers de Vercel](https://vercel.com/docs/domains/working-with-nameservers), [redirecciones de Supabase Auth](https://supabase.com/docs/guides/auth/redirect-urls).
 
 ## Validación previa
 

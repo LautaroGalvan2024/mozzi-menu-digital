@@ -535,6 +535,7 @@ try {
   }
 
   $existingEdgePath = Join-Path $ProjectRoot '.env.edge.production'
+  $existingAllowedOrigins = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'APP_ALLOWED_ORIGINS'
   $rateLimitSecret = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'RATE_LIMIT_HASH_SECRET'
   $maintenanceSecret = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'MAINTENANCE_SECRET'
   $existingSecretKeyName = Get-ExistingEnvironmentValue -Path $existingEdgePath -Name 'APP_SECRET_KEY_NAME'
@@ -614,6 +615,16 @@ try {
   $allowedOrigins.Add($LocalAppUrl)
   if ($edgeBaseUrl -ne $LocalAppUrl) {
     $allowedOrigins.Add($edgeBaseUrl)
+  }
+  if ($existingAllowedOrigins) {
+    foreach ($candidate in $existingAllowedOrigins.Split(',')) {
+      $trimmed = $candidate.Trim()
+      if (-not $trimmed) { continue }
+      $normalized = Normalize-AppUrl -Value $trimmed -AllowLoopbackHttp $true
+      if (-not $allowedOrigins.Contains($normalized)) {
+        $allowedOrigins.Add($normalized)
+      }
+    }
   }
   $edgeValues = [ordered]@{
     APP_BASE_URL = $edgeBaseUrl
