@@ -75,10 +75,10 @@ async function barrier(name) {
 function save(f, onHand, expectedVersion, operation = randomUUID(), name = 'Edited case') {
   return `select 'RESULT:'||public.save_product_catalog_with_stock(${literal(f.tenant)},
     ${json({ id: f.product, categoryId: f.category, name, basePriceCents: 1000 })},'[]','{}','{}',
-    ${literal(operation)},${json({ onHand: String(onHand), expectedVersion })})::text;`
+    ${literal(operation)},${onHand === null ? 'null' : json({ onHand: String(onHand), expectedVersion })})::text;`
 }
 
-function fixture() {
+function fixture(initialQuantity = 5) {
   const f = { tenant: randomUUID(), actor: randomUUID(), product: randomUUID(), category: randomUUID() }
   f.slug = `stock-race-${f.tenant}`
   query(`begin;
@@ -90,7 +90,7 @@ function fixture() {
     values(${literal(f.tenant)},${literal(f.actor)},'restaurant_admin','active',${literal(f.actor)});
     insert into public.categories(id,restaurant_id,name,slug) values(${literal(f.category)},${literal(f.tenant)},'Cases','cases');
     ${auth(f.actor)}
-    ${save(f, 5, null, randomUUID(), 'Original case')}
+    ${save(f, initialQuantity, null, randomUUID(), 'Original case')}
     select public.activate_inventory_from_product_stock(${literal(f.tenant)},${literal(randomUUID())},0);
     reset role;
     select public.save_payment_account(${literal(f.tenant)},${literal(f.tenant)},'encrypted-synthetic',now()+interval '1 day',false);
@@ -163,10 +163,39 @@ const twoEditors = fixture()
 await race(auth(twoEditors.actor) + save(twoEditors, 4, '1'), auth(twoEditors.actor) + save(twoEditors, 9, '1'), /INVENTORY_VERSION_CONFLICT/)
 assertBalance(twoEditors, 4, 0, 2, 0)
 
-console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 5, scenarios: [
+// There is no balance row to lock before a product's first stock load. The
+// restaurant lock must still serialize it with creation of immutable policies.
+const untrackedOrderFirst = fixture(null)
+const [untrackedCheckout] = await race(checkout(untrackedOrderFirst), auth(untrackedOrderFirst.actor) + save(untrackedOrderFirst, 0, null))
+const untrackedAttempt = result(untrackedCheckout)
+assertBalance(untrackedOrderFirst, 0, 0, 1, 1)
+assert.equal(query(`select stock_tracked from public.order_inventory_lines where order_id=${literal(untrackedAttempt.orderId)};`), 'f')
+query(`begin;set local role service_role;
+  select public.reconcile_online_payment(${literal(untrackedAttempt.attemptId)},'optional-race-payment','approved',1000,'ARS',now());
+  reset role;${auth(untrackedOrderFirst.actor)}
+  select public.claim_order(${literal(untrackedAttempt.actionId)});
+  select public.complete_order(${literal(untrackedAttempt.orderId)});
+  commit;`)
+assertBalance(untrackedOrderFirst, 0, 0, 1, 1)
+assert.equal(query(`select count(*) from public.inventory_movements m join public.inventory_operations op on op.id=m.operation_id
+  where op.order_id=${literal(untrackedAttempt.orderId)};`), '0')
+
+const firstLoadBeforeOrder = fixture(null)
+const [, trackedCheckout] = await race(auth(firstLoadBeforeOrder.actor) + save(firstLoadBeforeOrder, 2, null), checkout(firstLoadBeforeOrder))
+assertBalance(firstLoadBeforeOrder, 2, 1, 2, 1)
+assert.equal(query(`select stock_tracked from public.order_inventory_lines where order_id=${literal(result(trackedCheckout).orderId)};`), 't')
+
+const firstZeroBeforeOrder = fixture(null)
+await race(auth(firstZeroBeforeOrder.actor) + save(firstZeroBeforeOrder, 0, null), checkout(firstZeroBeforeOrder), /INSUFFICIENT_STOCK/)
+assertBalance(firstZeroBeforeOrder, 0, 0, 1, 0)
+
+console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 8, scenarios: [
   'checkout first: stale absolute edit waits then fails version check; reservation and catalogue remain intact',
   'editor first: checkout waits, then reserves against newly committed quantity without lost units',
   'editor sets zero first: checkout waits then fails wholly with no order or reservation',
   'same command from two sessions: one catalogue/stock operation and durable replay',
   'two editors with same version: one succeeds and stale quantity cannot overwrite it',
+  'untracked checkout first: initial zero waits; later approval and delivery preserve the original unrestricted line',
+  'initial quantity first: checkout waits and freezes a controlled line against committed stock',
+  'initial zero first: checkout waits then rejects without an order or reservation',
 ], fixtures: 'synthetic only; retained with immutable history; physical and reserved ledger sums checked' }))

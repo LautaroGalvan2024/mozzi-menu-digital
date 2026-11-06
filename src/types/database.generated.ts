@@ -579,6 +579,7 @@ export type Database = {
           product_id: string
           quantity: number
           restaurant_id: string
+          stock_tracked: boolean
         }
         Insert: {
           order_id: string
@@ -586,6 +587,7 @@ export type Database = {
           product_id: string
           quantity: number
           restaurant_id: string
+          stock_tracked?: boolean
         }
         Update: {
           order_id?: string
@@ -593,6 +595,7 @@ export type Database = {
           product_id?: string
           quantity?: number
           restaurant_id?: string
+          stock_tracked?: boolean
         }
         Relationships: [
           {

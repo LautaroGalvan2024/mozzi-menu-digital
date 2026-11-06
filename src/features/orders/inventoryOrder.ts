@@ -10,7 +10,7 @@ const restockQuantitySchema = z.union([
 ]).pipe(z.number().int().min(0).max(100))
 export const inventoryDetailSchema = z.object({
   replacementOrderId: z.string().uuid().nullable(),
-  inventoryOperations: z.array(z.object({ id: z.string().uuid(), kind: z.string(), reason: z.string().nullable(), createdAt: z.string(), actorUserId: z.string().uuid().nullable(), result: z.object({ restocked: z.boolean().optional(), restockQuantities: z.array(z.object({ productId: z.string().uuid(), quantity: restockQuantitySchema })).nullable().optional() }).passthrough() })),
+  inventoryOperations: z.array(z.object({ id: z.string().uuid(), kind: z.string(), reason: z.string().nullable(), createdAt: z.string(), actorUserId: z.string().uuid().nullable(), result: z.object({ items: z.array(z.object({ productId: z.string().uuid() })).default([]), restocked: z.boolean().optional(), restockQuantities: z.array(z.object({ productId: z.string().uuid(), quantity: restockQuantitySchema })).nullable().optional() }).passthrough() })),
 })
 export const inventoryOutcomeLabel = { none: 'Sin entrega registrada', delivered: 'Entrega vigente', corrected: 'Entrega corregida', returned: 'Devuelta' } as const
 export function isReversed(order: Pick<AdminOrderRow, 'inventory_outcome'>): boolean {

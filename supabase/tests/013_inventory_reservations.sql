@@ -49,6 +49,11 @@ select set_config('request.jwt.claims','{"sub":"1d000000-0000-4000-8000-00000000
 set local role authenticated;
 select is(public.get_inventory('2d000000-0000-4000-8000-000000000001')#>>'{policy,businessConfirmed}','false','business policy is not silently confirmed');
 select is(public.claim_order((select action_id from inventory_test_orders where label='legacy'))->>'claimed','true','legacy acceptance remains compatible before activation');
+-- This SKU is explicitly counted before the frozen count; archived initialized
+-- balances stay mandatory even though the older order itself remains untracked.
+select public.save_product_catalog_with_stock('2d000000-0000-4000-8000-000000000001',
+  '{"id":"4d000000-0000-4000-8000-000000000001","categoryId":"3d000000-0000-4000-8000-000000000001","name":"Product A","basePriceCents":100}',
+  '[]','{}','{}',extensions.gen_random_uuid(),'{"onHand":"0","expectedVersion":null}');
 update public.products set deleted_at=now(),active=false where id='4d000000-0000-4000-8000-000000000001';
 select is((select item->>'archived' from jsonb_array_elements(public.get_inventory('2d000000-0000-4000-8000-000000000001')->'items') item where item->>'productId'='4d000000-0000-4000-8000-000000000001'),'true','archived SKU in accepted legacy order remains visible before initial count');
 select lives_ok($$select public.begin_inventory_count('2d000000-0000-4000-8000-000000000001','9d000000-0000-4000-8000-000000000001','Opening physical count')$$,'administrator opens immobile physical count');
@@ -66,7 +71,7 @@ select throws_ok($$select public.finish_inventory_count('9d000000-0000-4000-8000
 select throws_ok($$select public.confirm_inventory_business_policy('2d000000-0000-4000-8000-000000000001','{}')$$,'22023','INVENTORY_BUSINESS_POLICY_UNSUPPORTED','incomplete business assumptions cannot activate stock');
 select lives_ok($$select public.confirm_inventory_business_policy('2d000000-0000-4000-8000-000000000001','{"unitModel":"whole_product","sourceOfTruth":"app","otherChannels":"record_before_handoff","returns":"full_only","partialDeliveries":"none","physicalScope":"until_handoff_including_transit","acceptance":"reserve","delivery":"physical_handoff","acceptedReservationsExpire":false}')$$,'explicit supported business policy can be confirmed in synthetic test');
 select throws_ok($$select public.finish_inventory_count('9d000000-0000-4000-8000-000000000001',(select rows - 0 from inventory_count_rows),array[(select id from inventory_test_orders where label='legacy')],true,'All channels stopped and reconciled',true)$$,
- '22023','INVENTORY_COUNT_INCOMPLETE','activation cannot omit archived SKU promised in a pending legacy order');
+ '22023','INVENTORY_COUNT_INCOMPLETE','activation cannot omit an initialized archived SKU');
 select throws_ok($$select public.finish_inventory_count('9d000000-0000-4000-8000-000000000001',(select rows from inventory_count_rows),'{}',true,'All channels stopped and reconciled',true)$$,
  '22023','INVENTORY_PENDING_REVIEW_REQUIRED','activation cannot silently leave open legacy orders');
 select throws_ok($$select public.finish_inventory_count('9d000000-0000-4000-8000-000000000001',(select rows from inventory_count_rows),array[(select id from inventory_test_orders where label='legacy')],false,'All channels stopped and reconciled',true)$$,
@@ -79,9 +84,13 @@ select throws_ok($$select public.finish_inventory_count('9d000000-0000-4000-8000
  '22023','IDEMPOTENCY_CONFLICT','count retry with different content conflicts');
 reset role;
 select is((select on_hand from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000002'),0::bigint,'explicit zero initializes a balance');
-select ok((select inventory_tracked from public.orders where id=(select id from inventory_test_orders where label='legacy')),'reviewed legacy pending now has controlled snapshot');
-select is((select reserved from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000001'),1::bigint,'adopting already accepted legacy order creates its reservation atomically');
+select ok((select inventory_tracked from public.orders where id=(select id from inventory_test_orders where label='legacy')),'reviewed legacy order joins the inventory lifecycle with its immutable line policy');
+select is((select reserved from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000001'),0::bigint,'activation never reserves an older untracked order retroactively');
 update public.products set deleted_at=null,active=true where id='4d000000-0000-4000-8000-000000000001';
+select pg_temp.inventory_fixture_order('controlled-one',1);
+set local role authenticated;
+select public.claim_order((select action_id from inventory_test_orders where label='controlled-one'));
+reset role;
 select pg_temp.inventory_fixture_order('four',4);
 select pg_temp.inventory_fixture_order('competing',4);
 select pg_temp.inventory_fixture_order('mixed',1,1);
@@ -92,7 +101,7 @@ select throws_ok($$select public.claim_order((select action_id from inventory_te
 select throws_ok($$select public.claim_order((select action_id from inventory_test_orders where label='mixed'))$$,'22023','INSUFFICIENT_STOCK','multi-SKU acceptance fails wholly when one SKU lacks stock');
 reset role;
 select is((select on_hand from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000001'),5::bigint,'acceptance never deducts physical stock');
-select is((select reserved from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000001'),5::bigint,'failed competing and mixed requests preserve new and adopted reservations');
+select is((select reserved from public.inventory_balances where product_id='4d000000-0000-4000-8000-000000000001'),5::bigint,'failed competing and mixed requests preserve both controlled reservations');
 select is((select count(*) from public.inventory_operations where order_id=(select id from inventory_test_orders where label='four') and kind='reserve'),1::bigint,'acceptance retry creates one reserve operation');
 select is((select status::text from public.orders where id=(select id from inventory_test_orders where label='mixed')),'generated','failed reservation leaves order state intact');
 create function pg_temp.inventory_injected_failure() returns trigger language plpgsql as $$begin if new.kind='delivery' then raise exception 'TEST_INJECTED_FAILURE'; end if; return new; end$$;
@@ -138,9 +147,9 @@ reset role;
 select is((select sum(returned_quantity)::bigint from public.inventory_movements where operation_id='ad000000-0000-4000-8000-000000000004'),2::bigint,'total received quantity remains two even when only one is sellable');
 select is((select sum(delta_on_hand)::bigint from public.inventory_movements where operation_id='ad000000-0000-4000-8000-000000000004'),1::bigint,'only explicit sellable quantity returns to on-hand stock');
 set local role authenticated;
-select public.claim_order((select action_id from inventory_test_orders where label='legacy'));
-select is(public.cancel_order((select id from inventory_test_orders where label='legacy'),'Customer cancelled')->>'cancelled','true','cancellation releases reservation without physical receipt');
-select is(public.cancel_order((select id from inventory_test_orders where label='legacy'),'Customer cancelled')->>'cancelled','false','cancellation retry does not release twice');
+select public.cancel_order((select id from inventory_test_orders where label='legacy'),'Close untracked legacy order');
+select is(public.cancel_order((select id from inventory_test_orders where label='controlled-one'),'Customer cancelled')->>'cancelled','true','cancellation releases reservation without physical receipt');
+select is(public.cancel_order((select id from inventory_test_orders where label='controlled-one'),'Customer cancelled')->>'cancelled','false','cancellation retry does not release twice');
 select ok(to_regprocedure('public.change_inventory_policy(uuid,text,text)') is null,'no policy-changing overload bypasses the reviewed version');
 select throws_ok($$select public.change_inventory_policy('2d000000-0000-4000-8000-000000000001','paused','Missing reviewed version',null)$$,'22023','INVENTORY_VERSION_REQUIRED','policy changes require the reviewed version');
 select set_config('test.inventory_policy_before_pause',(select inventory_version::text from public.restaurants where id='2d000000-0000-4000-8000-000000000001'),true);
@@ -189,8 +198,8 @@ select throws_ok($$select public.get_inventory('2d000000-0000-4000-8000-00000000
 select is((select count(*) from public.inventory_balances where restaurant_id='2d000000-0000-4000-8000-000000000001'),0::bigint,'RLS hides balance rows across tenants');
 reset role;
 insert into public.products(id,restaurant_id,category_id,code,name,base_price_cents,created_by,updated_by) values('4d000000-0000-4000-8000-000000000003','2d000000-0000-4000-8000-000000000001','3d000000-0000-4000-8000-000000000001','NEW-STOCK','Uninitialized product',100,'1d000000-0000-4000-8000-000000000001','1d000000-0000-4000-8000-000000000001');
-select throws_ok($$select pg_temp.inventory_fixture_order('new-sku-blocked',1,0,'4d000000-0000-4000-8000-000000000003')$$,'22023','INVENTORY_NOT_INITIALIZED','new SKU inherits mandatory inventory and cannot use legacy checkout');
-select is((select product->>'available' from jsonb_array_elements(public.get_public_menu('inventory-a')->'categories') category cross join lateral jsonb_array_elements(category->'products') product where product->>'id'='4d000000-0000-4000-8000-000000000003'),'false','uninitialized SKU is unavailable in public menu without ledger exposure');
+select lives_ok($$select pg_temp.inventory_fixture_order('new-sku-untracked',1,0,'4d000000-0000-4000-8000-000000000003')$$,'uninitialized SKU accepts orders without inventing stock');
+select is((select product->>'available' from jsonb_array_elements(public.get_public_menu('inventory-a')->'categories') category cross join lateral jsonb_array_elements(category->'products') product where product->>'id'='4d000000-0000-4000-8000-000000000003'),'true','uninitialized SKU is available in public menu without ledger exposure');
 select ok(not exists(select 1 from public.inventory_balances b where b.restaurant_id='2d000000-0000-4000-8000-000000000001' and (
  b.on_hand<>(select coalesce(sum(m.delta_on_hand),0) from public.inventory_movements m where m.restaurant_id=b.restaurant_id and m.product_id=b.product_id)
  or b.reserved<>(select coalesce(sum(m.delta_reserved),0) from public.inventory_movements m where m.restaurant_id=b.restaurant_id and m.product_id=b.product_id))), 'ledger deltas reconcile exactly to physical and reserved balances');

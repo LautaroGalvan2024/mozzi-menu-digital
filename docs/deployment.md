@@ -257,6 +257,18 @@ Estos comandos son el criterio de release, no una afirmación de que se haya des
 
 ## Rollback y recuperación
 
+### Stock opcional por producto (06/11/2026)
+
+La migración `202611060001_optional_product_stock.sql` permite vender productos sin cantidad cargada, también en comercios con control de stock activo. Una cantidad explícita de cero sigue agotada con el control activo; la disponibilidad manual, las pausas y las ventanas de conteo siguen aplicándose. La activación es manual y admite catálogos mixtos.
+
+Cada línea nueva guarda de forma inmutable si controlaba stock al crear el pedido. Cargar cantidades o activar el control después sólo afecta pedidos nuevos. Las líneas históricas que ya tenían snapshot conservan su control; los pedidos anteriores sin snapshot se incorporan sin descuentos retroactivos. Reservas, pagos, entregas y devoluciones usan esa condición original.
+
+Los conteos requieren todos los saldos existentes, incluidos los archivados y los de cero unidades. Se pueden omitir productos nunca inicializados; ingresar una cantidad los incorpora al control. Dejar vacío el campo de stock al editar conserva una cantidad previamente guardada.
+
+Aplicar esta migración antes del frontend. Conserva las firmas RPC y el contrato público `available`, e incrementa las revisiones del catálogo para actualizar sesiones abiertas. Verificar la migración sobre una restauración aislada y ejecutar las suites de inventario, pagos, catálogo y stock opcional, además de los harnesses de concurrencia y los recorridos simulados. La operación no activa ni pausa automáticamente ningún comercio.
+
+### Recuperación compatible
+
 - **Frontend:** después de publicar el checkout nuevo, no promover literalmente `bf18376` ni un deployment anterior. El formato nuevo de intentos en `sessionStorage` usa `version: 2` y huellas SHA256; el frontend antiguo puede reemplazar una clave de idempotencia incierta y duplicar un pedido cuya respuesta se perdió. Preparar un build compatible que conserve el checkout, la idempotencia y la lectura de intentos de la versión nueva, o corregir hacia adelante. Verificar también compatibilidad con el esquema y las funciones actuales. El snapshot del deployment previo sirve para trazabilidad y comparación; no garantiza un rollback compatible del checkout.
 - **Edge Functions:** redesplegar el commit anterior compatible. Rotar secretos si el incidente los afecta.
 - **Base:** no ejecutar SQL inverso improvisado. Crear una migración correctiva o restaurar a un proyecto aislado y seguir el procedimiento de recuperación.

@@ -1,11 +1,12 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
+import type { CommerceChannel } from '../../lib/commerce-channel'
 import { queryKeys } from '../../lib/queryKeys'
 import { usePublicCatalog } from './usePublicCatalog'
 
-const mocks = vi.hoisted(() => ({ meta: vi.fn(), page: vi.fn(), revision: vi.fn() }))
+const mocks = vi.hoisted(() => ({ meta: vi.fn(), page: vi.fn(), revision: vi.fn(), detail: vi.fn() }))
 vi.mock('./api', () => ({
   fetchPublicCatalogMeta: mocks.meta,
   fetchPublicCatalogPage: mocks.page,
@@ -15,11 +16,11 @@ vi.mock('../../lib/env', () => ({ env: { isSupabaseConfigured: true } }))
 
 const restaurantId = '10000000-0000-4000-8000-000000000001'
 const categoryId = '20000000-0000-4000-8000-000000000001'
-const group = (id: string, name: string) => ({
+const group = (id: string, name: string, available = true) => ({
   id,
   categoryId,
   family: null,
-  variants: [{ id, categoryId, name }],
+  variants: [{ id, categoryId, name, available }],
 })
 const meta = (revision: number) => ({
   revision,
@@ -53,6 +54,15 @@ function ErrorProbe() {
   if (catalog.isLoading) return <p>Cargando catálogo</p>
   if (!catalog.meta.data || !catalog.pages.data) return <p>No se pudo cargar el catálogo</p>
   return <p>Catálogo listo</p>
+}
+
+function AvailabilityProbe({ channel }: { channel: CommerceChannel }) {
+  const catalog = usePublicCatalog('mozzi', channel)
+  const detail = useQuery({ queryKey: queryKeys.publicCatalog.group('mozzi', channel, 'a'), queryFn: () => mocks.detail(channel), staleTime: Infinity })
+  return <>
+    <p data-testid="catalog-availability">{catalog.meta.data?.revision}:{catalog.groups[0]?.variants[0]?.available ? 'Disponible' : 'Agotado'}</p>
+    <p data-testid="detail-availability">{detail.data?.revision}:{detail.data?.group.variants[0]?.available ? 'Disponible' : 'Agotado'}</p>
+  </>
 }
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -146,5 +156,36 @@ it('preserves the last consistent snapshot when a refresh fails', async () => {
 
   await screen.findByText('Error de actualización')
   expect(screen.getByText('Vigente')).toBeInTheDocument()
+  queryClient.clear()
+})
+
+it.each(['menu', 'store'] as const)('refreshes %s availability and its cached detail when stock changes from unloaded to zero to positive', async channel => {
+  // Availability is authoritative in the public API; balances remain private.
+  let revision = 1
+  let available = true
+  const item = () => group('a', 'Producto con stock opcional', available)
+  mocks.meta.mockImplementation(async () => meta(revision))
+  mocks.page.mockImplementation(async () => ({ revision, items: [item()], nextCursor: null }))
+  mocks.detail.mockImplementation(async () => ({ revision, group: item() }))
+  mocks.revision.mockImplementation(async () => ({ revision, updatedAt: '2026-11-06T12:00:00Z' }))
+  const queryClient = client()
+  render(<QueryClientProvider client={queryClient}><AvailabilityProbe channel={channel} /></QueryClientProvider>)
+  await waitFor(() => {
+    expect(screen.getByTestId('catalog-availability')).toHaveTextContent('1:Disponible')
+    expect(screen.getByTestId('detail-availability')).toHaveTextContent('1:Disponible')
+  })
+
+  for (const state of [{ revision: 2, available: false, label: 'Agotado' }, { revision: 3, available: true, label: 'Disponible' }]) {
+    revision = state.revision
+    available = state.available
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: queryKeys.publicCatalog.revision('mozzi', channel), exact: true }) })
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-availability')).toHaveTextContent(`${revision}:${state.label}`)
+      expect(screen.getByTestId('detail-availability')).toHaveTextContent(`${revision}:${state.label}`)
+    })
+  }
+  expect(mocks.page).toHaveBeenCalledWith(expect.objectContaining({ channel }))
+  expect(mocks.detail).toHaveBeenCalledWith(channel)
+  expect(mocks.detail.mock.calls.length).toBeGreaterThanOrEqual(3)
   queryClient.clear()
 })

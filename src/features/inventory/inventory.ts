@@ -40,9 +40,9 @@ export function inventoryError(error: unknown): string {
     INSUFFICIENT_STOCK: 'No alcanza el stock disponible. Revisá las reservas y las cantidades.',
     INVENTORY_PAUSED: 'El stock está pausado. Un administrador debe resolver la contingencia antes de continuar.',
     INVENTORY_CUTOVER: 'Hay un conteo físico en curso. Las operaciones están pausadas hasta finalizarlo.',
-    INVENTORY_NOT_INITIALIZED: 'Falta cargar stock en uno o más productos. Completá Stock (unidades) en cada producto, incluyendo 0 si está agotado.',
+    INVENTORY_NOT_INITIALIZED: 'Este movimiento requiere un producto con stock cargado. Completá Stock (unidades) en el producto antes de registrar el movimiento.',
     INVENTORY_RECONCILIATION_REQUIRED: 'Completá un conteo desde esta pausa antes de reanudar las operaciones.',
-    INVENTORY_COUNT_INCOMPLETE: 'Faltan productos por contar. Incluí también los que tienen cantidad cero.',
+    INVENTORY_COUNT_INCOMPLETE: 'Faltan productos con stock cargado por contar. Incluí también los archivados y los que tienen cantidad cero.',
     INVENTORY_COUNT_TIME_INVALID: 'El conteo debe hacerse dentro de la ventana actual. Revisá la hora del dispositivo y volvé a contar.',
     INVENTORY_COUNT_EVIDENCE_REQUIRED: 'Confirmá la ventana sin movimientos y dejá una observación del conteo.',
     INVENTORY_PENDING_REVIEW_REQUIRED: 'Revisá todos los pedidos pendientes antes de activar el stock.',
@@ -79,9 +79,10 @@ export function readCountDraft(restaurantId: string, countId: string): CountDraf
 }
 
 export function countRows(items: z.infer<typeof inventoryItemSchema>[], counts: CountDraft) {
-  return items.map(item => {
+  return items.flatMap(item => {
     const value = counts[item.productId]
-    if (!value || !/^\d{1,13}$/.test(value.quantity)) throw new Error('Completá el conteo de todos los productos con cantidades enteras; usá cero cuando corresponda.')
-    return { productId: item.productId, quantity: value.quantity, countedAt: value.countedAt }
+    if (!item.initialized && (!value || value.quantity === '')) return []
+    if (!value || !/^\d{1,13}$/.test(value.quantity)) throw new Error('Completá con cantidades enteras el conteo de todos los productos con stock cargado; usá cero cuando corresponda.')
+    return [{ productId: item.productId, quantity: value.quantity, countedAt: value.countedAt }]
   })
 }

@@ -318,6 +318,51 @@ describe('operational order details', () => {
     expect(await screen.findByText(/Su importe no se suma como venta vigente/)).toBeVisible()
   })
 
+  it('returns a mixed order while restocking only products whose delivery moved inventory', async () => {
+    const user = userEvent.setup()
+    setupInventoryOrder('completed', {}, [{
+      id: '50000000-0000-4000-8000-000000000002', product_id: '60000000-0000-4000-8000-000000000002',
+      product_name_snapshot: 'Producto sin control', quantity: 2,
+    }])
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => ({
+      data: name === 'reverse_order_inventory' ? { operationId: args.p_operation_id, orderId: ORDER_ID } : inventoryDetail,
+      error: null,
+    }))
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    await user.click(await screen.findByText('Devolución o corrección completa'))
+    expect(screen.getByText('2 × Producto sin control')).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo'), 'Una unidad dañada')
+    await user.selectOptions(screen.getByLabelText('Mercadería que queda vendible'), 'partial')
+    expect(screen.queryByLabelText(/Producto sin control · recibidas/)).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Producto de prueba · recibidas 3'), '2')
+    await user.click(screen.getByLabelText('Confirmo que se recibió la devolución completa y revisé la cantidad vendible.'))
+    await user.click(screen.getByRole('button', { name: 'Registrar devolución completa' }))
+    expect(mocks.rpc).toHaveBeenCalledWith('reverse_order_inventory', expect.objectContaining({
+      p_restock_quantities: [{ productId: PRODUCT_ID, quantity: 2 }],
+    }))
+  })
+
+  it('allows a complete return without offering partial restocking for an untracked order', async () => {
+    const user = userEvent.setup()
+    setupInventoryOrder('completed')
+    mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => ({
+      data: name === 'reverse_order_inventory' ? { operationId: args.p_operation_id, orderId: ORDER_ID }
+        : { ...inventoryDetail, inventoryOperations: inventoryDetail.inventoryOperations.map(operation => ({ ...operation, result: { items: [] } })) },
+      error: null,
+    }))
+    wrapper(`/admin/pedidos/${ORDER_ID}`, '/admin/pedidos/:orderId', <OrderDetailPage />)
+    await user.click(await screen.findByText('Devolución o corrección completa'))
+    expect(screen.queryByRole('option', { name: 'Sólo una parte vuelve al stock vendible' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Este pedido se entregó sin descontar stock/)).toBeVisible()
+    await user.type(screen.getByLabelText('Motivo'), 'Devolución recibida')
+    await user.selectOptions(screen.getByLabelText('Mercadería que queda vendible'), 'yes')
+    await user.click(screen.getByLabelText('Confirmo que se recibió la devolución completa y revisé la cantidad vendible.'))
+    await user.click(screen.getByRole('button', { name: 'Registrar devolución completa' }))
+    const request = mocks.rpc.mock.calls.find(([name]) => name === 'reverse_order_inventory')?.[1]
+    expect(request).toMatchObject({ p_kind: 'return', p_restock: true })
+    expect(request).not.toHaveProperty('p_restock_quantities')
+  })
+
   it.each(['2', 2])('opens the returned order and its history when the RPC preserves quantity %j', async quantity => {
     const order = setupInventoryOrder('completed')
     order.inventory_outcome = 'returned'
@@ -406,8 +451,11 @@ describe('operational order details', () => {
 })
 
 const PRODUCT_ID = '60000000-0000-4000-8000-000000000001'
-const inventoryDetail = { replacementOrderId: null, inventoryOperations: [] }
-function setupInventoryOrder(status: string, itemOverrides: Record<string, unknown> = {}) {
+const inventoryDetail = { replacementOrderId: null, inventoryOperations: [{
+  id: '70000000-0000-4000-8000-000000000002', kind: 'delivery', reason: 'delivery',
+  createdAt: '2026-10-24T11:00:00Z', actorUserId: RESTAURANT_ID, result: { items: [{ productId: PRODUCT_ID }] },
+}] }
+function setupInventoryOrder(status: string, itemOverrides: Record<string, unknown> = {}, additionalItems: Record<string, unknown>[] = []) {
   const order = { ...adminOrder, status, inventory_tracked: true, inventory_outcome: status === 'completed' ? 'delivered' : 'none' }
   mocks.from.mockImplementation((table: string) => {
     const rows = table === 'order_items' ? [{
@@ -416,6 +464,7 @@ function setupInventoryOrder(status: string, itemOverrides: Record<string, unkno
       unit_price_cents: 100, base_subtotal_cents: 300, pricing_mode_snapshot: 'unit', pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 100, baseSubtotalCents: 300, components: [] }, options_total_unit_cents: 0, line_total_cents: 300, notes: null,
       ...itemOverrides,
     }] : []
+    if (table === 'order_items') rows.push(...additionalItems.map(item => ({ ...rows[0]!, ...item })))
     const request: Record<string, unknown> & PromiseLike<unknown> = { then(resolve, reject) { return Promise.resolve({ data: rows, error: null }).then(resolve, reject) }, single: () => Promise.resolve({ data: order, error: null }) }
     for (const method of ['select', 'eq', 'order', 'in', 'is', 'limit', 'ilike']) request[method] = () => request
     return request
