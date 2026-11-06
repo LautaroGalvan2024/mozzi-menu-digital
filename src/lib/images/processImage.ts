@@ -1,6 +1,7 @@
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_SOURCE_BYTES = 15 * 1024 * 1024
 const MAX_UPLOAD_BYTES = 1024 * 1024
+const MAX_DIMENSION = 1200
 const VARIANT_TARGETS = [
   { width: 320, targetBytes: 45 * 1024 },
   { width: 640, targetBytes: 120 * 1024 },
@@ -47,7 +48,7 @@ async function encodeVariant(
 ): Promise<ProcessedImageVariant> {
   // Exact widths keep the generated srcset descriptors truthful.
   const width = targetWidth
-  const height = Math.max(1, Math.round(bitmap.height * (width / bitmap.width)))
+  const height = Math.max(1, Math.min(MAX_DIMENSION, Math.round(bitmap.height * (width / bitmap.width))))
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -82,11 +83,14 @@ export async function processImage(file: File): Promise<ProcessedImage> {
     bitmap.close()
     throw new Error('La imagen no tiene dimensiones válidas.')
   }
-  const baseName = crypto.randomUUID()
+  const maxWidth = Math.max(1, Math.min(MAX_DIMENSION, Math.floor(MAX_DIMENSION * bitmap.width / bitmap.height)))
+  const baseName = `${crypto.randomUUID()}${maxWidth < MAX_DIMENSION ? `-w${maxWidth}` : ''}`
   try {
-    const variants = []
+    const variants: ProcessedImageVariant[] = []
     for (const target of VARIANT_TARGETS) {
-      variants.push(await encodeVariant(bitmap, baseName, target.width, target.targetBytes))
+      const width = Math.min(target.width, maxWidth)
+      if (variants.some(variant => variant.width === width)) continue
+      variants.push(await encodeVariant(bitmap, baseName, width, target.targetBytes))
     }
     const primary = variants.at(-1)!
     return { ...primary, variants }

@@ -54,7 +54,7 @@ async function readOnlyFixture(page: Page, account: Account, assurance: 'aal1' |
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
-  return { unexpected, mutations }
+  return { unexpected, mutations, restaurant }
 }
 
 const screens: { key: string; route: string; title: string; account: Account }[] = [
@@ -75,6 +75,63 @@ const screens: { key: string; route: string; title: string; account: Account }[]
 
 test.describe('administrative identity across secondary screens', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'Uses only synthetic sessions and e2e.invalid read mocks.')
+  test('uploads a portrait cover within database bounds and removes every generated variant', async ({ page }) => {
+    const fixture = await readOnlyFixture(page, 'admin')
+    const uploads = new Map<string, Buffer>()
+    const dimensions: { width: number; height: number; path: string }[] = []
+    const removed: string[] = []
+    await page.route('https://e2e.invalid/**', async route => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname
+      if (request.method() === 'POST' && path.startsWith('/storage/v1/object/restaurant-assets/')) {
+        const form = await new Request(request.url(), { method: 'POST', headers: request.headers(), body: request.postDataBuffer()! }).formData()
+        const image = [...form.values()].find((value): value is File => typeof value !== 'string')!
+        const objectPath = path.replace('/storage/v1/object/restaurant-assets/', '')
+        uploads.set(objectPath, Buffer.from(await image.arrayBuffer()))
+        await route.fulfill({ json: { Key: `restaurant-assets/${objectPath}` } })
+      } else if (request.method() === 'POST' && path === '/rest/v1/image_assets') {
+        const rows = request.postDataJSON() as { width: number; height: number; path: string; size_bytes: number }[]
+        dimensions.push(...rows)
+        const valid = rows.every(row => row.width >= 1 && row.width <= 1200 && row.height >= 1 && row.height <= 1200 && row.size_bytes <= 1048576)
+        await route.fulfill({ status: valid ? 201 : 400, json: valid ? rows : { code: '23514', message: 'image_assets_height_check' } })
+      } else if (request.method() === 'PATCH' && path === '/rest/v1/restaurants') {
+        Object.assign(fixture.restaurant, request.postDataJSON())
+        await route.fulfill({ json: { id: commerceId } })
+      } else if (request.method() === 'GET' && path.startsWith('/storage/v1/object/public/restaurant-assets/')) {
+        const bytes = uploads.get(path.replace('/storage/v1/object/public/restaurant-assets/', ''))
+        await route.fulfill({ status: bytes ? 200 : 404, contentType: 'image/webp', body: bytes ?? '' })
+      } else if (request.method() === 'DELETE' && path === '/storage/v1/object/restaurant-assets') {
+        removed.push(...request.postDataJSON().prefixes)
+        await route.fulfill({ json: [] })
+      } else if (request.method() === 'PATCH' && path === '/rest/v1/image_assets') {
+        await route.fulfill({ status: 204 })
+      } else await route.fallback()
+    })
+    await page.goto('/admin/marca')
+    await expect(page.getByRole('heading', { name: 'Logo y portada', exact: true })).toBeVisible()
+    // Same portrait dimensions as the reported PNG, with synthetic pixels.
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 485; canvas.height = 497
+      canvas.getContext('2d')!.fillRect(0, 0, 485, 497)
+      return canvas.toDataURL('image/png').split(',')[1]!
+    })
+    await page.locator('#cover-upload').setInputFiles({ name: 'Captura.PNG', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+    const cover = page.getByRole('img', { name: 'Portada actual' })
+    await expect(cover).toBeVisible()
+    expect(dimensions.map(({ width, height }) => ({ width, height }))).toEqual([
+      { width: 320, height: 328 }, { width: 640, height: 656 }, { width: 1171, height: 1200 },
+    ])
+    await expect(cover).toHaveAttribute('srcset', /320w, .*640w, .*1171w$/)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    page.on('dialog', dialog => dialog.accept())
+    await page.getByRole('button', { name: 'Eliminar' }).click()
+    await expect(cover).toHaveCount(0)
+    await expect.poll(() => removed).toEqual([...uploads.keys()])
+    expect(fixture.unexpected).toEqual([])
+    expect(fixture.mutations).toEqual([])
+  })
+
   for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 1000 }]) {
     for (const screen of screens) {
       test(`${viewport.name} ${screen.key} uses the administrative identity without overflow or mutations`, async ({ page }, testInfo) => {
