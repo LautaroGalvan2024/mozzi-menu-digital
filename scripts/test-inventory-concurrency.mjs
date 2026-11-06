@@ -59,10 +59,10 @@ function rpc(f, sql) { return `${actor(f)} ${sql} reset role;` }
 function counts(f) {
   return `jsonb_build_array(jsonb_build_object('productId','${f.productA}','quantity',${f.stock},'countedAt',clock_timestamp()),jsonb_build_object('productId','${f.productB}','quantity',${f.stock},'countedAt',clock_timestamp()))`
 }
-function activate(f) {
+function activate(f, pendingOrderIds = [f.orderA, f.orderB]) {
   return rpc(f, `select public.confirm_inventory_business_policy('${f.tenant}','{"unitModel":"whole_product","sourceOfTruth":"app","otherChannels":"record_before_handoff","returns":"full_only","partialDeliveries":"none","physicalScope":"until_handoff_including_transit","acceptance":"reserve","delivery":"physical_handoff","acceptedReservationsExpire":false}');
     select public.begin_inventory_count('${f.tenant}','${f.count}','Synthetic initial frozen count');
-    select public.finish_inventory_count('${f.count}',${counts(f)},array['${f.orderA}','${f.orderB}']::uuid[],true,'Synthetic immutable physical-count boundary',true);`)
+    select public.finish_inventory_count('${f.count}',${counts(f)},array[${pendingOrderIds.map(id => `'${id}'`).join(',')}]::uuid[],true,'Synthetic immutable physical-count boundary',true);`)
 }
 function rawOrder(f, key, product, quantity, secondProduct, secondQuantity) {
   const total = (quantity + (secondQuantity || 0)) * 100
@@ -84,10 +84,13 @@ async function fixture({ active = true, multi = false } = {}) {
     ('${f.productA}','${f.tenant}','${f.category}','A','Product A',100,'${f.admin}','${f.admin}'),('${f.productB}','${f.tenant}','${f.category}','B','Product B',100,'${f.admin}','${f.admin}');
     insert into public.payment_methods(id,restaurant_id,code,name) values('${f.payment}','${f.tenant}','cash','Cash');
     insert into public.business_hours(restaurant_id,day_of_week,slot_index,opens_at,closes_at) select '${f.tenant}',d,0,'00:00'::time,'23:59'::time from generate_series(0,6) d;
+    ${active ? activate(f, []) : ''}
     ${rawOrder(f, 'A', f.productA, 4, multi ? f.productB : null, 3)}
     ${rawOrder(f, 'B', multi ? f.productB : f.productA, 4, multi ? f.productA : null, 3)}
-    ${active ? activate(f) : ''}
     commit;`)
+  // Reservation races require orders that arrived under stock control. Legacy
+  // fixtures deliberately remain free even if a later race activates inventory.
+  assert.equal(await observer.query(`select bool_and(stock_tracked=${active}) from public.order_inventory_lines where restaurant_id='${f.tenant}';`), 't')
   return f
 }
 const claim = (f, key = 'A') => rpc(f, `select public.claim_order('${f[`action${key}`]}');`)
@@ -164,7 +167,10 @@ try {
     first: f => rpc(f, `select public.begin_inventory_count('${f.tenant}','${f.count}','Synthetic initial count');`), second: newOrder, error: 'INVENTORY_CUTOVER',
     verify: async f => assert.equal(await observer.query(`select count(*) from public.orders where restaurant_id='${f.tenant}';`), '2') })
   await race('activation serializes new orders into controlled snapshot', { options: { active: false }, lock: policyLock, first: activate, second: newOrder,
-    verify: async f => assert.equal(await observer.query(`select inventory_tracked from public.orders where restaurant_id='${f.tenant}' and idempotency_key='${f.newKey}';`), 't') })
+    verify: async f => {
+      assert.equal(await observer.query(`select o.inventory_tracked and bool_and(il.stock_tracked) from public.orders o join public.order_inventory_lines il on il.order_id=o.id where o.restaurant_id='${f.tenant}' and o.idempotency_key='${f.newKey}' group by o.inventory_tracked;`), 't')
+      assert.equal(await observer.query(`select bool_and(not stock_tracked) from public.order_inventory_lines where order_id in ('${f.orderA}','${f.orderB}');`), 't')
+    } })
   await race('identical supplier receipts have one effect', {
     lock: f => `select id from public.restaurants where id='${f.tenant}' for share;select pg_advisory_xact_lock(hashtext('${f.tenant}'),hashtext('${f.operation}'));`,
     first: receipt, second: receipt, result: /"replayed": true/, verify: f => verifyBalance(f, 7, 0),

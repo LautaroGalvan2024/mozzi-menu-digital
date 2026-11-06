@@ -43,6 +43,7 @@ returns jsonb language sql security invoker set search_path='' as $$
    '[]','{}','{}',p_op,case when p_on is null then null else jsonb_build_object('onHand',p_on,'expectedVersion',p_version) end)
 $$;
 grant execute on function pg_temp.save_stock(uuid,text,text,uuid,text) to authenticated;
+grant execute on function pg_temp.stock_order(text,integer) to authenticated;
 select pg_temp.stock_order('accepted',3);
 select pg_temp.stock_order('pending',1);
 
@@ -57,19 +58,21 @@ select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','2',null,'9a
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000003','0',null)#>>'{stock,items,0,onHand}','0','creating SKU and explicit zero initialize together');
 select is((select inventory_mode from restaurants where id='2a210000-0000-4000-8000-000000000001'),'never_enabled','loading one quantity does not activate policy');
 select is((select count(*)::integer from inventory_balances where restaurant_id='2a210000-0000-4000-8000-000000000001'),2,'other product balances are not invented');
-select throws_ok($$select public.activate_inventory_from_product_stock('2a210000-0000-4000-8000-000000000001','9a210000-0000-4000-8000-000000000002',0)$$,'22023','INVENTORY_NOT_INITIALIZED','activation requires every physical SKU to have explicit quantity');
-select lives_ok($$select pg_temp.save_stock('4a210000-0000-4000-8000-000000000002','0',null)$$,'second SKU can explicitly start at zero');
 select throws_ok($$select public.activate_inventory_from_product_stock('2a210000-0000-4000-8000-000000000001','9a210000-0000-4000-8000-000000000002',9)$$,'40001','INVENTORY_VERSION_CONFLICT','activation needs reviewed policy version');
-select throws_ok($$select public.activate_inventory_from_product_stock('2a210000-0000-4000-8000-000000000001','9a210000-0000-4000-8000-000000000002',0)$$,'22023','INSUFFICIENT_STOCK','initial activation cannot promise accepted legacy quantity exceeding stock');
-select is((select inventory_mode from restaurants where id='2a210000-0000-4000-8000-000000000001'),'never_enabled','failed adoption rolls policy back');
+select is((select inventory_mode from restaurants where id='2a210000-0000-4000-8000-000000000001'),'never_enabled','failed activation preserves the previous policy');
 select ok((select inventory_business_policy is null from restaurants where id='2a210000-0000-4000-8000-000000000001'),'failed activation rolls new business confirmation back');
 select ok(not exists(select 1 from orders where restaurant_id='2a210000-0000-4000-8000-000000000001' and inventory_tracked),'failed activation rolls snapshots and tracked status back');
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','5','1','9a210000-0000-4000-8000-000000000003')#>>'{stock,items,0,version}','2','absolute correction requires the loaded version');
 select is(public.activate_inventory_from_product_stock('2a210000-0000-4000-8000-000000000001','9a210000-0000-4000-8000-000000000002',0)->>'adoptedOrders','2','one activation adopts accepted and generated legacy orders');
-select is((select reserved from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),3::bigint,'only already accepted legacy order reserves on activation');
+select is((select reserved from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),0::bigint,'activation does not reserve older untracked lines retroactively');
+select is((select count(*)::integer from inventory_balances where restaurant_id='2a210000-0000-4000-8000-000000000001'),2,'activation permits missing stock without inventing a balance');
 select is((select count(*)::integer from orders where restaurant_id='2a210000-0000-4000-8000-000000000001' and inventory_tracked),2,'both open orders gain immutable inventory snapshots');
 select is(public.activate_inventory_from_product_stock('2a210000-0000-4000-8000-000000000001','9a210000-0000-4000-8000-000000000002',0)->>'replayed','true','activation retry is durable despite policy version change');
 select is((select count(*)::integer from inventory_counts where restaurant_id='2a210000-0000-4000-8000-000000000001'),0,'direct activation does not fabricate a physical count');
+select lives_ok($$select pg_temp.save_stock('4a210000-0000-4000-8000-000000000002','0',null)$$,'second SKU can explicitly start at zero after activation');
+select pg_temp.stock_order('controlled-accepted',3);
+select public.claim_order((select action_id from stock_orders where label='controlled-accepted'));
+select is((select reserved from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),3::bigint,'new controlled order reserves units before absolute-stock conflict checks');
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','2',null,'9a210000-0000-4000-8000-000000000001')->>'replayed','true','old initial save replay returns original result after later reservation');
 select is((select on_hand from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),5::bigint,'old initial save replay cannot reset later quantity');
 select throws_ok($$select pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','6','3','9a210000-0000-4000-8000-000000000001')$$,'22023','IDEMPOTENCY_CONFLICT','same command key with changed absolute quantity conflicts');
@@ -80,7 +83,7 @@ select throws_ok($$select pg_temp.save_stock('4a210000-0000-4000-8000-0000000000
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','8','3','9a210000-0000-4000-8000-000000000004','Latest product')#>>'{stock,items,0,reserved}','3','absolute update preserves reservations');
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001',null,null)#>>'{stock,items}','[]','omitted stock changes only catalogue');
 select is((select on_hand from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),8::bigint,'omitted stock keeps current balance');
-select public.complete_order((select id from stock_orders where label='accepted'));
+select public.complete_order((select id from stock_orders where label='controlled-accepted'));
 select is(pg_temp.save_stock('4a210000-0000-4000-8000-000000000001','8','3','9a210000-0000-4000-8000-000000000004','Latest product')->>'replayed','true','replay after delivery returns command outcome');
 select is((select on_hand from inventory_balances where product_id='4a210000-0000-4000-8000-000000000001'),5::bigint,'retry after delivery cannot restock sold units');
 select is((select name from products where id='4a210000-0000-4000-8000-000000000001'),'Saved product','retry cannot undo later metadata-only save');

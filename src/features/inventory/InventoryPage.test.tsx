@@ -146,9 +146,9 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(await screen.findByText('Mostrador, comprobante 123')).toBeVisible()
     expect(mocks.mutate).not.toHaveBeenCalled()
   })
-  it('keeps archived stock visible and mandatory in a physical recount', async () => {
+  it.each(['0', '5'])('keeps archived stock of %s visible and mandatory in a physical recount', async onHand => {
     const data = fixture('paused', count)
-    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, archived: true })) }
+    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, archived: true, onHand, reserved: '0', available: onHand })) }
     const user = userEvent.setup(); view()
     expect(await screen.findByText('Archivado')).toBeVisible()
     await user.type(screen.getByLabelText('Observación del conteo'), 'Conteo incluye existencias archivadas')
@@ -317,6 +317,40 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     await user.click(finish)
     await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith('finish_inventory_count', expect.objectContaining({ p_count_id: count, p_activate: false, p_no_movements_confirmed: true, p_rows: [expect.objectContaining({ productId: product, quantity: '0', countedAt: expect.any(String) })] })))
   })
+  it('counts controlled products while leaving an uninitialized product without stock', async () => {
+    const data = externalSaleFixture()
+    mocks.inventory = { ...data, policy: fixture('paused', count).policy, items: data.items.map(item => item.productId === secondProduct ? { ...item, initialized: false, onHand: null, reserved: null, available: null, version: null } : item) }
+    const user = userEvent.setup(); view()
+    await user.type(await screen.findByLabelText('Conteo de Arroz'), '5')
+    await user.type(screen.getByLabelText('Observación del conteo'), 'Conteo completo de productos controlados')
+    await user.click(screen.getByRole('checkbox', { name: /no hubo movimientos físicos/ }))
+    await user.click(screen.getByRole('button', { name: 'Registrar conteo' }))
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith('finish_inventory_count', expect.objectContaining({ p_rows: [expect.objectContaining({ productId: product, quantity: '5' })] })))
+    expect(screen.getByLabelText('Conteo de Fideos')).toHaveValue('')
+  })
+  it.each(['', '0'])('submits an entirely uninitialized count with explicit quantity %j', async quantity => {
+    const data = fixture('paused', count)
+    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })) }
+    const user = userEvent.setup(); view()
+    const input = await screen.findByLabelText('Conteo de Arroz')
+    if (quantity) await user.type(input, quantity)
+    else { await user.type(input, '3'); await user.clear(input) }
+    await user.type(screen.getByLabelText('Observación del conteo'), 'Ventana cerrada sin movimientos físicos')
+    await user.click(screen.getByRole('checkbox', { name: /no hubo movimientos físicos/ }))
+    await user.click(screen.getByRole('button', { name: 'Registrar conteo' }))
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith('finish_inventory_count', expect.objectContaining({ p_rows: quantity ? [expect.objectContaining({ productId: product, quantity: '0', countedAt: expect.any(String) })] : [] })))
+  })
+  it.each(['1.5', '-1', ' '])('rejects an invalid optional count %j instead of silently omitting it', async quantity => {
+    const data = fixture('paused', count)
+    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })) }
+    const user = userEvent.setup(); view()
+    await user.type(await screen.findByLabelText('Conteo de Arroz'), quantity)
+    await user.type(screen.getByLabelText('Observación del conteo'), 'Ventana cerrada sin movimientos físicos')
+    await user.click(screen.getByRole('checkbox', { name: /no hubo movimientos físicos/ }))
+    await user.click(screen.getByRole('button', { name: 'Registrar conteo' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('cantidades enteras')
+    expect(mocks.mutate).not.toHaveBeenCalled()
+  })
   it('reloads a rejected stale version and lets the operator review a new attempt', async () => {
     const user = userEvent.setup()
     mocks.mutate.mockImplementationOnce(async () => {
@@ -381,19 +415,22 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(original).toEqual(['activate_inventory_from_product_stock', { p_restaurant_id: tenant, p_operation_id: expect.any(String), p_expected_policy_version: 1, p_other_channels: 'none' }])
     firstView.unmount(); view()
     await user.click(await screen.findByRole('button', { name: 'Reintentar operación' }))
-    await screen.findByText('Control de stock activado. Ya se limita la venta a las unidades disponibles.')
+    await screen.findByText('Control de stock activado para los pedidos nuevos de productos con cantidad cargada.')
     expect(mocks.mutate.mock.calls[1]).toEqual(original)
     expect(sessionStorage.getItem(`mozzi:inventory-command:${tenant}`)).toBeNull()
   })
-  it('requires a quantity for every product and links to its editor instead of starting a count', async () => {
+  it.each([false, true])('allows activation with uninitialized products and controlled products: %s', async hasControlledProduct => {
     const data = fixture('never_enabled')
-    mocks.inventory = { ...data, items: data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })) }
-    view()
-    expect(await screen.findByText('Falta cargar stock en 1 producto:')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Activar control de stock' })).toBeDisabled()
+    mocks.inventory = { ...data, items: [...data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })), ...(hasControlledProduct ? [{ ...data.items[0], productId: secondProduct, name: 'Fideos', code: '0002' }] : [])] }
+    const user = userEvent.setup(); view()
+    expect(await screen.findByText('1 producto seguirá sin control de stock:')).toBeVisible()
+    expect(screen.getByText('Sin cantidad cargada, se permiten pedidos sin controlar stock.')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Activar control de stock' })).toBeEnabled()
     expect(screen.getByRole('link', { name: 'Editar stock de Arroz' })).toHaveAttribute('href', `/admin/catalogo/productos/${product}`)
     expect(screen.getByText('Sin cargar')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Iniciar ventana de conteo' })).not.toBeVisible()
     expect(mocks.mutate).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Activar control de stock' }))
+    await waitFor(() => expect(mocks.mutate).toHaveBeenCalledWith('activate_inventory_from_product_stock', expect.objectContaining({ p_restaurant_id: tenant })))
   })
 })

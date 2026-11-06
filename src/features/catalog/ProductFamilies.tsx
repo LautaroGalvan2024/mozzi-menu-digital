@@ -299,7 +299,7 @@ export function ProductFamilies() {
           <label className="check-field"><input type="checkbox" checked={draft.active} onChange={(e) => change('active', e.target.checked)} />Ficha visible</label>
           </div>
         </details>
-        <div className="border-t border-stone-100 pt-4"><h3 className="font-semibold text-stone-900">Variantes</h3><p className="mt-1 text-xs text-stone-500">El stock es la cantidad total, incluidas las reservas. Vacío conserva el saldo.</p></div>
+        <div className="border-t border-stone-100 pt-4"><h3 className="font-semibold text-stone-900">Variantes</h3><p className="mt-1 text-xs text-stone-500">El stock es la cantidad total, incluidas las reservas. Vacío conserva el saldo existente. Sin cantidad cargada, se permiten pedidos sin controlar stock. Con control activo, 0 indica agotado. Los pedidos recibidos sin control siguen sin descuento automático.</p></div>
         {editorCatalog.data?.stock.policy.mode === 'never_enabled' ? <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Podés cargar las cantidades ahora. El control de stock todavía no está activo.</p> : null}
         {stockLocked && !stockNeedsReview ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">El stock está pausado o tiene una actualización en curso. Podés editar los otros datos de la ficha.</p> : null}
         {draft.variants.map((row, index) => <div key={`${row.isNew ? row.productId : index}`} className="rounded-xl border border-stone-200 p-3">

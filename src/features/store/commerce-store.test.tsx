@@ -141,6 +141,23 @@ describe('shared catalog storefront', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('allows an untracked variant while keeping a zero-stock variant unavailable in the same family', async () => {
+    // The server exposes availability, without sending private stock balances.
+    mocks.menu.categories[0]!.products = [{ ...black, available: true }, { ...red, available: false }]
+    page(`/t/fundas/producto/${FAMILY}`)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Elegir variante' }))
+    const dialog = screen.getByRole('dialog')
+    const add = within(dialog).getByRole('button', { name: /Agregar/ })
+    expect(add).toBeEnabled()
+    await user.selectOptions(screen.getByLabelText('Elegí tu variante'), RED)
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Agregar/ })).toBeDisabled()
+    expect(screen.getByRole('option', { name: /Rojo.*No disponible/ })).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Elegí tu variante'), BLACK)
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Agregar/ }))
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('mozzi:cart:store:fundas') ?? '[]')).toEqual([expect.objectContaining({ productId: BLACK, quantity: 1 })]))
+  })
+
   it('shows an unpublished catalog empty state without a misleading filter reset', async () => {
     mocks.menu.categories = []
     page()

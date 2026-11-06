@@ -66,6 +66,34 @@ test('store variants and WhatsApp checkout share catalog while keeping menu cart
   await expect(page.getByRole('link', { name: 'Volver a la tienda' })).toHaveAttribute('href', '/t/casa-movil')
 })
 
+test('an untracked variant completes checkout while its zero-stock sibling stays unavailable', async ({ page }) => {
+  // Public availability comes from the server: black has zero stock; red has no balance.
+  const mixedCatalog = structuredClone(catalog)
+  mixedCatalog.categories[0]!.products[0]!.available = false
+  await routePublicCatalog(page, mixedCatalog, 'casa-movil', 'store')
+  let received: Record<string, unknown> | null = null
+  await page.route('**/functions/v1/create-order', async route => {
+    received = route.request().postDataJSON()
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ order: summary.order, whatsapp: { phone: '+5493492123456', message: 'CM-001 · Funda sin control de stock', url: 'https://wa.me/5493492123456?text=CM-001' }, clientEventToken: null, recoveryToken: token, recoveryExpiresAt: until }) })
+  })
+  await page.goto('/t/casa-movil')
+  await expect(page.getByText('Agotado', { exact: true })).toHaveCount(0)
+  await page.getByRole('link', { name: /Funda de silicona/ }).click()
+  await page.getByRole('button', { name: 'Elegir variante' }).click()
+  await page.getByLabel('Elegí tu variante').selectOption(blackId)
+  await expect(page.getByRole('dialog').getByRole('button', { name: /Agregar/ })).toBeDisabled()
+  await page.getByLabel('Elegí tu variante').selectOption(redId)
+  await page.getByRole('dialog').getByRole('button', { name: /Agregar/ }).click()
+  await page.getByRole('link', { name: /Ver carrito · 1/ }).click()
+  await page.getByRole('link', { name: 'Continuar' }).click()
+  await page.getByLabel('Nombre y apellido').fill('Ana Pérez')
+  await page.getByLabel('Teléfono').fill('+5493492123456')
+  await page.getByRole('button', { name: 'Generar pedido' }).click()
+  await expect(page).toHaveURL(/\/t\/casa-movil\/pedido-generado$/)
+  await expect(page.getByRole('button', { name: 'Abrir WhatsApp', exact: true })).toBeVisible()
+  expect(received).toMatchObject({ channel: 'store', checkoutMode: 'whatsapp', items: [{ productId: redId, quantity: 1 }] })
+})
+
 test('store online checkout confirms server total and ignores forged provider success query', async ({ page }, testInfo) => {
   await fixture(page)
   let received: Record<string, unknown> | null = null
