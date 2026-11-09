@@ -1,6 +1,6 @@
 import { ArrowLeft, Minus, Package, Plus, Trash2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Link, useParams } from 'react-router'
 import { EmptyState, ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { formatMoney } from '../../lib/money'
@@ -49,11 +49,14 @@ export function CartPage() {
   const editingVariants = editingGroup.data?.group.variants ?? []
   const dialogProduct = editingVariants.find(product => product.id === editingLine?.productId) ?? editingProduct
 
-  return <main className={`min-h-screen py-6 sm:py-10 ${channel === 'store' ? 'bg-[#f7f5f2]' : 'bg-stone-100'}`}><div className="page-shell max-w-4xl">
-    <Link to={commercePath(restaurant.slug, channel)} className="inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-semibold text-stone-600"><ArrowLeft className="h-4 w-4" aria-hidden />Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link>
+  return <main
+    className={`min-h-screen py-5 sm:py-8 ${channel === 'store' ? 'store-purchase store-cart-page' : 'bg-stone-100'}`}
+    style={channel === 'store' ? { '--store-brand': restaurant.primaryColor || '#18181b', '--store-accent': restaurant.secondaryColor || '#f4f4f5' } as CSSProperties : undefined}
+  ><div className={`page-shell max-w-5xl ${channel === 'store' ? 'store-purchase-shell' : ''}`}>
+    <Link to={commercePath(restaurant.slug, channel)} className={`inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-semibold text-stone-600 ${channel === 'store' ? 'store-purchase-back' : ''}`}><ArrowLeft className="h-4 w-4" aria-hidden />Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link>
     {channel === 'store' ? <StorePurchaseSteps slug={restaurant.slug} current={1} /> : null}
-    <h1 className="mt-5 font-display text-3xl font-bold tracking-tight sm:text-4xl">{channel === 'store' ? 'Tu carrito' : 'Tu pedido'}</h1>
-    <p className="mt-2 text-sm leading-6 text-stone-600">{channel === 'store' ? 'Revisá el producto, la variante y la cantidad. En el siguiente paso elegís cómo recibir y pagar tu compra.' : 'Revisá cantidades y observaciones. Los precios se actualizan con el menú y se validan nuevamente al confirmar.'}</p>
+    <div className={`mt-5 ${channel === 'store' ? 'store-purchase-heading' : ''}`}><h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">{channel === 'store' ? 'Tu carrito' : 'Tu pedido'}</h1>
+    <p className="mt-2 text-sm leading-6 text-stone-600">{channel === 'store' ? 'Revisá los productos y cantidades. Antes de confirmar vas a ver la entrega, el pago y el total final.' : 'Revisá cantidades y observaciones. Los precios se actualizan con el menú y se validan nuevamente al confirmar.'}</p></div>
     {menu.isFetching ? <p className="mt-3 text-sm" role="status">Actualizando precios y disponibilidad…</p> : null}
     {menu.refreshError ? <p className="form-error mt-3" role="alert">No pudimos actualizar el catálogo. <button type="button" className="underline" onClick={() => void menu.refresh()}>Volver a intentar</button></p> : null}
     {editingKey && editingGroup.isLoading ? <p className="mt-3 text-sm" role="status">Cargando variantes disponibles…</p> : null}
@@ -64,8 +67,8 @@ export function CartPage() {
         const product = products.find(row => row.id === line.productId)
         const lineIssues = issues.get(line.key) ?? []
         const pricing = calculateCartLinePricing(line)
-        return <article key={line.key} aria-label={line.productName} className={`flex gap-4 rounded-3xl border bg-white p-4 ${lineIssues.length ? 'border-amber-400' : 'border-stone-200'}`}>
-          {image.src ? <img src={image.src} srcSet={image.srcSet} sizes="96px" loading="lazy" decoding="async" alt="" className="h-16 w-16 shrink-0 rounded-2xl object-contain sm:h-24 sm:w-24" /> : channel === 'store' ? <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-stone-100 sm:h-24 sm:w-24"><Package className="h-7 w-7 text-stone-400" aria-hidden /></div> : null}
+        return <article key={line.key} aria-label={line.productName} className={`flex gap-4 rounded-3xl border bg-white p-4 ${lineIssues.length ? 'border-amber-400' : 'border-stone-200'} ${channel === 'store' ? 'store-cart-line' : ''}`}>
+          {image.src ? <img src={image.src} srcSet={image.srcSet} sizes="96px" loading="lazy" decoding="async" alt="" className={`h-16 w-16 shrink-0 rounded-2xl object-contain sm:h-24 sm:w-24 ${channel === 'store' ? 'store-cart-line-media' : ''}`} /> : channel === 'store' ? <div className="store-cart-line-media grid h-16 w-16 shrink-0 place-items-center rounded-2xl sm:h-24 sm:w-24"><Package className="h-7 w-7 text-stone-400" aria-hidden /></div> : null}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2"><div><h2 className="font-display font-bold">{line.productName}</h2>{line.selectedOptions.length > 0 ? <p className="mt-1 text-xs leading-5 text-stone-500">{line.selectedOptions.map(option => option.name).join(' · ')}</p> : null}{line.notes ? <p className="mt-1 text-xs italic text-stone-500">“{line.notes}”</p> : null}</div><button className="icon-button text-red-700" onClick={() => cart.removeLine(line.key)} aria-label={`Quitar ${line.productName}`}><Trash2 className="h-4 w-4" aria-hidden /></button></div>
             {lineIssues.length ? <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 p-3 text-sm text-amber-950">{lineIssues.map((issue, index) => <li key={`${issue.code}-${index}`}>{issue.message}</li>)}</ul> : null}
@@ -75,14 +78,14 @@ export function CartPage() {
           </div>
         </article>
       })}</section>
-      <aside className="h-fit rounded-3xl bg-stone-950 p-5 text-white lg:sticky lg:top-6">
-        <h2 className="font-display text-xl font-bold">Resumen</h2><div className="mt-5 flex justify-between text-sm text-stone-300"><span>Subtotal estimado</span><strong className="text-white">{formatMoney(cart.subtotalCents, restaurant.currencyCode, restaurant.locale)}</strong></div>
-        <p className="mt-3 text-xs leading-5 text-stone-300">El envío y los ajustes por medio de pago se muestran en el siguiente paso, antes de confirmar.</p>
+      <aside className={`h-fit rounded-3xl p-5 lg:sticky lg:top-6 ${channel === 'store' ? 'store-cart-summary' : 'bg-stone-950 text-white'}`}>
+        <h2 className="font-display text-xl font-bold">Resumen</h2><div className={`mt-5 flex justify-between text-sm ${channel === 'store' ? 'text-stone-600' : 'text-stone-300'}`}><span>Subtotal estimado</span><strong className={channel === 'store' ? 'text-stone-950' : 'text-white'}>{formatMoney(cart.subtotalCents, restaurant.currencyCode, restaurant.locale)}</strong></div>
+        <p className={`mt-3 text-xs leading-5 ${channel === 'store' ? 'text-stone-600' : 'text-stone-300'}`}>El envío y los ajustes por medio de pago se muestran en el siguiente paso, antes de confirmar.</p>
         {invalid ? <p className="mt-4 rounded-xl bg-amber-300 p-3 text-xs font-semibold text-amber-950">Revisá los productos marcados antes de continuar. Conservamos tus notas y opciones.</p> : null}
         {cart.subtotalCents < restaurant.minimumOrderCents ? <p className="mt-4 rounded-xl bg-amber-300 p-3 text-xs font-semibold text-amber-950">Faltan {formatMoney(restaurant.minimumOrderCents - cart.subtotalCents, restaurant.currencyCode, restaurant.locale)} para el mínimo del comercio.</p> : null}
         {cart.itemCount > 100 || cart.lines.length > 25 ? <p className="mt-4 rounded-xl bg-red-200 p-3 text-xs font-semibold text-red-950">El pedido admite hasta 25 renglones y 100 unidades. Ajustá el carrito para continuar.</p> : null}
-        {canContinue ? <Link className="mt-5 flex min-h-12 items-center justify-center rounded-xl bg-orange-600 font-bold hover:bg-orange-500" to={commercePath(restaurant.slug, channel, '/checkout')}>Continuar</Link> : <button type="button" disabled className="mt-5 flex min-h-12 w-full items-center justify-center rounded-xl bg-stone-700 font-bold text-stone-400">Continuar</button>}
-        {!acceptsOrders ? <p className="mt-3 text-center text-xs text-amber-300">{channel === 'store' ? 'La tienda no recibe compras en este momento.' : 'El comercio está cerrado.'} Podés conservar el carrito para más tarde.</p> : null}
+        {canContinue ? <Link className={channel === 'store' ? 'store-primary-action mt-5' : 'mt-5 flex min-h-12 items-center justify-center rounded-xl bg-orange-600 font-bold hover:bg-orange-500'} to={commercePath(restaurant.slug, channel, '/checkout')}>Continuar</Link> : <button type="button" disabled className={channel === 'store' ? 'store-primary-action mt-5' : 'mt-5 flex min-h-12 w-full items-center justify-center rounded-xl bg-stone-700 font-bold text-stone-400'}>Continuar</button>}
+        {!acceptsOrders ? <p className={`mt-3 text-center text-xs ${channel === 'store' ? 'text-amber-800' : 'text-amber-300'}`}>{channel === 'store' ? 'La tienda no recibe compras en este momento.' : 'El comercio está cerrado.'} Podés conservar el carrito para más tarde.</p> : null}
       </aside>
     </div>}
   </div>{editingLine && dialogProduct && editingVariants.length ? <ProductDialog key={editingLine.key} product={dialogProduct} variants={editingVariants} restaurant={restaurant} initialLine={editingLine} onClose={() => setEditingKey(null)} onAdd={line => { cart.replaceLine(editingLine.key, line); setEditingKey(null) }} /> : null}</main>

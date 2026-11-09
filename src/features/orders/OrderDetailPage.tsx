@@ -2,7 +2,7 @@ import { CommerceOrderStatus, isPaidAwaitingPreparation, paymentStatusLabel } fr
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useLocation, useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
@@ -16,8 +16,13 @@ import { OrderAcceptAction } from './OrderAcceptAction'
 import { acceptanceOrder, invalidateOrderQueries, useOrderUpdates } from './orderAcceptance'
 import { clearReverseAttempt, inventoryDetailSchema, inventoryOrderError, inventoryOutcomeLabel, isReversed, loadReverseAttempt, saveReverseAttempt, type ReverseAttempt } from './inventoryOrder'
 
+const returnStateSchema = z.object({
+  ordersReturnTo: z.string().regex(/^\/admin\/pedidos(?:\?[^#]*)?$/),
+})
+
 export function OrderDetailPage() {
   const { orderId } = useParams()
+  const location = useLocation()
   const scope = useRestaurantScope()
   const client = useQueryClient()
   const [cancelReason, setCancelReason] = useState('')
@@ -35,6 +40,9 @@ export function OrderDetailPage() {
   const [replacementId, setReplacementId] = useState('')
   const [replacementReason, setReplacementReason] = useState('')
   const isAdmin = scope.selected?.role === 'restaurant_admin' || scope.selected?.role === 'super_admin'
+  const returnState = returnStateSchema.safeParse(location.state)
+  const ordersReturnTo = returnState.success ? returnState.data.ordersReturnTo : '/admin/pedidos'
+  const detailState = { ordersReturnTo }
 
   useEffect(() => {
     setReceived(false)
@@ -196,7 +204,7 @@ export function OrderDetailPage() {
       eyebrow="Detalle"
       title={order.display_number}
       description={`Creado ${new Date(order.created_at).toLocaleString('es-AR')}`}
-      actions={<Link className="button-secondary" to="/admin/pedidos"><ArrowLeft className="h-4 w-4" />Volver</Link>}
+      actions={<Link className="button-secondary" to={ordersReturnTo}><ArrowLeft className="h-4 w-4" />Volver</Link>}
     />
     {error ? <p className="form-error mb-5" role="alert">{error}</p> : null}
     <section className="admin-toolbar mb-5 flex flex-wrap items-center justify-between gap-4" aria-label="Estado del pedido">
@@ -288,9 +296,9 @@ export function OrderDetailPage() {
       <p className="mt-3">{isReversed(order) ? inventoryOutcomeLabel[order.inventory_outcome] : order.status === 'accepted' ? 'Unidades reservadas. Pendiente de recepción del cliente o retiro.' : order.inventory_outcome === 'delivered' ? 'Entrega vigente: existencia física descontada.' : order.checkout_mode === 'online' ? 'El checkout reserva las unidades antes del pago. La existencia física se descuenta al confirmar recepción o retiro.' : 'La reserva se realiza al aceptar; la existencia física se descuenta al confirmar recepción o retiro.'}</p>
       {isReversed(order) ? <p className="mt-2 text-sm">Se conserva el pedido original. Su importe no se suma como venta vigente. Esto no registra un reintegro de dinero.</p> : null}
       <div className="mt-3 flex flex-wrap gap-4 text-sm">
-        {order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.replaces_order_id}`}>Ver pedido reemplazado</Link>:null}
-        {order.root_order_id && order.root_order_id !== order.id && order.root_order_id !== order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.root_order_id}`}>Ver pedido original de la operación</Link>:null}
-        {inventory.replacementOrderId?<Link className="underline" to={`/admin/pedidos/${inventory.replacementOrderId}`}>Ver pedido de reemplazo</Link>:null}
+        {order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.replaces_order_id}`} state={detailState}>Ver pedido reemplazado</Link>:null}
+        {order.root_order_id && order.root_order_id !== order.id && order.root_order_id !== order.replaces_order_id?<Link className="underline" to={`/admin/pedidos/${order.root_order_id}`} state={detailState}>Ver pedido original de la operación</Link>:null}
+        {inventory.replacementOrderId?<Link className="underline" to={`/admin/pedidos/${inventory.replacementOrderId}`} state={detailState}>Ver pedido de reemplazo</Link>:null}
       </div>
       {order.replacement_reason?<p className="mt-3 text-sm">Motivo del reemplazo: {order.replacement_reason}</p>:null}
     </div></details>:null}

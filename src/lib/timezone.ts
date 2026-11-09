@@ -63,6 +63,30 @@ function parseLocalDate(value: string) {
   return { year, month, day }
 }
 
+/** Calendar arithmetic for a YYYY-MM-DD value, independent of browser timezone. */
+export function addLocalDateDays(value: string, days: number) {
+  const local = parseLocalDate(value)
+  if (!Number.isInteger(days)) throw new RangeError('La cantidad de días debe ser entera.')
+  const shifted = new Date(Date.UTC(local.year, local.month - 1, local.day + days))
+  return formatLocalDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+  )
+}
+
+export function firstDayOfLocalMonth(value: string) {
+  const local = parseLocalDate(value)
+  return formatLocalDate(local.year, local.month, 1)
+}
+
+/** Monday is day zero and Sunday is day six. */
+export function startOfLocalWeek(value: string) {
+  const local = parseLocalDate(value)
+  const weekday = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay()
+  return addLocalDateDays(value, -((weekday + 6) % 7))
+}
+
 export function dateInTimeZone(now: Date, timeZone: string) {
   const local = zonedParts(now, timeZone)
   return formatLocalDate(local.year, local.month, local.day)

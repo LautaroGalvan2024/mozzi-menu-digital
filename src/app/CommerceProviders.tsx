@@ -23,10 +23,13 @@ function PublicCatalogPreloader() {
 
   useEffect(() => {
     if (!restaurantSlug || !isCatalogRoute || !env.isSupabaseConfigured) return
-    void import('../features/public-menu/usePublicCatalog').then((catalog) => Promise.all([
-      client.prefetchQuery(catalog.publicCatalogMetaQueryOptions(restaurantSlug, channel)),
-      client.prefetchInfiniteQuery(catalog.publicCatalogPagesQueryOptions(restaurantSlug, channel)),
-    ]))
+    void import('../features/public-menu/usePublicCatalog').then((catalog) => {
+      const meta = client.prefetchQuery(catalog.publicCatalogMetaQueryOptions(restaurantSlug, channel))
+      const products = channel === 'store'
+        ? client.prefetchInfiniteQuery(catalog.publicStoreCatalogPagesQueryOptions(restaurantSlug, 'all'))
+        : client.prefetchInfiniteQuery(catalog.publicCatalogPagesQueryOptions(restaurantSlug, channel))
+      return Promise.all([meta, products])
+    })
   }, [channel, client, isCatalogRoute, restaurantSlug])
 
   return null

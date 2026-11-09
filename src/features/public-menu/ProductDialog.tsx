@@ -6,7 +6,7 @@ import { responsiveAssetUrls } from '../../lib/images/responsive'
 import type { CartLine, PublicProduct, PublicRestaurant } from '../../types/domain'
 import { cartProductName, variantLabel } from '../../lib/catalog-presentation'
 
-type ProductDialogProps = { product: PublicProduct; variants?: PublicProduct[]; restaurant: PublicRestaurant; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }
+type ProductDialogProps = { product: PublicProduct; variants?: PublicProduct[]; restaurant: PublicRestaurant; now?: Date; onClose: () => void; onAdd: (line: CartLine) => void; initialLine?: CartLine }
 type ProductDraft = { quantity: number; notes: string; setQuantity: Dispatch<SetStateAction<number>>; setNotes: Dispatch<SetStateAction<string>> }
 
 export function ProductDialog(props: ProductDialogProps) {
@@ -18,14 +18,14 @@ export function ProductDialog(props: ProductDialogProps) {
   return <ProductConfiguration key={selected.id} {...props} product={selected} variants={variants} onVariantChange={setSelectedId} quantity={quantity} setQuantity={setQuantity} notes={notes} setNotes={setNotes} />
 }
 
-function ProductConfiguration({ product, variants, onVariantChange, restaurant, onClose, onAdd, initialLine, quantity, setQuantity, notes, setNotes }: ProductDialogProps & ProductDraft & { variants: PublicProduct[]; onVariantChange: (id: string) => void }) {
+function ProductConfiguration({ product, variants, onVariantChange, restaurant, now, onClose, onAdd, initialLine, quantity, setQuantity, notes, setNotes }: ProductDialogProps & ProductDraft & { variants: PublicProduct[]; onVariantChange: (id: string) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [selections, setSelections] = useState<Record<string, string[]>>(() => Object.fromEntries(product.optionGroups.map(group => [group.id, group.options.filter(option => initialLine?.selectedOptions.some(selected => selected.id === option.id)).map(option => option.id)])))
   const [removedOptions, setRemovedOptions] = useState<Set<string>>(new Set())
   const knownOptionIds = new Set(product.optionGroups.flatMap(group => group.options.map(option => option.id)))
   const unavailableSelections = initialLine?.selectedOptions.filter(option => !knownOptionIds.has(option.id) && !removedOptions.has(option.id)) ?? []
   const [error, setError] = useState<string | null>(null)
-  const basePrice = currentProductPrice(product)
+  const basePrice = currentProductPrice(product, now)
   const advertisedQuantityPrices = product.quantityThreshold ? [] : effectiveQuantityPrices(basePrice, product.quantityPrices)
   const advertisedThreshold = product.quantityThreshold && product.quantityThreshold.unitPriceCents < basePrice ? product.quantityThreshold : null
 
@@ -116,7 +116,14 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
             <X className="h-5 w-5" aria-hidden />
           </button>
           {image.src ? (
-            <img src={image.src} srcSet={image.srcSet} sizes="(min-width: 640px) 640px, 100vw" decoding="async" className="h-52 w-full object-cover sm:h-64" alt={product.name} />
+            <img
+              src={image.src}
+              srcSet={image.srcSet}
+              sizes="(min-width: 640px) 640px, 100vw"
+              decoding="async"
+              className={`h-52 w-full sm:h-64 ${restaurant.channel === 'store' ? 'bg-stone-50 object-contain p-4 sm:p-6' : 'object-cover'}`}
+              alt={product.name}
+            />
           ) : restaurant.channel === 'store' ? (
             <div className="grid h-32 place-items-center bg-stone-100 sm:h-44"><Package className="h-14 w-14 text-stone-400" aria-hidden /><span className="sr-only">Producto sin foto</span></div>
           ) : (
@@ -125,7 +132,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
           <div className="p-5 pb-6 sm:p-7 sm:pb-8">
             <div className="pr-10">
               <h2 id={titleId} className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-3xl">{product.family?.name ?? product.name}</h2>
-              {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name} · {formatMoney(currentProductPrice(variant), restaurant.currencyCode, restaurant.locale)}{!variant.available ? ' · No disponible' : ''}</option>)}</select></label> : null}
+              {product.family ? <label className="field mt-4"><span>Elegí tu variante</span><select value={product.id} onChange={event => onVariantChange(event.target.value)}>{variants.map(variant => <option key={variant.id} value={variant.id}>{variantLabel(variant) || variant.name} · {formatMoney(currentProductPrice(variant, now), restaurant.currencyCode, restaurant.locale)}{!variant.available ? ' · No disponible' : ''}</option>)}</select></label> : null}
               <p className="mt-2 text-sm leading-6 text-stone-600">{product.family?.description ?? product.description}</p>
               <p className="mt-3 font-display text-xl font-bold text-stone-950">{formatMoney(basePrice, restaurant.currencyCode, restaurant.locale)}</p>
               {advertisedThreshold ? <p className="mt-3 text-sm font-bold text-emerald-800">Desde {advertisedThreshold.minimumQuantity} unidades: {formatMoney(advertisedThreshold.unitPriceCents, restaurant.currencyCode, restaurant.locale)} c/u</p> : null}

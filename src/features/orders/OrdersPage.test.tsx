@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrdersPage, orderDateRangeError } from './OrdersPage'
 
@@ -70,10 +70,31 @@ const order = {
 beforeEach(() => { vi.clearAllMocks() })
 afterEach(cleanup)
 
-function renderOrders(rows: unknown[]) {
+function DetailProbe() {
+  const location = useLocation()
+  const ordersReturnTo = (location.state as { ordersReturnTo?: string } | null)?.ordersReturnTo ?? '/admin/pedidos'
+  return <><output data-testid="detail-return-to">{ordersReturnTo}</output><Link to={ordersReturnTo}>Volver a pedidos</Link></>
+}
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="current-location">{`${location.pathname}${location.search}`}</output>
+}
+
+function renderOrders(rows: unknown[], initialEntry = '/admin/pedidos') {
   mocks.from.mockReturnValue(emptyOrdersRequest(rows))
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter><OrdersPage /></MemoryRouter></QueryClientProvider>)
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/admin/pedidos" element={<OrdersPage />} />
+          <Route path="/admin/pedidos/:orderId" element={<DetailProbe />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
 }
 
 describe('customer WhatsApp actions', () => {
@@ -157,6 +178,41 @@ describe('customer WhatsApp actions', () => {
 })
 
 describe('order date range', () => {
+  it('hydrates every filter from the URL and resets the page when one changes', async () => {
+    renderOrders(
+      [order],
+      '/admin/pedidos?q=Luc%C3%ADa&status=accepted&fulfillment=pickup&from=2026-10-01&to=2026-10-31&page=3',
+    )
+
+    await screen.findByRole('table')
+    expect(screen.getByLabelText('Buscar')).toHaveValue('Lucía')
+    expect(screen.getByLabelText('Estado')).toHaveValue('accepted')
+    expect(screen.getByLabelText('Modalidad')).toHaveValue('pickup')
+    expect(screen.getByLabelText('Desde')).toHaveValue('2026-10-01')
+    expect(screen.getByLabelText('Hasta')).toHaveValue('2026-10-31')
+    expect(screen.getByTestId('current-location')).toHaveTextContent('page=3')
+
+    fireEvent.change(screen.getByLabelText('Estado'), { target: { value: 'completed' } })
+    await waitFor(() => expect(screen.getByTestId('current-location')).toHaveTextContent('status=completed'))
+    expect(screen.getByTestId('current-location')).not.toHaveTextContent('page=')
+    expect(screen.getByTestId('current-location')).toHaveTextContent('q=Luc%C3%ADa')
+    expect(screen.getByTestId('current-location')).toHaveTextContent('fulfillment=pickup')
+  })
+
+  it('restores the exact URL after opening a detail and going back', async () => {
+    const listUrl = '/admin/pedidos?q=Luc%C3%ADa&status=generated&from=2026-10-01&to=2026-10-31&page=2'
+    renderOrders([order], listUrl)
+    const table = await screen.findByRole('table')
+
+    fireEvent.click(within(table).getByRole('link', { name: 'Ver PED-0001' }))
+    expect(await screen.findByTestId('detail-return-to')).toHaveTextContent(listUrl)
+    fireEvent.click(screen.getByRole('link', { name: 'Volver a pedidos' }))
+
+    expect(await screen.findByLabelText('Buscar')).toHaveValue('Lucía')
+    expect(screen.getByLabelText('Estado')).toHaveValue('generated')
+    expect(screen.getByTestId('current-location')).toHaveTextContent(listUrl)
+  })
+
   it('keeps the search field mounted and focused while a new filter loads', async () => {
     renderOrders([order])
     await screen.findByRole('table')
@@ -184,25 +240,17 @@ describe('order date range', () => {
     expect(orderDateRangeError('2026-09-29', '2026-09-29')).toBeNull()
   })
 
-  it('keeps the filters visible and reports the validation inline', async () => {
-    mocks.from.mockReturnValue(emptyOrdersRequest())
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    render(
-      <QueryClientProvider client={queryClient}>
-        <OrdersPage />
-      </QueryClientProvider>,
-    )
-
+  it('keeps manual date edits valid and visible', async () => {
+    renderOrders([])
     const from = await screen.findByLabelText('Desde')
-    const to = screen.getByLabelText('Hasta')
-    // Keep the first change invalid against any realistic current date so the
-    // query does not briefly remount the filters between both events.
     fireEvent.change(from, { target: { value: '2099-09-30' } })
-    fireEvent.change(to, { target: { value: '2099-09-29' } })
+    await waitFor(() => expect(screen.getByLabelText('Desde')).toHaveValue('2099-09-30'))
+    expect(screen.getByLabelText('Hasta')).toHaveValue('2099-09-30')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'La fecha Desde no puede ser posterior a la fecha Hasta.',
-    )
+    fireEvent.change(screen.getByLabelText('Hasta'), { target: { value: '2099-09-29' } })
+    await waitFor(() => expect(screen.getByLabelText('Hasta')).toHaveValue('2099-09-29'))
+    expect(screen.getByLabelText('Desde')).toHaveValue('2099-09-29')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Pedidos' })).toBeVisible()
     expect(screen.getByLabelText('Buscar')).toBeVisible()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Exportar resultados' })).toBeDisabled())

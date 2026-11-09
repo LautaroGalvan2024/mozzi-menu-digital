@@ -1,9 +1,10 @@
 import { keepPreviousData, useQuery,useQueryClient } from '@tanstack/react-query'
-import { CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
+import { ChevronDown, CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel,EmptyState,LoadingScreen } from '../../components/Feedback'
+import { AdminDataRegion, AdminDataWorkspace } from '../../components/AdminDataWorkspace'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
@@ -38,7 +39,8 @@ export function ProductsPage(){
       if(normalizedSearch)request=request.or(`name.ilike.%${normalizedSearch}%,code.ilike.%${normalizedSearch}%,description.ilike.%${normalizedSearch}%`)
       const{data,error,count}=await request
       if(error)throw new Error('No se pudieron cargar los productos.')
-      return{rows:z.array(schema).parse(data),count:count??0}
+      const rows=z.array(schema).parse(data)
+      return{rows,count:count??rows.length}
     },
   })
   if(query.isLoading||restaurant.isLoading)return <LoadingScreen/>;if(query.error||restaurant.error)return <ErrorPanel>{query.error?.message??restaurant.error?.message}</ErrorPanel>
@@ -55,27 +57,35 @@ export function ProductsPage(){
     setBusyProductId(null)
   }
 
-  return <>
+  return <AdminDataWorkspace className="catalog-data-workspace">
     <PageHeader
       eyebrow="Catálogo"
       title="Productos"
       description="Administrá los productos, precios y disponibilidad de tu catálogo."
-      actions={<Link className="button-primary w-full sm:w-auto" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>}
     />
     {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
-    <div className="admin-toolbar mb-4 flex flex-wrap items-center justify-between gap-3">
-      <label className="relative block w-full sm:max-w-md">
+    <AdminDataRegion className="catalog-data-region">
+    <div className="admin-toolbar catalog-command-bar">
+      <label className="catalog-command-search relative block">
         <span className="sr-only">Buscar productos</span>
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-stone-400" aria-hidden/>
         <input className="h-11 w-full rounded-xl border border-stone-300 bg-white pl-10 pr-4 text-sm outline-none transition duration-150 placeholder:text-stone-400 hover:border-stone-400 focus:border-orange-500 focus:ring-3 focus:ring-orange-100" placeholder="Buscar por nombre o código" value={search} onChange={(e)=>setSearch(e.target.value)}/>
       </label>
-      <p className="text-sm text-stone-500">{total} {total === 1 ? 'producto' : 'productos'}{query.isFetching?' · Actualizando…':''}</p>
+      <p className="catalog-command-count" role="status">{total} {total === 1 ? 'producto' : 'productos'}{query.isFetching?' · Actualizando…':''}</p>
+      <div className="catalog-command-actions">
+        <Link className="button-primary" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>
+        <ProductFamilies key={scope.selected?.id} />
+        <details className="catalog-command-menu" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
+          <summary className="button-secondary list-none [&::-webkit-details-marker]:hidden">Más acciones<ChevronDown className="h-4 w-4" aria-hidden /></summary>
+          <div className="catalog-command-menu-popover">
+            {scope.selected ? <ProductImagesExport key={`images-${scope.selected.id}`} restaurantId={scope.selected.id} /> : null}
+          </div>
+        </details>
+      </div>
     </div>
-    {scope.selected ? <ProductImagesExport key={`images-${scope.selected.id}`} restaurantId={scope.selected.id} /> : null}
-    <ProductFamilies key={scope.selected?.id} />
     {mutationError?<p className="form-error mb-5" role="alert">{mutationError}</p>:null}
-    {products.length===0?<EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/>:<div className="admin-table-shell rounded-xl border border-stone-200 bg-white">
-      <div className="hidden grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] gap-4 border-b border-stone-200 px-5 py-3 text-xs font-medium text-stone-500 lg:grid" aria-hidden><span>Producto</span><span>Estado</span><span className="text-right">Precio</span><span /></div>
+    {products.length===0?<div className="admin-data-results admin-data-scroll"><EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/></div>:<div className="admin-table-shell admin-data-results admin-data-scroll catalog-products-list rounded-xl border border-stone-200 bg-white">
+      <div className="catalog-products-header hidden grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] gap-4 border-b border-stone-200 px-5 py-3 text-xs font-medium text-stone-500 lg:grid" aria-hidden><span>Producto</span><span>Estado</span><span className="text-right">Precio</span><span /></div>
       {products.map((row)=>{
         const image=responsiveAssetUrls(row.image_path);const busy=busyProductId===row.id;const hasPromotion=row.promotional_price_cents!==null
         return <article className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 border-b border-stone-100 p-4 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] lg:px-5" key={row.id}>
@@ -93,9 +103,9 @@ export function ProductsPage(){
           </div>
           <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 lg:col-auto lg:row-auto">
             <Link className="hidden rounded-lg px-2 py-2 text-sm font-medium text-stone-600 hover:text-stone-950 sm:block" aria-label={`Editar ${row.name}`} to={`/admin/catalogo/productos/${row.id}`}>Editar</Link>
-            <details className="relative" name="product-actions" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
+            <details className="catalog-product-actions relative" name="product-actions" onToggle={event => { const details=event.currentTarget; if(!details.open){delete details.dataset.placement;return} const menu=details.querySelector<HTMLElement>('.catalog-product-actions-menu');const viewport=details.closest<HTMLElement>('.catalog-products-list');if(!menu||!viewport)return;const trigger=details.getBoundingClientRect();const bounds=viewport.getBoundingClientRect();const below=bounds.bottom-trigger.bottom;const above=trigger.top-bounds.top;details.dataset.placement=below<menu.offsetHeight&&above>below?'top':'bottom' }} onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
               <summary className="icon-button list-none [&::-webkit-details-marker]:hidden" aria-label={`Opciones de ${row.name}`}><MoreHorizontal className="h-5 w-5" aria-hidden /></summary>
-              <div className="absolute right-0 z-20 mt-1 grid w-60 gap-1 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg">
+              <div className="catalog-product-actions-menu absolute right-0 z-20 grid w-60 gap-1 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg">
                 <Link className="rounded-lg px-3 py-2.5 text-sm hover:bg-stone-50" to={`/admin/catalogo/productos/${row.id}`}>Editar producto</Link>
                 <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.available} aria-label={`${row.available?'Disponible':'Agotado'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'available',!row.available)}>{row.available?<CircleX className="h-4 w-4" aria-hidden/>:<CircleCheck className="h-4 w-4" aria-hidden/>}{row.available?'Marcar agotado':'Marcar disponible'}</button>
                 <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.active} aria-label={`${row.active?'Activo':'Oculto'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'active',!row.active)}>{row.active?<EyeOff className="h-4 w-4" aria-hidden/>:<Eye className="h-4 w-4" aria-hidden/>}{row.active?'Ocultar producto':'Mostrar producto'}</button>
@@ -107,6 +117,7 @@ export function ProductsPage(){
         </article>
       })}
     </div>}
-    {total>PAGE_SIZE?<nav className="mt-5 flex items-center justify-between gap-3" aria-label="Páginas de productos"><p className="text-sm text-stone-500">Página {page+1} de {Math.max(1,Math.ceil(total/PAGE_SIZE))}</p><div className="flex gap-2"><button className="button-secondary" type="button" disabled={page===0||query.isFetching} onClick={()=>setPage(value=>Math.max(0,value-1))}>Anterior</button><button className="button-secondary" type="button" disabled={(page+1)*PAGE_SIZE>=total||query.isFetching} onClick={()=>setPage(value=>value+1)}>Siguiente</button></div></nav>:null}
-  </>
+    {total>PAGE_SIZE?<nav className="admin-data-pagination" aria-label="Páginas de productos"><p className="text-sm text-stone-500">Página {page+1} de {Math.max(1,Math.ceil(total/PAGE_SIZE))}</p><div className="flex gap-2"><button className="button-secondary" type="button" disabled={page===0||query.isFetching} onClick={()=>setPage(value=>Math.max(0,value-1))}>Anterior</button><button className="button-secondary" type="button" disabled={(page+1)*PAGE_SIZE>=total||query.isFetching} onClick={()=>setPage(value=>value+1)}>Siguiente</button></div></nav>:null}
+    </AdminDataRegion>
+  </AdminDataWorkspace>
 }

@@ -139,12 +139,12 @@ test.describe('catalog stock and store setup', () => {
     await expect(nav.getByRole('link', { name: 'Tienda online', exact: true })).toHaveCount(0)
     await expect(nav.locator('summary')).toHaveCount(0)
     await page.goto('/admin/tienda')
-    await expect(page).toHaveURL(/\/admin\/pedidos$/)
+    await expect(page).toHaveURL(/\/admin\/pedidos(?:\?.*)?$/)
     await expect(page.getByRole('heading', { name: 'Pedidos', exact: true })).toBeVisible()
     expect(requests.storeSaves).toEqual([])
   })
 
-  for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 1000 }]) {
+  for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 900 }]) {
     test(`${viewport.name} keeps the overview focused while detailed reports remain accessible`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
       const requests = await adminFixture(page)
@@ -205,9 +205,10 @@ test.describe('catalog stock and store setup', () => {
       await page.goto('/admin/catalogo/productos')
       await expect(page.getByRole('heading', { name: 'Productos', exact: true })).toBeVisible()
       await page.screenshot({ path: testInfo.outputPath(`catalog-list-${viewport.name}.png`), fullPage: true })
-      await page.getByRole('button', { name: /Productos con variantes/ }).click()
-      await page.getByRole('button', { name: 'Fundas de silicona', exact: true }).click()
-      const dialog = page.getByRole('dialog', { name: 'Ficha con variantes' })
+      if (viewport.name === 'desktop') expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
+      await page.getByRole('button', { name: 'Variantes', exact: true }).click()
+      await page.getByRole('button', { name: 'Editar Fundas de silicona' }).click()
+      const dialog = page.getByRole('dialog', { name: 'Editar Fundas de silicona' })
       const quantities = dialog.getByLabel('Cantidad en stock')
       await expect(quantities).toHaveCount(2)
       await expect(quantities.nth(0)).toHaveValue('10')

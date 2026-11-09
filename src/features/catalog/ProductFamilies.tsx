@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Layers, Plus, X } from 'lucide-react'
+import { ArrowLeft, Layers, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
@@ -61,16 +61,26 @@ export function ProductFamilies() {
   const debouncedCandidateSearch = safeSearch(useDebouncedValue(candidateSearch, 300))
   const savingRef = useRef(false)
   const dialogRef = useRef<HTMLElement>(null)
-  const dialogOpen = Boolean(draft)
+  const editorOpen = draft !== null
+  const activeDraftId = draft?.id ?? null
   useEffect(() => {
-    if (!dialogOpen || !dialogRef.current) return
+    if (!open || !dialogRef.current) return
     const dialog = dialogRef.current
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     dialog.querySelector<HTMLButtonElement>('button')?.focus()
-    return () => { if (previous?.isConnected) previous.focus() }
-  }, [dialogOpen])
+    return () => {
+      document.body.style.overflow = previousOverflow
+      if (previous?.isConnected) previous.focus()
+    }
+  }, [open])
+  useEffect(() => {
+    if (!open || !dialogRef.current) return
+    dialogRef.current.querySelector<HTMLElement>(editorOpen ? '[data-variant-editor-focus]' : '[data-family-index-focus]')?.focus()
+  }, [activeDraftId, editorOpen, open])
   function onDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-      if (event.key === 'Escape' && !savingRef.current) { event.preventDefault(); setDraft(null); return }
+      if (event.key === 'Escape' && !savingRef.current) { event.preventDefault(); setDraft(null); setOpen(false); return }
       if (event.key !== 'Tab') return
       const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary')].filter(element => {
         const closed = element.closest('details:not([open])')
@@ -79,6 +89,11 @@ export function ProductFamilies() {
       const first = controls[0]; const last = controls.at(-1)
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+  }
+  function closeManager() {
+    if (savingRef.current) return
+    setDraft(null)
+    setOpen(false)
   }
   useEffect(() => {
     setDraft(null); setAttempt(null); setError(null); setMessage(null); setStockNeedsReview(false)
@@ -263,64 +278,72 @@ export function ProductFamilies() {
       } else setError('No pudimos confirmar el guardado. Reintentá el mismo envío; no volverá a cargar las cantidades ni duplicará productos.')
     } finally { savingRef.current = false; setSaving(false) }
   }
-  return <section className="mb-4 rounded-xl border border-stone-200 bg-white px-4 py-3">
-    <button type="button" className="flex min-h-8 w-full items-center justify-between gap-3 text-left text-sm font-medium" onClick={() => setOpen((value) => !value)} aria-expanded={open}><span className="flex items-center gap-2 text-stone-700"><Layers className="h-4 w-4 text-stone-400" aria-hidden />Productos con variantes</span><span className="text-xs text-stone-500">{open ? 'Cerrar' : 'Administrar'}</span></button>
-    {open && <div className="mt-4 space-y-3">
-      <p className="text-sm text-stone-500">Agrupá modelos, colores o talles. Cada combinación tiene su precio y stock.</p>
-      <label className="field"><span>Buscar familias</span><input value={familySearch} onChange={event => { setFamilySearch(event.target.value); setFamilyPage(0) }} placeholder="Nombre o código" /></label>
-      {catalog.isLoading ? <p role="status">Cargando variantes…</p> : null}
-      {catalog.error ? <p className="form-error" role="alert">{catalog.error.message}</p> : null}
-      {catalog.data ? <>
-        <div className="flex flex-wrap gap-2">{catalog.data.families.map((family) => <button key={family.id} type="button" className="button-secondary" onClick={() => edit(family)}>{family.name}{!family.active ? ' · Oculta' : ''}</button>)}</div>
-        {!catalog.data.families.length ? <p className="text-sm text-stone-500">No hay familias que coincidan con la búsqueda.</p> : null}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-stone-500"><span>{catalog.data.familyCount} familias</span><div className="flex gap-2"><button type="button" className="button-secondary" disabled={familyPage === 0 || catalog.isFetching} onClick={() => setFamilyPage(page => Math.max(0, page - 1))}>Anterior</button><button type="button" className="button-secondary" disabled={(familyPage + 1) * PAGE_SIZE >= catalog.data.familyCount || catalog.isFetching} onClick={() => setFamilyPage(page => page + 1)}>Siguiente</button></div></div>
-        <button type="button" className="button-secondary" disabled={!catalog.data.categories.length} onClick={() => edit()}><Plus className="h-4 w-4" aria-hidden />Nueva ficha con variantes</button>
-      </> : null}
-      {message ? <p className="form-success" role="status">{message}</p> : null}
-      {attempt && !draft ? <button type="button" className="button-primary" onClick={() => setDraft(attempt.draft)}>Recuperar guardado pendiente</button> : null}
-    </div>}
-    {draft ? <div className="modal-backdrop"><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="modal-card max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="family-title">
-      <div className="flex items-center justify-between"><h2 id="family-title" className="text-xl font-semibold">Ficha con variantes</h2><button type="button" className="icon-button" aria-label="Cerrar ficha" disabled={saving} onClick={() => setDraft(null)}><X /></button></div>
-      {attempt ? <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Este envío está pendiente de confirmar. Conservamos sus datos para que puedas reintentarlo sin volver a aplicar el stock.</p> : null}
-      {editorCatalog.isLoading || needsVariantSeed ? <p className="mt-4 text-sm" role="status">Cargando productos de la ficha…</p> : null}
-      {editorCatalog.error ? <p className="form-error mt-4" role="alert">{editorCatalog.error.message}</p> : null}
-      <fieldset disabled={saving || Boolean(attempt)} className="mt-5 space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="field"><span>Nombre de la ficha</span><input maxLength={120} value={draft.name} onChange={(e) => change('name', e.target.value)} placeholder="Funda de silicona" /></label>
-          <label className="field"><span>Categoría de todas las variantes</span><select value={draft.categoryId} onChange={(e) => change('categoryId', e.target.value)}>{catalog.data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-          <label className="field sm:col-span-2"><span>Atributos, separados por comas</span><input value={draft.axesText} onChange={(e) => change('axesText', e.target.value)} placeholder="Modelo, Color" /><p className="text-xs font-normal text-stone-500">Por ejemplo: Modelo, Color o Talle. Después completás los valores de cada variante.</p></label>
+  return <>
+    <button type="button" className="button-secondary" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open}><Layers className="h-4 w-4" aria-hidden />Variantes</button>
+    {open ? <div className="modal-backdrop catalog-variants-backdrop" role="presentation"><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="modal-card catalog-variants-dialog" role="dialog" aria-modal="true" aria-labelledby="family-manager-title" aria-busy={saving}>
+      <header className="catalog-variants-dialog-header">
+        <div className="flex min-w-0 items-center gap-2">
+          {draft ? <button type="button" data-variant-editor-focus className="icon-button" aria-label="Volver a fichas con variantes" disabled={saving} onClick={() => setDraft(null)}><ArrowLeft className="h-5 w-5" /></button> : null}
+          <div className="min-w-0"><p className="page-eyebrow">Catálogo</p><h2 id="family-manager-title">{draft ? (editingFamily ? `Editar ${editingFamily.name}` : 'Nueva ficha con variantes') : 'Productos con variantes'}</h2></div>
         </div>
-        <details className="admin-disclosure" open={Boolean(error && error.includes('código')) || undefined}>
-          <summary>Descripción y presentación</summary>
-          <div className="grid gap-4 sm:grid-cols-2">
-          <label className="field"><span>Código de familia (opcional)</span><input maxLength={80} value={draft.code} onChange={(e) => change('code', e.target.value)} placeholder="FUNDAS-SILICONA" /></label>
-          <label className="field sm:col-span-2"><span>Descripción de la ficha</span><textarea maxLength={2000} rows={2} value={draft.description} onChange={(e) => change('description', e.target.value)} /></label>
-          <label className="field"><span>Foto de portada</span><select value={draft.imagePath} onChange={(e) => change('imagePath', e.target.value)}><option value="">Usar la foto de una variante</option>{editorCatalog.data?.products.filter((p) => p.image_path && draft.variants.some((v) => v.productId === p.id)).map((p) => <option key={p.id} value={p.image_path!}>{p.name}</option>)}</select></label>
-          <label className="check-field"><input type="checkbox" checked={draft.active} onChange={(e) => change('active', e.target.checked)} />Ficha visible</label>
-          </div>
-        </details>
-        <div className="border-t border-stone-100 pt-4"><h3 className="font-semibold text-stone-900">Variantes</h3><p className="mt-1 text-xs text-stone-500">El stock es la cantidad total, incluidas las reservas. Vacío conserva el saldo existente. Sin cantidad cargada, se permiten pedidos sin controlar stock. Con control activo, 0 indica agotado. Los pedidos recibidos sin control siguen sin descuento automático.</p></div>
-        {editorCatalog.data?.stock.policy.mode === 'never_enabled' ? <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Podés cargar las cantidades ahora. El control de stock todavía no está activo.</p> : null}
-        {stockLocked && !stockNeedsReview ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">El stock está pausado o tiene una actualización en curso. Podés editar los otros datos de la ficha.</p> : null}
-        {draft.variants.map((row, index) => <div key={`${row.isNew ? row.productId : index}`} className="rounded-xl border border-stone-200 p-3">
-          <div className="flex items-end gap-2">
-            {row.isNew ? <div className="grid flex-1 gap-3 sm:grid-cols-2"><label className="field"><span>Nuevo código / SKU (opcional)</span><input value={row.code} maxLength={80} onChange={(e) => changeVariant(index, { code: e.target.value })} /></label><label className="field"><span>Precio de la variante</span><input value={row.price} type="number" min="0" step="0.01" onChange={(e) => changeVariant(index, { price: e.target.value })} /></label></div> : <label className="field flex-1"><span>Producto existente</span><select value={row.productId} onChange={(e) => changeVariant(index, { productId: e.target.value, ...stockDraft(balanceFor(e.target.value)) })}><option value="">Elegí un producto</option>{productsForVariant(row, index).map((p) => <option key={p.id} value={p.id}>{p.name} · {p.code}</option>)}</select></label>}
-            <button type="button" className="icon-button" aria-label={`Quitar variante ${index + 1}`} onClick={() => change('variants', draft.variants.filter((_, i) => i !== index))}><X className="h-4 w-4" /></button>
-          </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">{axes.map((axis) => <label key={axis} className="field"><span>{axis}</span><input maxLength={80} value={row.attributes[axis] ?? ''} onChange={(e) => changeVariant(index, { attributes: { ...row.attributes, [axis]: e.target.value } })} /></label>)}</div>
-          <div className="mt-3 grid items-end gap-3 sm:grid-cols-2">
-            <label className="field"><span>Cantidad en stock</span><input type="text" inputMode="numeric" value={row.quantity} disabled={stockLocked || !row.productId} aria-describedby={`variant-stock-${index}`} placeholder="Ej. 10" onChange={e => changeVariant(index, { quantity: e.target.value })} /></label>
-            <p id={`variant-stock-${index}`} className="text-sm text-stone-600">{row.initialQuantity === null ? 'Sin cantidad cargada.' : `Stock actual: ${row.initialQuantity}.`} Reservadas: {row.reserved}.{row.initialQuantity !== null ? ` Disponibles: ${BigInt(row.initialQuantity) - BigInt(row.reserved)}.` : ''}</p>
-          </div>
-          {!row.isNew && row.productId ? <Link className="mt-2 inline-block text-sm font-semibold text-orange-700 underline" to={`/admin/catalogo/productos/${row.productId}`}>Editar precio, foto y extras de este producto</Link> : null}
-        </div>)}
-        <div className="grid gap-3 rounded-xl bg-stone-50 p-3 sm:grid-cols-[minmax(0,1fr)_auto]"><label className="field"><span>Buscar productos sin familia</span><input value={candidateSearch} onChange={event => { setCandidateSearch(event.target.value); setCandidatePage(0) }} placeholder="Nombre o código" /></label><div className="flex items-end gap-2"><button type="button" className="button-secondary" disabled={candidatePage === 0 || editorCatalog.isFetching} onClick={() => setCandidatePage(page => Math.max(0, page - 1))}>Anterior</button><button type="button" className="button-secondary" disabled={!editorCatalog.data || (candidatePage + 1) * PAGE_SIZE >= editorCatalog.data.candidateCount || editorCatalog.isFetching} onClick={() => setCandidatePage(page => page + 1)}>Siguiente</button></div></div>
-        <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" disabled={editorCatalog.isLoading || Boolean(editorCatalog.error)} onClick={() => change('variants', [...draft.variants, { productId: '', attributes: {}, isNew: false, code: '', price: '0', ...stockDraft() }])}>Agrupar producto existente</button><button type="button" className="button-secondary" onClick={() => change('variants', [...draft.variants, { productId: crypto.randomUUID(), attributes: {}, isNew: true, code: '', price: '0', ...stockDraft() }])}>Crear nueva variante</button></div>
-        <p className="text-sm text-stone-500">Quitar una variante de esta ficha la deja como producto independiente y conserva su stock.</p>
-      </fieldset>
-      {error ? <p role="alert" className="form-error mt-4">{error}</p> : null}
-      {stockNeedsReview ? <button type="button" className="button-secondary mt-3" disabled={editorCatalog.isFetching} onClick={() => void reviewStock()}>Actualizar stock de variantes</button> : null}
-      <div className="mt-5 flex justify-end gap-2"><button type="button" className="button-secondary" disabled={saving} onClick={() => setDraft(null)}>{attempt ? 'Cerrar' : 'Cancelar'}</button><button type="button" className="button-primary" disabled={saving || (!attempt && (stockNeedsReview || needsVariantSeed || editorCatalog.isLoading || Boolean(editorCatalog.error)))} onClick={() => void save()}>{saving ? 'Guardando…' : attempt ? 'Reintentar guardado' : 'Guardar ficha y variantes'}</button></div>
+        <button type="button" className="icon-button" aria-label="Cerrar gestor de variantes" disabled={saving} onClick={closeManager}><X className="h-5 w-5" /></button>
+      </header>
+      <div className="catalog-variants-dialog-body">
+        {!draft ? <div className="catalog-family-index">
+          <div className="catalog-family-index-intro"><div><p>Agrupá modelos, colores o talles. Cada combinación conserva su precio y stock.</p></div><button type="button" className="button-primary" disabled={!catalog.data?.categories.length} onClick={() => edit()}><Plus className="h-4 w-4" aria-hidden />Nueva ficha con variantes</button></div>
+          <label className="field"><span>Buscar familias</span><input data-family-index-focus value={familySearch} onChange={event => { setFamilySearch(event.target.value); setFamilyPage(0) }} placeholder="Nombre o código" /></label>
+          {catalog.isLoading ? <p role="status">Cargando variantes…</p> : null}
+          {catalog.error ? <p className="form-error" role="alert">{catalog.error.message}</p> : null}
+          {catalog.data ? <>
+            <div className="catalog-family-list">{catalog.data.families.map((family) => <button key={family.id} type="button" className="catalog-family-row" aria-label={`Editar ${family.name}`} onClick={() => edit(family)}><span><strong>{family.name}</strong>{family.code ? <small>{family.code}</small> : null}</span><span>{family.active ? 'Editar' : 'Oculta · Editar'}</span></button>)}</div>
+            {!catalog.data.families.length ? <p className="catalog-family-empty">No hay familias que coincidan con la búsqueda.</p> : null}
+            <div className="catalog-family-pagination"><span>{catalog.data.familyCount} familias</span><div className="flex gap-2"><button type="button" className="button-secondary" disabled={familyPage === 0 || catalog.isFetching} onClick={() => setFamilyPage(page => Math.max(0, page - 1))}>Anterior</button><button type="button" className="button-secondary" disabled={(familyPage + 1) * PAGE_SIZE >= catalog.data.familyCount || catalog.isFetching} onClick={() => setFamilyPage(page => page + 1)}>Siguiente</button></div></div>
+          </> : null}
+          {message ? <p className="form-success" role="status">{message}</p> : null}
+          {attempt ? <button type="button" className="button-primary" onClick={() => setDraft(attempt.draft)}>Recuperar guardado pendiente</button> : null}
+        </div> : <>
+          {attempt ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Este envío está pendiente de confirmar. Conservamos sus datos para que puedas reintentarlo sin volver a aplicar el stock.</p> : null}
+          {editorCatalog.isLoading || needsVariantSeed ? <p className="mt-4 text-sm" role="status">Cargando productos de la ficha…</p> : null}
+          {editorCatalog.error ? <p className="form-error mt-4" role="alert">{editorCatalog.error.message}</p> : null}
+          <fieldset disabled={saving || Boolean(attempt)} className="catalog-variant-editor space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="field"><span>Nombre de la ficha</span><input maxLength={120} value={draft.name} onChange={(e) => change('name', e.target.value)} placeholder="Funda de silicona" /></label>
+              <label className="field"><span>Categoría de todas las variantes</span><select value={draft.categoryId} onChange={(e) => change('categoryId', e.target.value)}>{catalog.data?.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+              <label className="field sm:col-span-2"><span>Atributos, separados por comas</span><input value={draft.axesText} onChange={(e) => change('axesText', e.target.value)} placeholder="Modelo, Color" /><p className="text-xs font-normal text-stone-500">Por ejemplo: Modelo, Color o Talle. Después completás los valores de cada variante.</p></label>
+            </div>
+            <details className="admin-disclosure" open={Boolean(error && error.includes('código')) || undefined}>
+              <summary>Descripción y presentación</summary>
+              <div className="grid gap-4 sm:grid-cols-2">
+              <label className="field"><span>Código de familia (opcional)</span><input maxLength={80} value={draft.code} onChange={(e) => change('code', e.target.value)} placeholder="FUNDAS-SILICONA" /></label>
+              <label className="field sm:col-span-2"><span>Descripción de la ficha</span><textarea maxLength={2000} rows={2} value={draft.description} onChange={(e) => change('description', e.target.value)} /></label>
+              <label className="field"><span>Foto de portada</span><select value={draft.imagePath} onChange={(e) => change('imagePath', e.target.value)}><option value="">Usar la foto de una variante</option>{editorCatalog.data?.products.filter((p) => p.image_path && draft.variants.some((v) => v.productId === p.id)).map((p) => <option key={p.id} value={p.image_path!}>{p.name}</option>)}</select></label>
+              <label className="check-field"><input type="checkbox" checked={draft.active} onChange={(e) => change('active', e.target.checked)} />Ficha visible</label>
+              </div>
+            </details>
+            <div className="border-t border-stone-100 pt-4"><h3 className="font-semibold text-stone-900">Variantes</h3><p className="mt-1 text-xs text-stone-500">El stock es la cantidad total, incluidas las reservas. Vacío conserva el saldo existente. Sin cantidad cargada, se permiten pedidos sin controlar stock. Con control activo, 0 indica agotado. Los pedidos recibidos sin control siguen sin descuento automático.</p></div>
+            {editorCatalog.data?.stock.policy.mode === 'never_enabled' ? <p className="rounded-xl bg-stone-50 p-3 text-sm text-stone-600">Podés cargar las cantidades ahora. El control de stock todavía no está activo.</p> : null}
+            {stockLocked && !stockNeedsReview ? <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">El stock está pausado o tiene una actualización en curso. Podés editar los otros datos de la ficha.</p> : null}
+            {draft.variants.map((row, index) => <div key={`${row.isNew ? row.productId : index}`} className="catalog-variant-row">
+              <div className="flex items-end gap-2">
+                {row.isNew ? <div className="grid flex-1 gap-3 sm:grid-cols-2"><label className="field"><span>Nuevo código / SKU (opcional)</span><input value={row.code} maxLength={80} onChange={(e) => changeVariant(index, { code: e.target.value })} /></label><label className="field"><span>Precio de la variante</span><input value={row.price} type="number" min="0" step="0.01" onChange={(e) => changeVariant(index, { price: e.target.value })} /></label></div> : <label className="field flex-1"><span>Producto existente</span><select value={row.productId} onChange={(e) => changeVariant(index, { productId: e.target.value, ...stockDraft(balanceFor(e.target.value)) })}><option value="">Elegí un producto</option>{productsForVariant(row, index).map((p) => <option key={p.id} value={p.id}>{p.name} · {p.code}</option>)}</select></label>}
+                <button type="button" className="icon-button" aria-label={`Quitar variante ${index + 1}`} onClick={() => change('variants', draft.variants.filter((_, i) => i !== index))}><X className="h-4 w-4" /></button>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">{axes.map((axis) => <label key={axis} className="field"><span>{axis}</span><input maxLength={80} value={row.attributes[axis] ?? ''} onChange={(e) => changeVariant(index, { attributes: { ...row.attributes, [axis]: e.target.value } })} /></label>)}</div>
+              <div className="mt-3 grid items-end gap-3 sm:grid-cols-2">
+                <label className="field"><span>Cantidad en stock</span><input type="text" inputMode="numeric" value={row.quantity} disabled={stockLocked || !row.productId} aria-describedby={`variant-stock-${index}`} placeholder="Ej. 10" onChange={e => changeVariant(index, { quantity: e.target.value })} /></label>
+                <p id={`variant-stock-${index}`} className="text-sm text-stone-600">{row.initialQuantity === null ? 'Sin cantidad cargada.' : `Stock actual: ${row.initialQuantity}.`} Reservadas: {row.reserved}.{row.initialQuantity !== null ? ` Disponibles: ${BigInt(row.initialQuantity) - BigInt(row.reserved)}.` : ''}</p>
+              </div>
+              {!row.isNew && row.productId ? <Link className="mt-2 inline-block text-sm font-semibold text-orange-700 underline" to={`/admin/catalogo/productos/${row.productId}`} aria-disabled={saving} tabIndex={saving ? -1 : undefined} onClick={event => { if (savingRef.current) event.preventDefault() }}>Editar precio, foto y extras de este producto</Link> : null}
+            </div>)}
+            <div className="grid gap-3 rounded-xl bg-stone-50 p-3 sm:grid-cols-[minmax(0,1fr)_auto]"><label className="field"><span>Buscar productos sin familia</span><input value={candidateSearch} onChange={event => { setCandidateSearch(event.target.value); setCandidatePage(0) }} placeholder="Nombre o código" /></label><div className="flex items-end gap-2"><button type="button" className="button-secondary" disabled={candidatePage === 0 || editorCatalog.isFetching} onClick={() => setCandidatePage(page => Math.max(0, page - 1))}>Anterior</button><button type="button" className="button-secondary" disabled={!editorCatalog.data || (candidatePage + 1) * PAGE_SIZE >= editorCatalog.data.candidateCount || editorCatalog.isFetching} onClick={() => setCandidatePage(page => page + 1)}>Siguiente</button></div></div>
+            <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary" disabled={editorCatalog.isLoading || Boolean(editorCatalog.error)} onClick={() => change('variants', [...draft.variants, { productId: '', attributes: {}, isNew: false, code: '', price: '0', ...stockDraft() }])}>Agrupar producto existente</button><button type="button" className="button-secondary" onClick={() => change('variants', [...draft.variants, { productId: crypto.randomUUID(), attributes: {}, isNew: true, code: '', price: '0', ...stockDraft() }])}>Crear nueva variante</button></div>
+            <p className="text-sm text-stone-500">Quitar una variante de esta ficha la deja como producto independiente y conserva su stock.</p>
+          </fieldset>
+          {error ? <p role="alert" className="form-error mt-4">{error}</p> : null}
+          {stockNeedsReview ? <button type="button" className="button-secondary mt-3" disabled={editorCatalog.isFetching} onClick={() => void reviewStock()}>Actualizar stock de variantes</button> : null}
+        </>}
+      </div>
+      {draft ? <footer className="catalog-variants-dialog-footer"><button type="button" className="button-secondary" disabled={saving} onClick={() => setDraft(null)}>{attempt ? 'Cerrar' : 'Volver a fichas'}</button><button type="button" className="button-primary" disabled={saving || (!attempt && (stockNeedsReview || needsVariantSeed || editorCatalog.isLoading || Boolean(editorCatalog.error)))} onClick={() => void save()}>{saving ? 'Guardando…' : attempt ? 'Reintentar guardado' : 'Guardar ficha y variantes'}</button></footer> : null}
     </section></div> : null}
-  </section>
+  </>
 }

@@ -16,17 +16,20 @@ export function ErrorPanel({
   title = 'No pudimos completar la operación',
   children,
   action,
+  headingLevel = 2,
 }: {
   title?: string
   children: ReactNode
   action?: ReactNode
+  headingLevel?: 1 | 2
 }) {
+  const Heading = headingLevel === 1 ? 'h1' : 'h2'
   return (
     <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950 shadow-sm" role="alert">
       <div className="flex gap-3">
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
         <div>
-          <h2 className="font-semibold">{title}</h2>
+          <Heading className="font-semibold">{title}</Heading>
           <div className="mt-1 text-sm text-red-800">{children}</div>
           {action ? <div className="mt-4">{action}</div> : null}
         </div>

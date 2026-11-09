@@ -107,6 +107,38 @@ async function mockCatalog(page: Page) {
         })),
         nextCursor: start === 0 ? products[23]!.id : null,
       }
+    } else if (path === '/rest/v1/rpc/get_public_store_catalog_page') {
+      const input = request.postDataJSON() as {
+        p_section?: 'all' | 'featured' | 'offers'
+        p_cursor?: { afterGroupId?: string } | null
+        p_limit?: number
+      }
+      const section = input.p_section ?? 'all'
+      const scoped = section === 'featured'
+        ? products.filter((variant) => variant.featured)
+        : section === 'offers'
+          ? []
+          : products
+      if (section === 'all') pageRequests += 1
+      const cursorIndex = input.p_cursor?.afterGroupId
+        ? scoped.findIndex((variant) => variant.id === input.p_cursor?.afterGroupId) + 1
+        : 0
+      const limit = Math.min(48, Math.max(1, input.p_limit ?? 24))
+      const rows = scoped.slice(cursorIndex, cursorIndex + limit)
+      body = {
+        revision: 1,
+        serverNow: '2026-11-08T12:00:00.000Z',
+        validUntil: null,
+        items: rows.map((variant) => ({
+          id: variant.id,
+          categoryId,
+          family: null,
+          variants: [variant],
+        })),
+        nextCursor: cursorIndex + limit < scoped.length
+          ? { afterGroupId: rows.at(-1)!.id, revision: 1, section }
+          : null,
+      }
     } else {
       await route.fulfill({
         status: 404,
@@ -120,7 +152,12 @@ async function mockCatalog(page: Page) {
   return { getPageRequests: () => pageRequests }
 }
 
-test('public catalog meets mobile Web Vitals budgets under slow network and 4x CPU', async ({ page, context }, testInfo) => {
+const performanceRoutes = [
+  { label: 'menu', path: '/r/performance-test' },
+  { label: 'storefront', path: '/t/performance-test' },
+] as const
+
+for (const target of performanceRoutes) test(`public ${target.label} meets mobile Web Vitals budgets under slow network and 4x CPU`, async ({ page, context }, testInfo) => {
   const catalog = await mockCatalog(page)
   await page.addInitScript(() => {
     const supported = new Set(PerformanceObserver.supportedEntryTypes)
@@ -179,9 +216,9 @@ test('public catalog meets mobile Web Vitals budgets under slow network and 4x C
   })
   await session.send('Emulation.setCPUThrottlingRate', { rate: 4 })
 
-  await page.goto('/r/performance-test', { waitUntil: 'domcontentloaded' })
+  await page.goto(target.path, { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: 'Mozzi Performance', level: 1 })).toBeVisible()
-  await expect(page.getByText('Producto de rendimiento 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('Producto de rendimiento 1', { exact: true }).first()).toBeVisible()
   const coverImage = page.locator('img[fetchpriority="high"]')
   await expect(coverImage).toHaveCount(1)
   await expect.poll(

@@ -211,6 +211,13 @@ export const publicCatalogPageSchema = z.object({
   nextCursor: z.string().nullable(),
 })
 
+export const publicStoreCatalogPageSchema = publicCatalogPageSchema.omit({ nextCursor: true }).extend({
+  nextCursor: z.record(z.string(), z.unknown()).nullable(),
+  serverNow: z.string().datetime({ offset: true }),
+  validUntil: z.string().datetime({ offset: true }).nullable(),
+  categoryIcons: z.record(z.string(), z.string()).optional().default({}),
+})
+
 export const publicCatalogGroupResultSchema = z.object({
   revision: z.number().int().nonnegative(),
   group: publicCatalogGroupSchema,

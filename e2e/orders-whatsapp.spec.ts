@@ -24,7 +24,7 @@ const orders = [paidOrder,
   { ...paidOrder, id: '23000000-0000-4000-8000-000000000003', display_number: 'CM-0003', customer_name: 'Cliente sin teléfono válido', customer_phone: 'sin teléfono' },
 ]
 
-async function adminFixture(page: Page, options: { inventoryCounting?: boolean; whatsappOrders?: boolean; claims?: string[] } = {}) {
+async function adminFixture(page: Page, options: { inventoryCounting?: boolean; inventoryMode?: 'never_enabled' | 'enforced'; whatsappOrders?: boolean; claims?: string[] } = {}) {
   const currentOrders = orders.map((order, index) => ({ ...order,
     action_id: `24000000-0000-4000-8000-00000000000${index + 1}`,
     accepted_by: null as string | null, accepted_at: null as string | null,
@@ -89,7 +89,7 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean; 
       body = { claimed, alreadyClaimed: !claimed, status: order.status }
     }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_overview') body = {
-      policy: { mode: options.inventoryCounting ? 'paused' : 'enforced', version: '1', activatedAt: '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
+      policy: { mode: options.inventoryCounting ? 'paused' : (options.inventoryMode ?? 'enforced'), version: '1', activatedAt: options.inventoryMode === 'never_enabled' ? null : '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
       operations: [],
     }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_items') body = {
@@ -108,7 +108,42 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean; 
 test.describe('admin WhatsApp contact', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'This suite uses only the isolated e2e.invalid mock environment.')
 
-  for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 'mobile', width: 390, height: 844 }]) {
+  test('order filters survive list, detail and return while a change resets pagination', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const unexpected = await adminFixture(page)
+    const listPath = '/admin/pedidos?q=Luc%C3%ADa&status=generated&fulfillment=pickup&from=2026-10-01&to=2026-10-31&page=2'
+    await page.goto(listPath)
+    await expect(page.getByLabel('Buscar')).toHaveValue('Lucía')
+    await expect(page.getByLabel('Estado')).toHaveValue('generated')
+    await expect(page.getByLabel('Modalidad')).toHaveValue('pickup')
+    await page.getByRole('link', { name: 'Ver CM-0001' }).click()
+    await expect(page.getByRole('heading', { name: 'CM-0001', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Volver' })).toHaveAttribute('href', listPath)
+    await page.getByRole('link', { name: 'Volver' }).click()
+    await expect(page).toHaveURL(new RegExp(`${listPath.replace(/[?]/g, '\\?')}$`))
+    await page.getByLabel('Estado').selectOption('completed')
+    await expect(page).not.toHaveURL(/(?:\?|&)page=/)
+    await expect(page).toHaveURL(/status=completed/)
+    expect(unexpected).toEqual([])
+  })
+
+  test('desktop keeps the stock table usable while activation guidance is visible', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const unexpected = await adminFixture(page, { inventoryMode: 'never_enabled' })
+    await page.goto('/admin/stock')
+    await expect(page.getByRole('heading', { name: 'Activar control de stock' })).toBeVisible()
+    const balances = page.locator('.admin-inventory-balances')
+    const box = await balances.boundingBox()
+    expect(box!.height).toBeGreaterThanOrEqual(400)
+    await balances.scrollIntoViewIfNeeded()
+    await expect(page.getByRole('table', { name: 'Existencias de productos' })).toBeVisible()
+    await expect(page.getByText('Funda negra', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('stock-activation-desktop.png'), fullPage: true })
+    expect(unexpected).toEqual([])
+  })
+
+  for (const viewport of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }]) {
     test(`${viewport.name} accepts from the list, detail and WhatsApp entry point with one shared action`, async ({ page }) => {
       await page.setViewportSize(viewport)
       const claims: string[] = []
@@ -164,12 +199,13 @@ test.describe('admin WhatsApp contact', () => {
       await expect(invalidRow.getByRole('link', { name: /por WhatsApp/ })).toHaveCount(0)
       await expect(invalidRow.getByRole('link', { name: 'Ver CM-0003' })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      if (viewport.name === 'desktop') expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
       if (viewport.name === 'mobile') {
-        await page.getByText('Fechas y modalidad', { exact: true }).click()
+        await page.getByText('Fechas personalizadas', { exact: true }).click()
         const from = await page.getByLabel('Desde', { exact: true }).boundingBox()
         const to = await page.getByLabel('Hasta', { exact: true }).boundingBox()
         expect(from!.y).toBe(to!.y)
-        await page.getByText('Fechas y modalidad', { exact: true }).click()
+        await page.getByText('Fechas personalizadas', { exact: true }).click()
         const number = await approvedRow.getByText('CM-0001', { exact: true }).boundingBox()
         const state = await approvedRow.getByText('Pagado · Pendiente de preparación').boundingBox()
         expect(state!.y).toBeGreaterThanOrEqual(number!.y + number!.height)
@@ -197,6 +233,7 @@ test.describe('admin WhatsApp contact', () => {
         expect(editStock!.height).toBeGreaterThanOrEqual(44)
       }
       await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).not.toBeVisible()
+      if (viewport.name === 'desktop') expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
       await page.getByText('Ingresos, ajustes y ventas externas', { exact: true }).click()
       await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -17,17 +17,25 @@ const CATEGORY = '20000000-0000-4000-8000-000000000001'
 const mocks = vi.hoisted(() => ({ menu: {} as PublicMenu, hook: vi.fn() }))
 vi.mock('../../lib/useDebouncedValue', () => ({ useDebouncedValue: (value: unknown) => value }))
 vi.mock('../public-menu/usePublicCatalog', () => ({
-  usePublicCatalog: (...args: unknown[]) => {
+  usePublicStoreCatalog: (...args: unknown[]) => {
     mocks.hook(...args)
-    const [, , categoryId = '', search = ''] = args as [string, string, string, string]
-    const groups = catalogGroups(mocks.menu, categoryId, search)
+    const [, section = 'all', categoryId = '', search = ''] = args as [string, 'all' | 'featured' | 'offers', string, string]
+    const baseGroups = catalogGroups(mocks.menu, categoryId, search)
+    const groups = section === 'featured'
+      ? baseGroups.filter(group => group.variants.some(product => product.featured && product.available))
+      : section === 'offers'
+        ? baseGroups.filter(group => group.variants.some(product => product.available && (product.promotionalPriceCents !== null || product.quantityPrices.length > 0 || product.quantityThreshold)))
+        : baseGroups
+    const serverNow = '2026-11-08T12:00:00.000Z'
     return {
       meta: { data: { ...mocks.menu, revision: 1, categories: mocks.menu.categories.map(({ products: _products, ...category }) => category) }, error: null, refetch: vi.fn() },
-      pages: { data: { pages: [{ revision: 1, items: groups, nextCursor: null }] }, error: null, refetch: vi.fn(), hasNextPage: false, isFetchingNextPage: false, fetchNextPage: vi.fn() },
+      pages: { data: { pages: [{ revision: 1, items: groups, nextCursor: null, serverNow, validUntil: null }] }, error: null, refetch: vi.fn(), hasNextPage: false, isFetchingNextPage: false, fetchNextPage: vi.fn() },
       groups,
       isLoading: false,
       isUpdating: false,
       refreshError: null,
+      serverNow,
+      validUntil: null,
     }
   },
 }))
@@ -81,21 +89,35 @@ describe('shared catalog storefront', () => {
     page()
     expect(await screen.findAllByRole('heading', { name: 'Funda de silicona' })).toHaveLength(1)
     expect(screen.getByText('Recibimos pedidos')).toBeVisible()
-    expect(screen.getByText('Atención: fuera de horario')).toBeVisible()
-    expect(mocks.hook).toHaveBeenCalledWith('fundas', 'store', '', '')
-    const link = screen.getByRole('link', { name: /Funda de silicona/ })
+    expect(screen.getByRole('button', { name: 'Ver horarios' })).toBeVisible()
+    expect(mocks.hook).toHaveBeenCalledWith('fundas', 'all', '', '', 24)
+    const link = screen.getByRole('link', { name: 'Funda de silicona' })
     expect(link).toHaveAttribute('href', `/t/fundas/producto/${FAMILY}`)
     await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'Rojo')
     expect(screen.getByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
   })
 
+  it('opens an offer on the same variant whose price was advertised', async () => {
+    mocks.menu.categories[0]!.products = [black, {
+      ...red,
+      promotionalPriceCents: 900,
+      promotionStartsAt: '2026-11-01T00:00:00.000Z',
+      promotionEndsAt: '2026-11-30T23:59:59.000Z',
+    }]
+    page()
+
+    expect(await screen.findByRole('heading', { name: 'Ofertas para aprovechar' })).toBeVisible()
+    await userEvent.click(screen.getAllByRole('link', { name: 'Funda de silicona' })[0]!)
+
+    expect(await screen.findByRole('button', { name: 'Rojo' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('25% menos')).toBeVisible()
+  })
+
   it('resolves the selected combination to its own SKU and preserves the menu cart', async () => {
     localStorage.setItem('mozzi:cart:fundas', '[]')
     page(`/t/fundas/producto/${FAMILY}`)
-    await userEvent.click(await screen.findByRole('button', { name: 'Elegir variante' }))
-    await userEvent.selectOptions(screen.getByLabelText('Elegí tu variante'), RED)
-    const dialog = screen.getByRole('dialog')
-    await userEvent.click(within(dialog).getByRole('button', { name: /Agregar/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Rojo' }))
+    await userEvent.click(screen.getByRole('button', { name: /Agregar al carrito/ }))
     await waitFor(() => {
       const cart = JSON.parse(localStorage.getItem('mozzi:cart:store:fundas') ?? '[]')
       expect(cart).toHaveLength(1)
@@ -104,27 +126,51 @@ describe('shared catalog storefront', () => {
     expect(localStorage.getItem('mozzi:cart:fundas')).toBe('[]')
   })
 
+  it('does not silently change an earlier variant axis when a combination is unavailable', async () => {
+    const model16Red = {
+      ...red,
+      id: '10000000-0000-4000-8000-000000000003',
+      variantAttributes: { Modelo: 'iPhone 16', Color: 'Rojo' },
+    }
+    mocks.menu.categories[0]!.products = [black, { ...red, available: false }, model16Red]
+    page(`/t/fundas/producto/${FAMILY}`)
+
+    const redChoice = await screen.findByRole('button', { name: /Rojo.*Agotado/ })
+    expect(redChoice).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'iPhone 15' })).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(screen.getByRole('button', { name: 'iPhone 16' }))
+    expect(screen.getByRole('button', { name: 'Rojo' })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.click(screen.getByRole('button', { name: /Agregar al carrito/ }))
+    await waitFor(() => {
+      const cart = JSON.parse(localStorage.getItem('mozzi:cart:store:fundas') ?? '[]')
+      expect(cart[0]).toMatchObject({ productId: model16Red.id, productName: 'Funda de silicona · Modelo: iPhone 16 · Color: Rojo' })
+    })
+  })
+
   it('combines category and variant search and clears both filters from the empty state', async () => {
     const chargers = '20000000-0000-4000-8000-000000000002'
     mocks.menu.categories.push({ id: chargers, name: 'Cargadores', slug: 'cargadores', description: '', imagePath: null, sortOrder: 1, products: [{ ...black, id: '10000000-0000-4000-8000-000000000003', categoryId: chargers, name: 'Cargador USB', family: null, variantAttributes: {} }] })
     page()
-    expect(await screen.findByRole('status')).toHaveTextContent('2 productos')
-    await userEvent.click(screen.getByRole('button', { name: 'Cargadores' }))
+    expect(await screen.findByText('Mostrando 2 productos')).toBeVisible()
+    await userEvent.click(screen.getAllByRole('button', { name: 'Cargadores' })[0]!)
     expect(screen.getByRole('button', { name: 'Cargadores' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('heading', { name: 'Funda de silicona' })).not.toBeInTheDocument()
     await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'Rojo')
     expect(screen.getByRole('heading', { name: 'No encontramos productos' })).toBeVisible()
-    expect(screen.getByRole('status')).toHaveTextContent('0 productos')
+    expect(screen.getByText('Mostrando 0 productos')).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: 'Ver todos los productos' }))
-    expect(screen.getByRole('textbox', { name: 'Buscar productos' })).toHaveValue('')
-    expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Buscar productos' })).toHaveValue('')
+      expect(screen.getByRole('button', { name: 'Todos' })).toHaveAttribute('aria-pressed', 'true')
+    })
     expect(screen.getByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Cargador USB' })).toBeVisible()
   })
 
   it('clears only the search while retaining the selected category', async () => {
     page()
-    await userEvent.click(await screen.findByRole('button', { name: 'Fundas' }))
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Fundas' }))[0]!)
     await userEvent.type(screen.getByRole('textbox', { name: 'Buscar productos' }), 'no existe')
     await userEvent.click(screen.getByRole('button', { name: 'Limpiar búsqueda' }))
     expect(screen.getByRole('button', { name: 'Fundas' })).toHaveAttribute('aria-pressed', 'true')
@@ -136,8 +182,8 @@ describe('shared catalog storefront', () => {
     else mocks.menu.categories[0]!.products = [black, red].map(product => ({ ...product, available: false }))
     page(`/t/fundas/producto/${FAMILY}`)
     expect(await screen.findByRole('heading', { name: 'Funda de silicona' })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Elegir variante' })).toBeDisabled()
-    expect(screen.getByText(state === 'paused' ? 'Pedidos pausados' : 'Agotado')).toBeVisible()
+    expect(screen.getByRole('button', { name: /Agregar al carrito/ })).toBeDisabled()
+    expect(screen.getAllByText(state === 'paused' ? 'Pedidos pausados' : 'Agotado')[0]).toBeVisible()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -146,15 +192,10 @@ describe('shared catalog storefront', () => {
     mocks.menu.categories[0]!.products = [{ ...black, available: true }, { ...red, available: false }]
     page(`/t/fundas/producto/${FAMILY}`)
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Elegir variante' }))
-    const dialog = screen.getByRole('dialog')
-    const add = within(dialog).getByRole('button', { name: /Agregar/ })
+    const add = await screen.findByRole('button', { name: /Agregar al carrito/ })
     expect(add).toBeEnabled()
-    await user.selectOptions(screen.getByLabelText('Elegí tu variante'), RED)
-    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /Agregar/ })).toBeDisabled()
-    expect(screen.getByRole('option', { name: /Rojo.*No disponible/ })).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Elegí tu variante'), BLACK)
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Agregar/ }))
+    expect(screen.getByRole('button', { name: /Rojo.*Agotado/ })).toBeDisabled()
+    await user.click(add)
     await waitFor(() => expect(JSON.parse(localStorage.getItem('mozzi:cart:store:fundas') ?? '[]')).toEqual([expect.objectContaining({ productId: BLACK, quantity: 1 })]))
   })
 
