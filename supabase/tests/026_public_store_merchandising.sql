@@ -81,7 +81,9 @@ insert into product_quantity_prices(
   (pg_temp.store_id(201), pg_temp.store_id(2), pg_temp.store_id(105), 3, 1500);
 
 update restaurants
-set inventory_mode = 'enforced', inventory_activated_at = now()
+set inventory_mode = 'enforced',
+    inventory_activated_at = now(),
+    inventory_business_policy = '{"unitModel":"whole_product","sourceOfTruth":"app","otherChannels":"record_before_handoff","returns":"full_only","partialDeliveries":"none","physicalScope":"until_handoff_including_transit","acceptance":"reserve","delivery":"physical_handoff","acceptedReservationsExpire":false}'::jsonb
 where id = pg_temp.store_id(2);
 insert into inventory_balances(restaurant_id, product_id, on_hand, reserved)
 values (pg_temp.store_id(2), pg_temp.store_id(110), 0, 0);
