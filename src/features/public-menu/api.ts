@@ -4,6 +4,7 @@ import {
   publicCatalogGroupResultSchema,
   publicCatalogMetaSchema,
   publicCatalogPageSchema,
+  publicStoreCatalogPageSchema,
   publicMenuSchema,
   publicProductsByIdsSchema,
 } from '../../lib/validation/schemas'
@@ -12,6 +13,9 @@ import type {
   PublicCatalogGroup,
   PublicCatalogMeta,
   PublicCatalogPage,
+  PublicStoreCatalogPage,
+  PublicStoreCatalogCursor,
+  PublicStoreCatalogSection,
   PublicMenu,
   PublicProduct,
 } from '../../types/domain'
@@ -20,6 +24,20 @@ import type { CommerceChannel } from '../../lib/commerce-channel'
 type JsonRpcResult = {
   data: unknown
   error: { code?: string; message: string } | null
+}
+
+export class PublicCatalogCursorStaleError extends Error {
+  constructor() {
+    super('El catálogo cambió mientras lo estabas recorriendo.')
+    this.name = 'PublicCatalogCursorStaleError'
+  }
+}
+
+export class PublicCatalogCategoryInvalidError extends Error {
+  constructor() {
+    super('La categoría seleccionada ya no está disponible.')
+    this.name = 'PublicCatalogCategoryInvalidError'
+  }
 }
 
 async function jsonRpc(
@@ -141,6 +159,79 @@ export async function fetchPublicCatalogPage({
   const parsed = publicCatalogPageSchema.safeParse(data)
   if (!parsed.success) throw new Error('La página de productos publicada tiene un formato inválido.')
   return parsed.data
+}
+
+export interface PublicStoreCatalogPageRequest {
+  slug: string
+  section?: PublicStoreCatalogSection
+  categoryId?: string
+  search?: string
+  cursor?: PublicStoreCatalogCursor
+  limit?: number
+}
+
+export async function fetchPublicStoreCatalogPage({
+  slug,
+  section = 'all',
+  categoryId,
+  search,
+  cursor,
+  limit = 24,
+}: PublicStoreCatalogPageRequest): Promise<PublicStoreCatalogPage> {
+  // Anchor before the network trip: latency may refresh a price early, but it
+  // must never keep an expired promotion visible for longer.
+  const clientAnchorAt = Date.now()
+  const { data, error } = await jsonRpc('get_public_store_catalog_page', {
+    p_restaurant_slug: slug,
+    p_section: section,
+    p_category_id: categoryId ?? null,
+    p_search: search?.trim() || null,
+    p_cursor: cursor ?? null,
+    p_limit: Math.min(48, Math.max(1, limit)),
+  })
+  if (error) {
+    // Local development often points at a shared Supabase project where the
+    // migration is intentionally deployed after review. Keep the complete
+    // catalogue browsable in that narrow window; production still requires
+    // the curated RPC and merchandising sections never use partial legacy data.
+    if (
+      import.meta.env.DEV &&
+      section === 'all' &&
+      error.code === 'PGRST202' &&
+      error.message.includes('get_public_store_catalog_page')
+    ) {
+      const legacyCursor = typeof cursor?.legacyAfterGroupId === 'string'
+        ? cursor.legacyAfterGroupId
+        : undefined
+      const legacy = await fetchPublicCatalogPage({
+        slug,
+        channel: 'store',
+        ...(categoryId ? { categoryId } : {}),
+        ...(search ? { search } : {}),
+        ...(legacyCursor ? { cursor: legacyCursor } : {}),
+        limit,
+      })
+      return {
+        revision: legacy.revision,
+        items: legacy.items,
+        nextCursor: legacy.nextCursor ? { legacyAfterGroupId: legacy.nextCursor } : null,
+        serverNow: new Date(clientAnchorAt).toISOString(),
+        validUntil: null,
+        categoryIcons: {},
+        clientAnchorAt,
+      }
+    }
+    if ((error.code === '22023' || error.code === 'P0001') && error.message.includes('CATALOG_CURSOR_')) {
+      throw new PublicCatalogCursorStaleError()
+    }
+    if ((error.code === '22023' || error.code === 'P0001') && error.message.includes('CATALOG_CATEGORY_INVALID')) {
+      throw new PublicCatalogCategoryInvalidError()
+    }
+    throw publicCatalogError(error, 'No pudimos cargar los productos de la tienda.')
+  }
+  const parsed = publicStoreCatalogPageSchema.safeParse(data)
+  if (!parsed.success) throw new Error('La página de la tienda tiene un formato inválido.')
+  return { ...parsed.data, clientAnchorAt }
 }
 
 export async function fetchPublicCatalogGroup(

@@ -21,6 +21,15 @@ async function fill() { await userEvent.type(screen.getByLabelText('Nombre y ape
 describe('store online checkout', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear(); mocks.whatsappEnabled = false })
   afterEach(cleanup)
+  it('keeps guest checkout and the final action visible next to a compact order summary', async () => {
+    page()
+    expect(screen.getByText(/Comprás como invitado/)).toBeVisible()
+    expect(screen.getByText('No necesitás crear una cuenta.')).toBeVisible()
+    expect(screen.getByText('Ver resumen')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Continuar al pago' })).toBeVisible()
+    expect(screen.getByRole('navigation', { name: 'Pasos de compra' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Volver a Carrito' })).toBeVisible()
+  })
   it('can receive online purchases outside business hours without manual payment methods', async () => {
     mocks.invoke.mockResolvedValue({ data: session, error: null })
     page(); await fill()

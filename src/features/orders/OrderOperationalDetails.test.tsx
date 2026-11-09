@@ -44,7 +44,7 @@ vi.mock('../restaurants/RestaurantScope', () => ({
   }),
 }))
 
-function wrapper(initialEntry: string, path: string, element: React.ReactNode) {
+function wrapper(initialEntry: string | { pathname: string; state?: unknown }, path: string, element: React.ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return { queryClient, ...render(
     <QueryClientProvider client={queryClient}>
@@ -169,6 +169,19 @@ describe('operational order details', () => {
     expect(await screen.findByText('3 × Nombre histórico del pedido')).toBeVisible()
     expect(screen.getByLabelText('Variante elegida')).toHaveTextContent('Modelo: iPhone 15 · Color: Rojo original')
     expect(mocks.from.mock.calls.some(([table]) => table === 'products' || table === 'product_families')).toBe(false)
+  })
+
+  it('returns to the exact persisted order-list filters from router state', async () => {
+    setupInventoryOrder('completed')
+    mocks.rpc.mockResolvedValue({ data: inventoryDetail, error: null })
+    const ordersReturnTo = '/admin/pedidos?q=Cliente&status=completed&fulfillment=delivery&from=2026-09-01&to=2026-09-30&page=2'
+    wrapper(
+      { pathname: `/admin/pedidos/${ORDER_ID}`, state: { ordersReturnTo } },
+      '/admin/pedidos/:orderId',
+      <OrderDetailPage />,
+    )
+
+    expect(await screen.findByRole('link', { name: 'Volver' })).toHaveAttribute('href', ordersReturnTo)
   })
 
   it('acceptance reserves explicitly and blocks duplicate clicks while a response is pending', async () => {

@@ -192,6 +192,29 @@ describe('cart line merging', () => {
     })
   })
 
+  it('reconciles a store cart with the server pricing clock instead of the browser clock', () => {
+    const product: PublicProduct = {
+      id: baseLine.productId,
+      categoryId: '40000000-0000-4000-8000-000000000001',
+      code: 'PROMO',
+      name: 'Producto con promoción',
+      description: '',
+      basePriceCents: 10_000,
+      promotionalPriceCents: 7_000,
+      promotionStartsAt: '2030-01-10T12:00:00.000Z',
+      promotionEndsAt: '2030-01-11T12:00:00.000Z',
+      imagePath: null,
+      available: true,
+      featured: false,
+      sortOrder: 0,
+      quantityPrices: [],
+      optionGroups: [],
+    }
+
+    expect(reconcileCartLines([baseLine], [product], new Date('2030-01-10T18:00:00.000Z'))[0]?.unitPriceCents).toBe(7_000)
+    expect(reconcileCartLines([baseLine], [product], new Date('2030-01-12T12:00:00.000Z'))[0]?.unitPriceCents).toBe(10_000)
+  })
+
   it('merges the same product, options and normalized notes into one canonical line', () => {
     const existing = {
       ...baseLine,

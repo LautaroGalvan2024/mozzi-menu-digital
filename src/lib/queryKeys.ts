@@ -20,6 +20,15 @@ export const queryKeys = {
       categoryId: string,
       search: string,
     ) => ['public-catalog', 'page', slug, channel, categoryId, search] as const,
+    storePages: (slug: string | undefined) =>
+      ['public-catalog', 'store-page', slug] as const,
+    storePage: (
+      slug: string | undefined,
+      section: 'all' | 'featured' | 'offers',
+      categoryId: string,
+      search: string,
+      limit: number,
+    ) => ['public-catalog', 'store-page', slug, section, categoryId, search, limit] as const,
     group: (slug: string | undefined, channel: CommerceChannel, groupId: string | undefined) =>
       ['public-catalog', 'group', slug, channel, groupId] as const,
     groups: (slug: string | undefined, channel: CommerceChannel) =>

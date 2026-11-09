@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addLocalDateDays,
   dateInTimeZone,
   dateRangeForLocalDates,
   dayRangeInTimeZone,
+  firstDayOfLocalMonth,
+  startOfLocalWeek,
 } from '../lib/timezone'
 
 describe('restaurant-local reporting range', () => {
@@ -48,5 +51,16 @@ describe('restaurant-local reporting range', () => {
     expect(() => dateRangeForLocalDates('2026-03-02', '2026-03-01', 'UTC')).toThrow(
       'El rango de fechas es inválido',
     )
+  })
+
+  it('does calendar arithmetic across leap days and years', () => {
+    expect(addLocalDateDays('2028-03-01', -1)).toBe('2028-02-29')
+    expect(addLocalDateDays('2026-01-01', -1)).toBe('2025-12-31')
+    expect(firstDayOfLocalMonth('2026-11-30')).toBe('2026-11-01')
+  })
+
+  it('starts the local week on Monday', () => {
+    expect(startOfLocalWeek('2026-11-02')).toBe('2026-11-02')
+    expect(startOfLocalWeek('2026-11-08')).toBe('2026-11-02')
   })
 })

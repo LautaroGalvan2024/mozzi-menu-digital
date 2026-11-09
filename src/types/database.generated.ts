@@ -158,6 +158,7 @@ export type Database = {
           deleted_at: string | null
           description: string
           id: string
+          icon_key: string | null
           image_path: string | null
           name: string
           restaurant_id: string
@@ -173,6 +174,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string
           id?: string
+          icon_key?: string | null
           image_path?: string | null
           name: string
           restaurant_id: string
@@ -188,6 +190,7 @@ export type Database = {
           deleted_at?: string | null
           description?: string
           id?: string
+          icon_key?: string | null
           image_path?: string | null
           name?: string
           restaurant_id?: string

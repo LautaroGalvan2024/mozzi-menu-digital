@@ -1,11 +1,12 @@
 import { AdminOrderStatus } from './CommerceOrderStatus'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Download, Eye, Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { z } from 'zod'
 import { EmptyState, ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { FilterBar } from '../../components/FilterBar'
+import { AdminDataRegion, AdminDataWorkspace } from '../../components/AdminDataWorkspace'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { orderSearchFilter } from '../../lib/orders'
@@ -20,6 +21,7 @@ import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { OrderAcceptAction } from './OrderAcceptAction'
 import { acceptanceOrder, useOrderUpdates } from './orderAcceptance'
 import { orderCommercialReport } from './inventoryOrder'
+import { activeOrderDatePreset, orderDatePresetLabels, orderDatePresets, parseOrderListFilters } from './orderFilters'
 
 const PAGE_SIZE = 25
 
@@ -31,33 +33,59 @@ export function orderDateRangeError(from: string, to: string) {
 export function OrdersPage() {
   const scope = useRestaurantScope()
   const restaurant = useRestaurant(scope.selected?.id)
-  const [page, setPage] = useState(0)
-  const [status, setStatus] = useState<'' | AdminOrderRow['status']>('')
-  const [fulfillment, setFulfillment] = useState<'' | AdminOrderRow['fulfillment_type']>('')
-  const [search, setSearch] = useState('')
-  const debouncedSearch = useDebouncedValue(search, 300)
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [referenceNow, setReferenceNow] = useState(() => new Date())
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [dates, setDates] = useState({ restaurantId: '', from: '', to: '' })
   const restaurantId = scope.selected?.id
   const restaurantTimeZone = restaurant.data?.timezone
   useOrderUpdates(restaurantId)
 
   useEffect(() => {
-    if (!restaurantId || !restaurantTimeZone) return
-    const today = dateInTimeZone(new Date(), restaurantTimeZone)
-    setDates({ restaurantId, from: today, to: today })
-    setPage(0)
-  }, [restaurantId, restaurantTimeZone])
+    const timer = window.setInterval(() => setReferenceNow(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
-  const datesReady = Boolean(
-    scope.selected &&
-      restaurant.data &&
-      dates.restaurantId === scope.selected.id &&
-      dates.from &&
-      dates.to,
+  const today = restaurantTimeZone ? dateInTimeZone(referenceNow, restaurantTimeZone) : ''
+  const paramsText = searchParams.toString()
+  const parsed = useMemo(
+    () => today ? parseOrderListFilters(new URLSearchParams(paramsText), today) : null,
+    [paramsText, today],
   )
+  const search = parsed?.filters.search ?? ''
+  const debouncedSearch = useDebouncedValue(search, 300)
+  const status = parsed?.filters.status ?? ''
+  const fulfillment = parsed?.filters.fulfillment ?? ''
+  const page = parsed?.filters.page ?? 0
+  const dates = { from: parsed?.filters.from ?? '', to: parsed?.filters.to ?? '' }
+  const presets = useMemo(
+    () => restaurantTimeZone ? orderDatePresets(referenceNow, restaurantTimeZone) : null,
+    [referenceNow, restaurantTimeZone],
+  )
+  const activePreset = presets ? activeOrderDatePreset(dates.from, dates.to, presets) : 'custom'
+
+  useEffect(() => {
+    if (!parsed || parsed.canonical.toString() === paramsText) return
+    setSearchParams(parsed.canonical, { replace: true })
+  }, [paramsText, parsed, setSearchParams])
+
+  const datesReady = Boolean(scope.selected && restaurant.data && dates.from && dates.to)
   const dateError = datesReady ? orderDateRangeError(dates.from, dates.to) : null
+
+  function updateFilters(values: Record<string, string | null>, resetPage = true) {
+    const next = new URLSearchParams(parsed?.canonical ?? searchParams)
+    for (const [key, value] of Object.entries(values)) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    if (resetPage) next.delete('page')
+    setSearchParams(next, { replace: true })
+  }
+
+  function changePage(nextPage: number) {
+    updateFilters({ page: nextPage > 0 ? String(nextPage + 1) : null }, false)
+  }
   const query = useQuery<{ rows: AdminOrderRow[]; count: number }>({
     queryKey: [
       ...queryKeys.orders(scope.selected?.id),
@@ -159,30 +187,22 @@ export function OrdersPage() {
     }
   }
 
+  const returnTo = `${location.pathname}${location.search}`
+  const detailState = { ordersReturnTo: returnTo }
+
   return (
-    <>
+    <AdminDataWorkspace className="orders-workspace">
       <PageHeader
         eyebrow="Tiempo real"
         title="Pedidos"
         description="Aceptá tus pedidos, reservá las unidades y contactá a cada cliente."
-        actions={
-          <button
-            className="button-secondary"
-            title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
-            disabled={!rows.length || exporting || query.isFetching || search !== debouncedSearch || Boolean(dateError)}
-            onClick={() => void exportCsv()}
-          >
-            <Download className="h-4 w-4" aria-hidden />
-            {exporting ? 'Exportando…' : 'Exportar resultados'}
-          </button>
-        }
       />
       {exportError ? (
         <p className="form-error mb-4" role="alert">
           {exportError}
         </p>
       ) : null}
-      <FilterBar className="mb-5 grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_14rem]">
+      <FilterBar className="orders-filter-bar mb-4 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]">
         <label className="field min-w-0">
           <span>Buscar</span>
           <span className="relative">
@@ -190,10 +210,7 @@ export function OrdersPage() {
             <input
               className="!pl-9"
               value={search}
-              onChange={(event) => {
-                setSearch(event.target.value)
-                setPage(0)
-              }}
+              onChange={(event) => updateFilters({ q: event.target.value || null })}
               placeholder="Cliente, teléfono o número"
             />
           </span>
@@ -202,10 +219,7 @@ export function OrdersPage() {
           <span>Estado</span>
           <select
             value={status}
-            onChange={(event) => {
-              setStatus(event.target.value as '' | AdminOrderRow['status'])
-              setPage(0)
-            }}
+            onChange={(event) => updateFilters({ status: event.target.value || null })}
           >
             <option value="">Todos</option>
             {Object.entries(statusLabel).map(([value, label]) => (
@@ -215,33 +229,60 @@ export function OrdersPage() {
             ))}
           </select>
         </label>
-        <details className="admin-disclosure md:col-span-2" open={Boolean(dateError) || undefined}>
-          <summary className="flex flex-wrap items-center gap-x-3 gap-y-1"><span>Fechas y modalidad</span><span className="text-xs font-normal text-stone-500">{dates.from === dates.to ? dates.from.split('-').reverse().join('/') : `${dates.from.split('-').reverse().join('/')} — ${dates.to.split('-').reverse().join('/')}`}{fulfillment ? ` · ${fulfillment === 'delivery' ? 'Envío' : 'Retiro'}` : ''}</span></summary>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <label className="field col-span-2 min-w-0 sm:col-span-1">
+        <label className="field min-w-0">
           <span>Modalidad</span>
           <select
             value={fulfillment}
-            onChange={(event) => {
-              setFulfillment(event.target.value as '' | AdminOrderRow['fulfillment_type'])
-              setPage(0)
-            }}
+            onChange={(event) => updateFilters({ fulfillment: event.target.value || null })}
           >
             <option value="">Todas</option>
             <option value="delivery">Envío</option>
             <option value="pickup">Retiro</option>
           </select>
         </label>
+        <div className="flex items-end">
+          <button
+            className="button-secondary w-full whitespace-nowrap md:w-auto"
+            title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
+            disabled={!rows.length || exporting || query.isFetching || search !== debouncedSearch || Boolean(dateError)}
+            onClick={() => void exportCsv()}
+          >
+            <Download className="h-4 w-4" aria-hidden />
+            {exporting ? 'Exportando…' : 'Exportar resultados'}
+          </button>
+        </div>
+        <div className="lg:col-span-4">
+          <span className="mb-2 block text-xs font-medium text-stone-600">Período</span>
+          <div className="flex flex-wrap gap-2" aria-label="Período del pedido">
+            {orderDatePresetLabels.map((preset) => (
+              <button
+                type="button"
+                className="button-secondary min-h-9 px-3 py-1.5"
+                aria-pressed={activePreset === preset.value}
+                key={preset.value}
+                onClick={() => {
+                  const range = presets?.[preset.value]
+                  if (range) updateFilters({ from: range.from, to: range.to })
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {activePreset === 'custom' ? <span className="inline-flex min-h-9 items-center rounded-lg bg-stone-100 px-3 text-xs font-semibold text-stone-700">Personalizado</span> : null}
+          </div>
+        </div>
+        <details className="admin-disclosure lg:col-span-4" open={Boolean(dateError) || undefined}>
+          <summary className="flex flex-wrap items-center gap-x-3 gap-y-1"><span>Fechas personalizadas</span><span className="text-xs font-normal text-stone-500">{dates.from === dates.to ? dates.from.split('-').reverse().join('/') : `${dates.from.split('-').reverse().join('/')} — ${dates.to.split('-').reverse().join('/')}`}</span></summary>
+          <div className="mt-4 grid grid-cols-2 gap-3">
         <label className="field min-w-0">
           <span>Desde</span>
           <input
             type="date"
             value={dates.from}
+            max={dates.to}
             onChange={(event) => {
-              if (event.target.value) {
-                setDates((value) => ({ ...value, from: event.target.value }))
-              }
-              setPage(0)
+              const from = event.target.value
+              if (from) updateFilters({ from, to: dates.to < from ? from : dates.to })
             }}
           />
         </label>
@@ -250,11 +291,10 @@ export function OrdersPage() {
           <input
             type="date"
             value={dates.to}
+            min={dates.from}
             onChange={(event) => {
-              if (event.target.value) {
-                setDates((value) => ({ ...value, to: event.target.value }))
-              }
-              setPage(0)
+              const to = event.target.value
+              if (to) updateFilters({ from: dates.from > to ? to : dates.from, to })
             }}
           />
         </label>
@@ -262,6 +302,7 @@ export function OrdersPage() {
         </details>
       </FilterBar>
       {search !== debouncedSearch ? <p className="mb-3 text-xs text-stone-500" role="status">Buscando…</p> : query.isFetching ? <p className="mb-3 text-xs text-stone-500" role="status">Actualizando pedidos…</p> : null}
+      <AdminDataRegion aria-label="Resultados de pedidos">
       {dateError ? (
         <p className="form-error mb-5" role="alert">{dateError}</p>
       ) : rows.length === 0 ? (
@@ -271,6 +312,7 @@ export function OrdersPage() {
         />
       ) : (
         <>
+          <div className="admin-data-scroll">
           <div className="admin-table-shell hidden overflow-hidden xl:block" aria-busy={query.isFetching}>
             <table className="data-table orders-table">
               <thead>
@@ -293,7 +335,7 @@ export function OrdersPage() {
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
-                    <td><div className="flex flex-wrap items-center justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
+                    <td><div className="flex flex-wrap items-center justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} state={detailState} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -305,7 +347,7 @@ export function OrdersPage() {
                 className="surface-card group block p-4 transition duration-150 hover:border-stone-300"
                 key={row.id}
               >
-                <Link to={`/admin/pedidos/${row.id}`} className="block" aria-label={`Ver ${row.display_number}`}>
+                <Link to={`/admin/pedidos/${row.id}`} state={detailState} className="block" aria-label={`Ver ${row.display_number}`}>
                 <div className="flex flex-col items-start gap-1">
                   <strong className="whitespace-nowrap font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
                   <AdminOrderStatus order={row} />
@@ -329,15 +371,17 @@ export function OrdersPage() {
               </article>
             ))}
           </div>
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          </div>
+          <div className="admin-data-pagination mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-stone-500">{query.data?.count ?? 0} resultados</p>
             <div className="grid grid-cols-2 gap-2 sm:flex">
-              <button className="button-secondary" disabled={page === 0 || query.isFetching} onClick={() => setPage((value) => value - 1)}>Anterior</button>
-              <button className="button-secondary" disabled={query.isFetching || (page + 1) * PAGE_SIZE >= (query.data?.count ?? 0)} onClick={() => setPage((value) => value + 1)}>Siguiente</button>
+              <button className="button-secondary" disabled={page === 0 || query.isFetching} onClick={() => changePage(page - 1)}>Anterior</button>
+              <button className="button-secondary" disabled={query.isFetching || (page + 1) * PAGE_SIZE >= (query.data?.count ?? 0)} onClick={() => changePage(page + 1)}>Siguiente</button>
             </div>
           </div>
         </>
       )}
-    </>
+      </AdminDataRegion>
+    </AdminDataWorkspace>
   )
 }

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react'
@@ -80,7 +81,7 @@ interface CartContextValue {
   itemCount: number
   subtotalCents: number
   activateRestaurant: (slug: string, channel?: CommerceChannel) => void
-  reconcileProducts: (products: readonly PublicProduct[]) => void
+  reconcileProducts: (products: readonly PublicProduct[], serverNow?: Date) => void
   addLine: (line: CartLine) => void
   replaceLine: (key: string, line: CartLine) => void
   updateQuantity: (key: string, quantity: number) => void
@@ -164,6 +165,7 @@ export function addOrMergeCartLine(lines: readonly CartLine[], incoming: CartLin
 export function reconcileCartLines(
   lines: readonly CartLine[],
   products: readonly PublicProduct[],
+  now = new Date(),
 ): CartLine[] {
   const productById = new Map(products.map((product) => [product.id, product]))
   return normalizeCartLines(lines.map((line) => {
@@ -181,7 +183,7 @@ export function reconcileCartLines(
       ...line,
       productName: cartProductName(product),
       productImagePath: product.imagePath,
-      unitPriceCents: currentProductPrice(product),
+      unitPriceCents: currentProductPrice(product, now),
       quantityPrices: product.quantityPrices,
       quantityThreshold: product.quantityThreshold ?? null,
       selectedOptions: line.selectedOptions.map((option) => optionById.get(option.id) ?? option),
@@ -193,6 +195,12 @@ export function CartProvider({ children }: PropsWithChildren) {
   const [restaurantSlug, setRestaurantSlug] = useState<string | null>(null)
   const [channel, setChannel] = useState<CommerceChannel>('menu')
   const [lines, setLines] = useState<CartLine[]>([])
+  const pricingClock = useRef<{
+    restaurantSlug: string
+    channel: CommerceChannel
+    serverAtMs: number
+    clientAtMs: number
+  } | null>(null)
 
   const persist = useCallback(
     (next: CartLine[]) => {
@@ -208,9 +216,17 @@ export function CartProvider({ children }: PropsWithChildren) {
     [restaurantSlug, channel],
   )
 
-  const reconcileProducts = useCallback((products: readonly PublicProduct[]) => {
+  const reconcileProducts = useCallback((products: readonly PublicProduct[], serverNow?: Date) => {
+    const serverAtMs = serverNow?.getTime()
+    if (restaurantSlug && serverAtMs !== undefined && Number.isFinite(serverAtMs)) {
+      pricingClock.current = { restaurantSlug, channel, serverAtMs, clientAtMs: Date.now() }
+    }
+    const clock = pricingClock.current
+    const pricingNow = serverNow ?? (clock && clock.restaurantSlug === restaurantSlug && clock.channel === channel
+      ? new Date(clock.serverAtMs + Math.max(0, Date.now() - clock.clientAtMs))
+      : new Date())
     setLines((current) => {
-      const next = reconcileCartLines(current, products)
+      const next = reconcileCartLines(current, products, pricingNow)
       if (JSON.stringify(next) === JSON.stringify(current)) return current
       if (restaurantSlug) {
         try {

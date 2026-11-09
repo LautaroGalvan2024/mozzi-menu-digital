@@ -50,6 +50,20 @@ describe('product images export control', () => {
     expect(mocks.write).not.toHaveBeenCalled()
   })
 
+  it('shows live progress and lets the user cancel from the compact feedback area', async () => {
+    mocks.write.mockImplementation(({ onProgress, signal }: { onProgress: (value: { current: number, total: number, label: string }) => void, signal: AbortSignal }) => {
+      onProgress({ current: 1, total: 2, label: 'Comprimiendo imágenes…' })
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))
+    })
+    render(<ProductImagesExport restaurantId={restaurantId} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Descargar imágenes' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Comprimiendo imágenes… · 1/2')
+    await user.click(screen.getByRole('button', { name: 'Cancelar descarga' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Descarga cancelada')
+    expect(mocks.abort).toHaveBeenCalled()
+  })
+
   it('does not produce an empty ZIP for products without images', async () => {
     mocks.read.mockResolvedValue([{ id: 'p', image_path: null }])
     render(<ProductImagesExport restaurantId={restaurantId} />)

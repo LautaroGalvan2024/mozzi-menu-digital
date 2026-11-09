@@ -195,6 +195,22 @@ export interface PublicCatalogPage {
   nextCursor: string | null
 }
 
+export type PublicStoreCatalogSection = 'all' | 'featured' | 'offers'
+
+export type PublicStoreCatalogCursor = Record<string, unknown>
+
+export interface PublicStoreCatalogPage {
+  revision: number
+  items: PublicCatalogGroup[]
+  nextCursor: PublicStoreCatalogCursor | null
+  serverNow: string
+  validUntil: string | null
+  categoryIcons?: Record<string, string>
+  /** Local request start used to expire temporal prices without allowing
+   * later infinite-query pages to extend the first page's validity window. */
+  clientAnchorAt?: number
+}
+
 export interface CartLine {
   key: string
   productId: string

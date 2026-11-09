@@ -65,14 +65,12 @@ export function ProductImagesExport({ restaurantId }: { restaurantId: string }) 
     }
   }
 
-  return <div className="mb-5 rounded-xl border border-stone-200 bg-white p-4">
-    <div className="flex flex-wrap items-center gap-3">
-      <button type="button" className="button-secondary" disabled={busy} onClick={() => void download()}><Download className="h-4 w-4" aria-hidden />{busy ? 'Preparando ZIP…' : 'Descargar imágenes'}</button>
-      <p className="text-sm text-stone-500">Todas las imágenes del catálogo en un único ZIP.</p>
-      {busy ? <button type="button" className="button-secondary" onClick={() => controller.current?.abort()}><X className="h-4 w-4" aria-hidden />Cancelar</button> : null}
-    </div>
-    {busy && progress ? <div className="mt-3" role="status"><p className="text-sm">{progress.label}{progress.total ? ` · ${progress.current}/${progress.total}` : ''}</p><progress className="mt-2 w-full" value={progress.current} max={Math.max(1, progress.total)} /></div> : null}
-    {message ? <p className="mt-3 text-sm" role="status">{message}</p> : null}
-    {error ? <p className="form-error mt-3" role="alert">{error}</p> : null}
+  return <div className="catalog-export-control">
+    <button type="button" className="catalog-command-menu-action" disabled={busy} onClick={() => void download()}><Download className="h-4 w-4" aria-hidden />{busy ? 'Preparando ZIP…' : 'Descargar imágenes'}</button>
+    <p className="catalog-command-menu-help">Todas las imágenes del catálogo en un único ZIP.</p>
+    {busy ? <button type="button" className="catalog-export-cancel" onClick={() => controller.current?.abort()}><X className="h-4 w-4" aria-hidden />Cancelar descarga</button> : null}
+    {busy && progress ? <div className="catalog-export-progress" role="status"><p>{progress.label}{progress.total ? ` · ${progress.current}/${progress.total}` : ''}</p><progress value={progress.current} max={Math.max(1, progress.total)} /></div> : null}
+    {message ? <p className="catalog-export-message" role="status">{message}</p> : null}
+    {error ? <p className="catalog-export-error" role="alert">{error}</p> : null}
   </div>
 }
