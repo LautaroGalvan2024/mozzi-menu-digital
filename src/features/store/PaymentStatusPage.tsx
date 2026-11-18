@@ -76,20 +76,28 @@ const orderLabels: Record<string, string> = {
 
 export function PaymentStatusPage() {
   const { restaurantSlug = '' } = useParams()
-  return <PaymentConfirmation key={restaurantSlug} slug={restaurantSlug} />
+  const location = useLocation()
+  const orders = new URLSearchParams(location.search).getAll('order')
+  const requestedOrder = orders.length === 0 ? null : orders.length === 1 ? orders[0]! : 'invalid'
+  return <PaymentConfirmation key={`${restaurantSlug}:${requestedOrder ?? 'legacy'}`} slug={restaurantSlug} requestedOrder={requestedOrder} />
 }
 
-function PaymentConfirmation({ slug }: { slug: string }) {
+function PaymentConfirmation({ slug, requestedOrder }: { slug: string; requestedOrder: string | null }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const [initial] = useState(() => paymentSessionSchema.safeParse(location.state))
+  const [initial] = useState(() => {
+    const parsed = paymentSessionSchema.safeParse(location.state)
+    return parsed.success && requestedOrder !== null && parsed.data.order.actionId.toLowerCase() !== requestedOrder.toLowerCase()
+      ? paymentSessionSchema.safeParse(null)
+      : parsed
+  })
   const [result, setResult] = useState<PaymentStatus | null>(initial.success ? initial.data : null)
   const [reference] = useState(() => {
     if (initial.success) {
       savePaymentRecovery(slug, initial.data)
       return { actionId: initial.data.order.actionId, token: initial.data.recoveryToken, expiresAt: initial.data.recoveryExpiresAt }
     }
-    return readPaymentRecovery(slug)
+    return readPaymentRecovery(slug, requestedOrder)
   })
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState(Date.now)
@@ -107,9 +115,11 @@ function PaymentConfirmation({ slug }: { slug: string }) {
     finally { setBusy(false) }
   }, [reference])
   useEffect(() => {
-    // URL query parameters are never evidence that a payment succeeded.
-    if (location.search || location.state) void navigate(location.pathname, { replace: true, state: null })
-  }, [location.pathname, location.search, location.state, navigate])
+    // Keep the order selector across reloads, but never trust provider status/query
+    // parameters as payment evidence. The matching capability remains mandatory.
+    const search = requestedOrder === null ? '' : `?order=${encodeURIComponent(requestedOrder)}`
+    if (location.search !== search || location.state) void navigate(`${location.pathname}${search}`, { replace: true, state: null })
+  }, [location.pathname, location.search, location.state, navigate, requestedOrder])
   useEffect(() => { void refresh() }, [refresh])
   const terminal = result && ['approved', 'paid', 'refunded', 'partially_refunded', 'charged_back', 'cancelled', 'expired', 'requires_refund', 'refund_required'].includes(result.payment.status)
   useEffect(() => {

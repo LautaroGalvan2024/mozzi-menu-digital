@@ -1,3 +1,4 @@
+import type { Database } from "../../../src/types/database.generated.ts";
 import { createClient, type SupabaseClient } from "./deps.ts";
 import { getPublishableKey, getSecretKey, getSupabaseUrl } from "./config.ts";
 
@@ -8,7 +9,7 @@ const AUTH_OPTIONS = {
 } as const;
 
 export function createUserClient(authorization: string): SupabaseClient {
-  return createClient(getSupabaseUrl(), getPublishableKey(), {
+  return createClient<Database>(getSupabaseUrl(), getPublishableKey(), {
     auth: AUTH_OPTIONS,
     global: { headers: { Authorization: authorization } },
   });
@@ -16,5 +17,5 @@ export function createUserClient(authorization: string): SupabaseClient {
 
 /** Must only be called after the request has passed the relevant authorization checks. */
 export function createAdminClient(): SupabaseClient {
-  return createClient(getSupabaseUrl(), getSecretKey(), { auth: AUTH_OPTIONS });
+  return createClient<Database>(getSupabaseUrl(), getSecretKey(), { auth: AUTH_OPTIONS });
 }

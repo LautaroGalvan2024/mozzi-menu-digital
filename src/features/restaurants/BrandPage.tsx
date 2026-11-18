@@ -4,7 +4,8 @@ import { useState, type ChangeEvent } from 'react'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
-import { assetVariantPaths, responsiveAssetUrls } from '../../lib/images/responsive'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { cleanupRestaurantImage } from '../../lib/images/cleanup'
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { queryKeys } from '../../lib/queryKeys'
@@ -76,15 +77,8 @@ export function BrandPage() {
 }
 
 async function removeAsset(path: string, restaurantId: string) {
-  const paths = assetVariantPaths(path)
-  const { error: storageError } = await supabase.storage.from('restaurant-assets').remove(paths)
-  if (storageError) return 'El archivo anterior quedó pendiente de limpieza.'
-  const { error: metadataError } = await supabase
-    .from('image_assets')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('restaurant_id', restaurantId)
-    .in('path', paths)
-  return metadataError ? 'El archivo se eliminó, pero su registro quedó pendiente de limpieza.' : null
+  return await cleanupRestaurantImage(restaurantId, path) === 'pending'
+    ? 'El archivo anterior quedó pendiente de limpieza.' : null
 }
 
 function ImageCard({label,description,image,busy,inputId,onChange,onRemove}:{label:string;description:string;image:ReturnType<typeof responsiveAssetUrls>;busy:boolean;inputId:string;onChange:(event:ChangeEvent<HTMLInputElement>)=>void;onRemove:()=>void}) {

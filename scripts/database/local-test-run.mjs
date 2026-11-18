@@ -1,7 +1,7 @@
 // Run SQL suites against the dedicated loopback test DB. No secrets or fixture contents logged.
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 
 const env = localDatabaseEnvironment()
 const databaseArgument = process.argv.find(value => value.startsWith('--database='))
@@ -19,7 +19,7 @@ let failed = 0
 for (const suite of suites) {
   if (!/^\d{3}_[a-z0-9_]+\.sql$/.test(suite)) throw new Error('Invalid SQL suite name')
   try {
-    const output = run(path.join(env.PG_BIN, 'psql.exe'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
+    const output = run(pgBinary(env, 'psql'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
       env, input: baseline ? run('git', ['show', `${baseline}:supabase/tests/${suite}`]) : readFileSync(path.join('supabase/tests', suite), 'utf8'),
     })
     const lines = output.split(/\r?\n/)

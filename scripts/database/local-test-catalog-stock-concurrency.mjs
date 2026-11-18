@@ -3,8 +3,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 
 const env = localDatabaseEnvironment()
 const database = process.argv.find(value => value.startsWith('--database='))
@@ -12,7 +11,7 @@ if (database) env.PGDATABASE = database.slice('--database='.length)
 if (!/^mozzi_[a-z0-9_]+$/.test(env.PGDATABASE) || env.PGDATABASE.startsWith('mozzi_restore_')) {
   throw new Error('Synthetic test database required; never seed a recovery database')
 }
-const executable = path.join(env.PG_BIN, 'psql.exe')
+const executable = pgBinary(env, 'psql')
 const args = ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1']
 const query = sql => run(executable, args, { env, input: sql }).trim()
 const literal = value => `'${String(value).replaceAll("'", "''")}'`

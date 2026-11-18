@@ -10,6 +10,7 @@
     "lint": "oxlint",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "test:ops": "node scripts/database/test-ops.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "build:performance": "node scripts/build-performance.mjs",

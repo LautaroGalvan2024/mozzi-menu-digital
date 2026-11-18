@@ -11,6 +11,17 @@ import {
   rpc,
 } from "../_shared/mercadopago.ts";
 import { parseInput } from "../_shared/schemas.ts";
+import { PaymentMaintenanceService } from "../_shared/mercadopago-maintenance.ts";
+
+const expirationReportSchema = z.object({
+  expired: z.number().int().nonnegative(),
+  blocked: z.number().int().nonnegative(),
+  blockedCountCapped: z.boolean(),
+  locked: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  scanned: z.number().int().nonnegative(),
+  purgedTokens: z.number().int().nonnegative(),
+});
 
 Deno.serve(async (request) => {
   const requestId = crypto.randomUUID();
@@ -26,44 +37,45 @@ Deno.serve(async (request) => {
       await readJson(request, 2048),
     );
     const admin = createAdminClient();
-    const attempts = z.array(z.unknown()).parse(
-      await rpc(admin, "list_online_reconciliation", { p_limit: input.limit }),
-    );
-    let reconciled = 0;
-    let failed = 0;
-    let next = 0;
-    await Promise.all(Array.from({ length: Math.min(3, attempts.length) }, async () => {
-      while (next < attempts.length) {
-        const raw = attempts[next++];
-        const reference = z.object({ attemptId: z.string().uuid() }).safeParse(raw);
-        try {
-          const attempt = paymentAttemptSchema.parse(raw);
-          await reconcileAttempt(admin, attempt);
-          reconciled++;
-        } catch {
-          failed++;
-          safeLog("error", "payment.reconciliation_failed", requestId, {
-            ...(reference.success ? { attemptId: reference.data.attemptId } : {}),
-          });
-          // Rotate failed attempts too: one disconnected seller must not starve
-          // every other merchant's reconciliation queue. This never changes money.
-          if (reference.success) {
-            await rpc(admin, "mark_online_reconciled", { p_attempt_id: reference.data.attemptId });
-          }
-        }
-      }
-    }));
-    const expired = await rpc(admin, "expire_online_reservations", {
-      p_before: new Date().toISOString(),
-      p_limit: input.limit,
+    const service = new PaymentMaintenanceService({
+      expire: async (limit, signal) =>
+        expirationReportSchema.parse(
+          await rpc(admin, "expire_online_reservations_report", {
+            p_before: new Date().toISOString(),
+            p_limit: limit,
+          }, signal),
+        ),
+      list: async (limit, signal) =>
+        z.array(z.object({ attemptId: z.string().uuid() }).passthrough()).parse(
+          await rpc(admin, "list_online_reconciliation", { p_limit: limit }, signal),
+        ),
+      reconcile: (attempt, signal) =>
+        reconcileAttempt(admin, paymentAttemptSchema.parse(attempt), signal),
+      finish: async (attemptId, succeeded) => {
+        await rpc(admin, "finish_online_reconciliation", {
+          p_attempt_id: attemptId,
+          p_succeeded: succeeded,
+        }, AbortSignal.timeout(5000));
+      },
+      failed: (attemptId) =>
+        safeLog("error", "payment.reconciliation_failed", requestId, { attemptId }),
     });
+    const result = await service.run(input.limit);
     const environment = providerLiveMode() ? "production" : "test";
-    safeLog("info", "payment.maintenance", requestId, { reconciled, failed, environment });
-    // Failed runs remain visible to the scheduler; reservations expire independently,
-    // and a subsequently approved late payment must reacquire stock or require refund.
+    safeLog(result.expiration.blocked ? "warn" : "info", "payment.maintenance", requestId, {
+      reconciled: result.reconciled,
+      failed: result.failed,
+      expired: result.expired,
+      deferred: result.deferred,
+      expirationBlocked: result.expiration.blocked,
+      expirationLocked: result.expiration.locked,
+      expirationFailed: result.expiration.failed,
+      durationMs: result.durationMs,
+      environment,
+    });
     return jsonResponse(
-      { reconciled, failed, expired, environment, requestId },
-      failed ? 503 : 200,
+      { ...result, environment, requestId },
+      result.failed || result.expiration.failed || result.deferred ? 503 : 200,
     );
   } catch (error) {
     const failure = toApiError(error);

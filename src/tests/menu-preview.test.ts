@@ -31,12 +31,12 @@ function publicMenuPayload(paths: { coverPath?: string | null; logoPath?: string
 describe('menu preview metadata', () => {
   it('reads the store channel and shares a product canonical without falling back to the menu', async () => {
     const productId = '10000000-0000-4000-8000-000000000001'
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...publicMenuPayload(), categories: [{ products: [{ id: productId, name: 'Funda roja', description: 'Para iPhone', imagePath: null }] }] }), { status: 200 }))
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...publicMenuPayload(), product: { name: 'Funda roja', description: 'Para iPhone', imagePath: null } }), { status: 200 }))
     const response = await handleMenuPreviewRequest(new Request(`https://menu.example.com/api/menu-preview?slug=la-rotiseria&channel=store&product=${productId}`), { environment, fetch })
     const html = await response.text()
     expect(response.status).toBe(200)
-    expect(String(fetch.mock.calls[0]![0])).toContain('/rpc/get_public_catalog')
-    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ p_restaurant_slug: 'la-rotiseria', p_channel: 'store' })
+    expect(String(fetch.mock.calls[0]![0])).toContain('/rpc/get_public_catalog_preview')
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ p_restaurant_slug: 'la-rotiseria', p_channel: 'store', p_product_id: productId })
     expect(html).toContain(`/t/la-rotiseria/producto/${productId}`)
     expect(html).toContain('Funda roja · La Rotisería')
     expect(html).not.toContain('Abrir menú digital')
@@ -105,9 +105,9 @@ describe('menu preview metadata', () => {
     )
     expect(fetchMock).toHaveBeenCalledOnce()
     const [endpoint, options] = fetchMock.mock.calls[0] ?? []
-    expect(endpoint?.toString()).toBe('https://project.supabase.co/rest/v1/rpc/get_public_menu')
+    expect(endpoint?.toString()).toBe('https://project.supabase.co/rest/v1/rpc/get_public_catalog_preview')
     expect(options?.method).toBe('POST')
-    expect(options?.body).toBe(JSON.stringify({ p_restaurant_slug: 'la-rotiseria' }))
+    expect(options?.body).toBe(JSON.stringify({ p_restaurant_slug: 'la-rotiseria', p_channel: 'menu', p_product_id: null }))
   })
 
   it('falls back to the logo, rejects unpublished menus and never serves unsupported methods', async () => {
@@ -137,5 +137,24 @@ describe('menu preview metadata', () => {
     )
     expect(methodResponse.status).toBe(405)
     expect(methodResponse.headers.get('allow')).toBe('GET, HEAD')
+  })
+
+  it('keeps the old database contract available only when the additive RPC is absent', async () => {
+    const productId = '10000000-0000-4000-8000-000000000001'
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ code: 'PGRST202' }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ ...publicMenuPayload(), categories: [{ products: [{ id: productId, name: 'Legado', description: '', imagePath: null }] }] }))
+    const response = await handleMenuPreviewRequest(new Request(`https://menu.example.com/api/menu-preview?slug=la-rotiseria&channel=store&product=${productId}`), { environment, fetch: fetchMock })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('Legado · La Rotisería')
+    expect(fetchMock.mock.calls[1]?.[0]?.toString()).toContain('/rpc/get_public_catalog')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ p_restaurant_slug: 'la-rotiseria', p_channel: 'store' })
+  })
+
+  it.each([Response.json(null), Response.json({ code: '42501' }, { status: 403 }), Response.json({}, { status: 503 })])('never bypasses visibility or errors through a legacy fallback', async upstream => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(upstream)
+    const response = await handleMenuPreviewRequest(new Request('https://menu.example.com/api/menu-preview?slug=la-rotiseria'), { environment, fetch: fetchMock })
+    expect([404, 503]).toContain(response.status)
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 })

@@ -11,11 +11,13 @@ const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 export type RequestContext = {
   requestId: string;
   origin: string;
+  readJson: () => Promise<unknown>;
 };
 
 type Handler = (request: Request, context: RequestContext) => Promise<Response | unknown>;
 
 type ServeOptions = {
+  name?: string;
   maxBodyBytes: number;
   handler: Handler;
   allowedMethods?: readonly string[];
@@ -124,23 +126,52 @@ export function validationError(
   return new ApiError(422, "VALIDATION_ERROR", "Revisá los datos enviados.", { fields });
 }
 
-export function serve(options: ServeOptions): void {
+function withRequestId(response: Response, requestId: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set("X-Request-Id", requestId);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+export function createRequestHandler(
+  options: ServeOptions,
+): (request: Request) => Promise<Response> {
+  if (!Number.isSafeInteger(options.maxBodyBytes) || options.maxBodyBytes < 1) {
+    throw new RangeError("maxBodyBytes must be a positive safe integer.");
+  }
   const methods = options.allowedMethods ?? ["POST", "OPTIONS"];
-  Deno.serve(async (request) => {
+  return async (request) => {
     const requestId = crypto.randomUUID();
+    const startedAt = performance.now();
     let origin: string | undefined;
     try {
-      if (request.method === "OPTIONS") return preflightResponse(request, methods);
+      if (request.method === "OPTIONS") {
+        return withRequestId(preflightResponse(request, methods), requestId);
+      }
       origin = validateOrigin(request);
       if (!methods.includes(request.method) || request.method === "OPTIONS") {
         throw new ApiError(405, "METHOD_NOT_ALLOWED", "Método no permitido.");
       }
 
-      const result = await options.handler(request, { requestId, origin });
+      let body: Promise<unknown> | undefined;
+      const result = await options.handler(request, {
+        requestId,
+        origin,
+        readJson: () => body ??= readJson(request, options.maxBodyBytes),
+      });
       const response = result instanceof Response ? result : jsonResponse(result);
-      return withHeaders(response, origin, methods);
+      return withRequestId(withHeaders(response, origin, methods), requestId);
     } catch (error) {
       const apiError = toApiError(error);
+      safeLog(apiError.status >= 500 ? "error" : "warn", "request.failed", requestId, {
+        route: options.name ?? "request",
+        status: apiError.status,
+        code: /^[A-Z0-9_]{1,80}$/.test(apiError.code) ? apiError.code : "UNKNOWN_ERROR",
+        durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      });
       const payload: Record<string, unknown> = {
         error: { code: apiError.code, message: apiError.message },
         requestId,
@@ -148,7 +179,7 @@ export function serve(options: ServeOptions): void {
       if (apiError.details) {
         payload.error = { ...payload.error as object, details: apiError.details };
       }
-      const response = jsonResponse(payload, apiError.status);
+      const response = withRequestId(jsonResponse(payload, apiError.status), requestId);
 
       if (origin) return withHeaders(response, origin, methods);
       try {
@@ -158,7 +189,11 @@ export function serve(options: ServeOptions): void {
         return response;
       }
     }
-  });
+  };
+}
+
+export function serve(options: ServeOptions): void {
+  Deno.serve(createRequestHandler(options));
 }
 
 export function safeLog(

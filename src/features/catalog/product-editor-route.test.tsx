@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '../../lib/queryKeys'
+import { currentProductPrice } from '../../lib/money'
+import { publicProductSchema } from '../../lib/validation/schemas'
 import { ProductEditorPage } from './ProductEditorPage'
 
 const mocks = vi.hoisted(() => ({
@@ -82,11 +84,12 @@ function stockResponse(onHand = '10', reserved = '3', version = '7', mode = 'enf
 }
 function mockExistingProduct(
   quantityPrices: () => Array<{ id: string; quantity: number; total_price_cents: number }> = () => [],
+  productOverrides: () => Record<string, unknown> = () => ({}),
 ) {
   const categories = mocks.from.getMockImplementation()!
   mocks.from.mockImplementation((table: string) => {
     if (table === 'categories') return categories(table)
-    if (table === 'products') return { select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: { id: existingId, category_id: mocks.categories[0]!.id, code: 'FUN-1', name: 'Funda', description: '', base_price_cents: 10000, promotional_price_cents: null, promotion_starts_at: null, promotion_ends_at: null, image_path: null, active: true, available: true, featured: false, sort_order: 0 }, error: null }) }) }) }) }
+    if (table === 'products') return { select: () => ({ eq: () => ({ eq: () => ({ single: async () => ({ data: { id: existingId, category_id: mocks.categories[0]!.id, code: 'FUN-1', name: 'Funda', description: '', base_price_cents: 10000, promotional_price_cents: null, promotion_starts_at: null, promotion_ends_at: null, image_path: null, active: true, available: true, featured: false, sort_order: 0, ...productOverrides() }, error: null }) }) }) }) }
     if (table === 'product_option_groups') return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) }) }) }
     if (table === 'product_quantity_prices') return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ order: async () => ({ data: quantityPrices(), error: null }) }) }) }) }) }
     throw new Error(`Unexpected table: ${table}`)
@@ -343,6 +346,62 @@ describe('new product route', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'No se pudieron cargar las categorías.',
     )
+  })
+
+  it.each([8000, 0])('clears an existing promotion of %s cents as null and restores the public base price', async promotionalPriceCents => {
+    const user = userEvent.setup()
+    mockExistingProduct(() => [], () => ({ promotional_price_cents: promotionalPriceCents }))
+    renderExistingProductRoute(existingId)
+    const input = await screen.findByLabelText('Precio promocional')
+    expect(input).toHaveValue(promotionalPriceCents / 100)
+    await user.clear(input)
+    expect(input).toBeVisible()
+    expect(screen.getByText('Sin promoción: se usa el precio base.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    await screen.findByRole('heading', { name: 'Listado de productos' })
+    const saved = mocks.rpc.mock.calls.at(-1)![1].p_product
+    expect(saved).toMatchObject({ basePriceCents: 10000, promotionalPriceCents: null })
+    const published = publicProductSchema.parse({ ...saved, basePriceCents: String(saved.basePriceCents), sortOrder: 0, optionGroups: [] })
+    expect(published.promotionalPriceCents).toBeNull()
+    expect(currentProductPrice(published)).toBe(10000)
+  })
+
+  it('removes a saved promotion and its dates, and keeps no promotion after reopening', async () => {
+    const user = userEvent.setup()
+    let savedPromotion: { promotional_price_cents: number | null; promotion_starts_at: string | null; promotion_ends_at: string | null } = {
+      promotional_price_cents: 0, promotion_starts_at: '2026-01-01T00:00:00Z', promotion_ends_at: '2026-12-31T23:59:59Z',
+    }
+    mockExistingProduct(() => [], () => savedPromotion)
+    mocks.rpc.mockImplementation(async (_name, { p_product }) => {
+      savedPromotion = { promotional_price_cents: p_product.promotionalPriceCents, promotion_starts_at: p_product.promotionStartsAt, promotion_ends_at: p_product.promotionEndsAt }
+      return { data: null, error: null }
+    })
+    renderExistingProductRoute(existingId)
+    expect(await screen.findByLabelText('Precio promocional')).toHaveValue(0)
+    expect(screen.getByRole('status')).toHaveTextContent('el producto se ofrece sin cargo')
+    await user.click(screen.getByRole('button', { name: 'Quitar promoción' }))
+    expect(screen.getByLabelText('Precio promocional')).toHaveValue(null)
+    expect(screen.getByLabelText('Precio promocional')).toBeVisible()
+    expect(screen.getByLabelText('Promoción desde')).toHaveValue('')
+    expect(screen.getByLabelText('Promoción hasta')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    await screen.findByRole('heading', { name: 'Listado de productos' })
+    expect(savedPromotion).toEqual({ promotional_price_cents: null, promotion_starts_at: null, promotion_ends_at: null })
+    await user.click(screen.getByRole('link', { name: 'Volver a editar' }))
+    await screen.findByLabelText('Precio base')
+    await openSection('Promociones y precios especiales')
+    expect(screen.getByLabelText('Precio promocional')).toHaveValue(null)
+    expect(screen.getByLabelText('Precio base')).toHaveValue(100)
+    expect(screen.queryByRole('button', { name: 'Quitar promoción' })).not.toBeInTheDocument()
+  })
+
+  it('also clears the saved date window when the promotion amount is removed manually', async () => {
+    const user = userEvent.setup()
+    mockExistingProduct(() => [], () => ({ promotional_price_cents: 8000, promotion_starts_at: '2026-01-01T00:00:00Z', promotion_ends_at: '2026-12-31T23:59:59Z' }))
+    renderExistingProductRoute(existingId)
+    await user.clear(await screen.findByLabelText('Precio promocional'))
+    await user.click(screen.getByRole('button', { name: 'Guardar producto' }))
+    expect(mocks.rpc).toHaveBeenCalledWith('save_product_catalog_with_stock', expect.objectContaining({ p_product: expect.objectContaining({ promotionalPriceCents: null, promotionStartsAt: null, promotionEndsAt: null }) }))
   })
 
   it('rejects a promotional price above the base price', async () => {

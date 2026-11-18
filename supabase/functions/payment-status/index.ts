@@ -2,21 +2,22 @@ import { getRateLimitSecret } from "../_shared/config.ts";
 import { hmacSha256Hex, sha256Hex } from "../_shared/crypto.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError } from "../_shared/errors.ts";
-import { readJson, serve } from "../_shared/http.ts";
+import { serve } from "../_shared/http.ts";
 import { createAdminClient, providerLiveMode, rpc } from "../_shared/mercadopago.ts";
 import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
 import { clientIp } from "../_shared/request-meta.ts";
 import { parseInput } from "../_shared/schemas.ts";
 
 serve({
+  name: "payment-status",
   maxBodyBytes: 2048,
-  handler: async (request) => {
+  handler: async (request, context) => {
     const input = parseInput(
       z.object({
         actionId: z.string().uuid(),
         recoveryToken: z.string().min(40).max(100).regex(/^[A-Za-z0-9_-]+$/),
       }).strict(),
-      await readJson(request, 2048),
+      await context.readJson(),
     );
     const admin = createAdminClient();
     assertOrderRateLimitAllowed(

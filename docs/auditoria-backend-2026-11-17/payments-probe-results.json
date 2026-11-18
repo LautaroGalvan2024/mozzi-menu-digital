@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-17",
+  "database": "mozzi_audit_20261117",
+  "environment": "isolated loopback PostgreSQL 17, 39 repository migrations",
+  "mutationPolicy": "All fixtures and operations rolled back; no remote calls",
+  "results": [
+    {
+      "test": "cross_tenant_expiry_failure",
+      "error": {
+        "code": "22023",
+        "message": "INVENTORY_CUTOVER"
+      },
+      "healthyTenantReserved": 1,
+      "healthyTenantOrderStatus": "generated"
+    },
+    {
+      "test": "expired_attempt_remains_in_queue",
+      "orderStatus": "expired",
+      "paymentStatus": "pending",
+      "queueContainsExpired": true
+    },
+    {
+      "test": "two_payment_recovery_capabilities",
+      "returnOrder": "10000000-0000-4000-8000-000000000001",
+      "restoredOrder": "10000000-0000-4000-8000-000000000002",
+      "matchesRequestedOrder": false,
+      "storedRecords": 1
+    }
+  ]
+}

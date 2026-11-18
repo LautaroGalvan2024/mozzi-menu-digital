@@ -1,10 +1,17 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(193);
+select plan(214);
 
 with expected(signature, access) as (
   values
+    ('public.find_auth_user_by_email(text)', 'service'),
+    ('public.claim_restaurant_invitation(uuid,uuid,boolean,public.restaurant_role)', 'service'),
+    ('public.finish_restaurant_invitation(uuid,boolean)', 'service'),
+    ('public.prepare_image_asset_cleanup(uuid,text)', 'authenticated'),
+    ('public.get_public_catalog_preview(text,text,uuid)', 'public-service'),
+    ('public.expire_online_reservations_report(timestamptz,integer)', 'service'),
+    ('public.finish_online_reconciliation(uuid,boolean)', 'service'),
     ('public.get_public_menu(text)', 'public'),
     ('public.get_public_catalog(text,text)', 'public-service'),
     ('public.get_public_catalog_revision(text,text)', 'public-service'),
@@ -97,7 +104,7 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  63::bigint,
+  70::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 

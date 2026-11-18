@@ -203,11 +203,10 @@ async function fetchRestaurantPreview(
   channel: 'menu' | 'store' = 'menu',
   productId: string | null = null,
 ): Promise<RestaurantPreview | null> {
-  const endpoint = new URL(`/rest/v1/rpc/${channel === 'store' ? 'get_public_catalog' : 'get_public_menu'}`, configuration.supabaseUrl)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
-    const response = await fetchImplementation(endpoint, {
+    const read = (name: string, body: Record<string, unknown>) => fetchImplementation(new URL(`/rest/v1/rpc/${name}`, configuration.supabaseUrl), {
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -215,13 +214,30 @@ async function fetchRestaurantPreview(
         authorization: `Bearer ${configuration.publishableKey}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ p_restaurant_slug: slug, ...(channel === 'store' ? { p_channel: 'store' } : {}) }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     })
+    let response = await read('get_public_catalog_preview', { p_restaurant_slug: slug, p_channel: channel, p_product_id: productId })
+    let legacy = false
+    if (!response.ok) {
+      const problem: unknown = await response.json().catch(() => null)
+      // During an additive rollout the previous database can still serve the
+      // established projection. Never fall back for hidden products or outages.
+      if (response.status === 404 && problem && typeof problem === 'object' && 'code' in problem && problem.code === 'PGRST202') {
+        legacy = true
+        response = await read(channel === 'store' ? 'get_public_catalog' : 'get_public_menu', { p_restaurant_slug: slug, ...(channel === 'store' ? { p_channel: 'store' } : {}) })
+      }
+    }
     if (!response.ok) throw new Error('PUBLIC_MENU_UNAVAILABLE')
     const payload: unknown = await response.json()
     const restaurant = parseRestaurantPreview(payload)
     if (!restaurant || !productId) return restaurant
+    if (!legacy) {
+      const product = payload && typeof payload === 'object' && 'product' in payload ? payload.product : null
+      if (!product || typeof product !== 'object' || !('name' in product) || !('description' in product) || !('imagePath' in product)) return null
+      if (typeof product.name !== 'string' || typeof product.description !== 'string' || (product.imagePath !== null && typeof product.imagePath !== 'string')) return null
+      return { ...restaurant, product: { name: product.name.slice(0, 160), description: product.description.slice(0, 1200), imagePath: product.imagePath } }
+    }
     const categories = (payload as { categories?: unknown }).categories
     if (!Array.isArray(categories)) return null
     for (const category of categories) {

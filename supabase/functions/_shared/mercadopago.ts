@@ -10,7 +10,8 @@ import {
   paymentAmountCents,
   pkceChallenge,
 } from "./mercadopago-core.ts";
-import { invalidTokenResponse, oauthProviderFailure } from "./mercadopago-errors.ts";
+import { invalidTokenResponse } from "./mercadopago-errors.ts";
+import { MercadoPagoClient } from "./mercadopago-client.ts";
 
 // OAuth client_id is the application's numeric APP_ID, not its Public Key or Access Token.
 // Keep it as a string; the upper bound is defensive, not an assumed provider ID length.
@@ -131,12 +132,18 @@ export const providerPaymentSchema = z.object({
   live_mode: z.boolean(),
 });
 
-export async function rpc(
+type RpcFunctions =
+  import("../../../src/types/database.generated.ts").Database["public"]["Functions"];
+type RpcJson = import("../../../src/types/database.generated.ts").Json;
+
+export async function rpc<Name extends keyof RpcFunctions>(
   admin: SupabaseClient,
-  name: string,
-  args: Record<string, unknown> = {},
+  name: Name,
+  args: RpcFunctions[Name]["Args"],
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  const { data, error } = await admin.rpc(name, args);
+  const query = admin.rpc(name, args);
+  const { data, error } = await (signal ? query.abortSignal(signal) : query);
   if (error) throw databaseApiError(error);
   return data;
 }
@@ -243,47 +250,17 @@ export async function authorizePaymentAdmin(request: Request, restaurantId: stri
   return actor;
 }
 
-export async function providerRequest(
+const provider = new MercadoPagoClient();
+
+/** Compatibility facade for existing checkout/OAuth/webhook consumers. */
+export function providerRequest(
   path: string,
   accessToken?: string,
   body?: unknown,
   method = body ? "POST" : "GET",
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid provider path");
-  let response: Response;
-  try {
-    response = await fetch(`https://api.mercadopago.com${path}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(10_000),
-      redirect: "error",
-    });
-  } catch {
-    throw new ApiError(
-      503,
-      "PAYMENT_PROVIDER_UNAVAILABLE",
-      "No pudimos contactar a Mercado Pago. Reintentá esta misma compra.",
-    );
-  }
-  if (!response.ok) {
-    if (path === "/oauth/token") throw await oauthProviderFailure(response);
-    await response.body?.cancel();
-    throw new ApiError(
-      response.status >= 500 ? 503 : 409,
-      "PAYMENT_PROVIDER_ERROR",
-      "Mercado Pago no pudo completar la operación. Revisá la conexión del comercio o reintentá.",
-    );
-  }
-  try {
-    return await response.json();
-  } catch (error) {
-    if (path === "/oauth/token") throw invalidTokenResponse(undefined, []);
-    throw error;
-  }
+  return provider.request(path, accessToken, body, method, signal);
 }
 
 export async function saveProviderAccount(
@@ -315,7 +292,9 @@ type AccountLookup = { restaurantId: string } | { accountId: string } | {
   liveMode?: boolean;
 };
 
-function accountLookupArguments(lookup: AccountLookup): Record<string, unknown> {
+function accountLookupArguments(
+  lookup: AccountLookup,
+): RpcFunctions["get_payment_account"]["Args"] {
   if ("accountId" in lookup) return { p_account_id: lookup.accountId };
   if ("restaurantId" in lookup) return { p_restaurant_id: lookup.restaurantId };
   return {
@@ -392,11 +371,13 @@ export async function paymentAccount(
   admin: SupabaseClient,
   lookup: AccountLookup,
   requireActive = false,
+  signal?: AbortSignal,
 ) {
   const raw = await rpc(
     admin,
     "get_payment_account",
     accountLookupArguments(lookup),
+    signal,
   );
   if (!raw) {
     throw new ApiError(409, "PAYMENT_NOT_CONNECTED", "El comercio debe conectar Mercado Pago.");
@@ -421,7 +402,7 @@ export async function paymentAccount(
     const acquired = await rpc(admin, "acquire_payment_account_refresh", {
       p_account_id: account.accountId,
       p_expected_expires_at: account.expiresAt,
-    });
+    }, signal);
     if (acquired !== true) {
       throw new ApiError(
         503,
@@ -432,12 +413,18 @@ export async function paymentAccount(
     // Refresh inherits the original token's environment; test_token belongs to initial authorization.
     // https://www.mercadopago.com.ar/developers/es/docs/split-payments/additional-content/security/oauth/renewal
     const refresh = normalizeOAuthTokenResponse(
-      await providerRequest("/oauth/token", undefined, {
-        grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
-        refresh_token: credentials.refreshToken,
-      }),
+      await providerRequest(
+        "/oauth/token",
+        undefined,
+        {
+          grant_type: "refresh_token",
+          client_id: clientId,
+          client_secret: requireEnv("MERCADOPAGO_CLIENT_SECRET"),
+          refresh_token: credentials.refreshToken,
+        },
+        "POST",
+        signal,
+      ),
       credentials.liveMode,
     );
     if (refresh.user_id !== account.providerUserId) {
@@ -458,7 +445,7 @@ export async function paymentAccount(
       ),
       p_expires_at: new Date(Date.now() + refresh.expires_in * 1000).toISOString(),
       p_live_mode: refresh.live_mode,
-    });
+    }, signal);
     credentials = {
       accessToken: refresh.access_token,
       refreshToken: refresh.refresh_token,
@@ -474,7 +461,7 @@ export async function paymentAccount(
 export async function beginPaymentCheckout(
   admin: SupabaseClient,
   input: {
-    request: Record<string, unknown> & { restaurantSlug: string };
+    request: { [key: string]: RpcJson | undefined } & { restaurantSlug: string };
     ipHash: string;
     phoneHash: string;
     clientEventTokenHash: string;
@@ -582,13 +569,14 @@ export async function reconcileProviderPayment(
   admin: SupabaseClient,
   raw: unknown,
   account: PaymentAccountIdentity,
+  signal?: AbortSignal,
 ) {
   const payment = providerPaymentSchema.parse(raw);
   assertProviderPaymentAccount(payment, account);
   if (!z.string().uuid().safeParse(payment.external_reference).success) return null; // A different integration's payment.
   const rawAttempt = await rpc(admin, "get_online_payment_attempt", {
     p_attempt_id: payment.external_reference,
-  });
+  }, signal);
   if (!rawAttempt) return null;
   const attempt = paymentAttemptSchema.parse(rawAttempt);
   const status = canonicalPaymentStatus(payment, attempt, account);
@@ -604,14 +592,15 @@ export async function reconcileProviderPayment(
       liveMode: payment.live_mode,
       accountId: account.accountId,
     },
-  });
+  }, signal);
 }
 
 export async function reconcileAttempt(
   admin: SupabaseClient,
   attempt: z.infer<typeof paymentAttemptSchema>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const account = await paymentAccount(admin, { accountId: attempt.accountId });
+  const account = await paymentAccount(admin, { accountId: attempt.accountId }, false, signal);
   if (account.restaurantId !== attempt.restaurantId || account.liveMode !== attempt.liveMode) {
     throw new Error("Payment attempt account/environment mismatch");
   }
@@ -625,6 +614,9 @@ export async function reconcileAttempt(
         encodeURIComponent(attempt.attemptId)
       }&sort=date_created&criteria=desc&limit=100`,
       account.accessToken,
+      undefined,
+      "GET",
+      signal,
     ),
   );
   if ((search.paging?.total ?? search.results.length) > 100) {
@@ -640,7 +632,13 @@ export async function reconcileAttempt(
       const id = ids[next++]!;
       try {
         const payment = providerPaymentSchema.parse(
-          await providerRequest(`/v1/payments/${encodeURIComponent(id)}`, account.accessToken),
+          await providerRequest(
+            `/v1/payments/${encodeURIComponent(id)}`,
+            account.accessToken,
+            undefined,
+            "GET",
+            signal,
+          ),
         );
         if (payment.id !== id) throw new Error("Provider payment detail ID mismatch");
         // Validate the whole batch before applying any financial event. A search
@@ -659,8 +657,11 @@ export async function reconcileAttempt(
     const payment of payments.sort((a, b) =>
       Date.parse(a.date_last_updated) - Date.parse(b.date_last_updated)
     )
-  ) await reconcileProviderPayment(admin, payment, account);
-  await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId });
+  ) {
+    signal?.throwIfAborted();
+    await reconcileProviderPayment(admin, payment, account, signal);
+  }
+  await rpc(admin, "mark_online_reconciled", { p_attempt_id: attempt.attemptId }, signal);
 }
 
 /** The caller must verify the webhook signature before selecting a stored connection. */

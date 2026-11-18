@@ -2,12 +2,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PaymentStatusPage } from './PaymentStatusPage'
-import { paymentSessionSchema, savePaymentRecovery, type PaymentStatus } from './payment-recovery'
+import { paymentSessionSchema, readPaymentRecovery, savePaymentRecovery, type PaymentStatus } from './payment-recovery'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke: mocks.invoke } } }))
 const session = { order: { actionId: '10000000-0000-4000-8000-000000000001', displayNumber: 'PED-1', status: 'generated', totalCents: 2000, currencyCode: 'ARS', createdAt: '2026-10-27T12:00:00Z' }, payment: { status: 'pending', checkoutUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=123', expiresAt: '2099-10-27T12:30:00Z' }, recoveryToken: 'a'.repeat(43), recoveryExpiresAt: '2099-11-27T12:00:00Z' }
-function page() { return render(<MemoryRouter initialEntries={['/t/fundas/pago?status=approved&payment_id=evil']}><Routes><Route path="/t/:restaurantSlug/pago" element={<PaymentStatusPage />} /></Routes></MemoryRouter>) }
+function page(url = '/t/fundas/pago?status=approved&payment_id=evil') { return render(<MemoryRouter initialEntries={[url]}><Routes><Route path="/t/:restaurantSlug/pago" element={<PaymentStatusPage />} /></Routes></MemoryRouter>) }
 function verifiedResult(payment: Partial<PaymentStatus['payment']>, order: Partial<PaymentStatus['order']> = {}) {
   const result = { ...session, order: { ...session.order, ...order }, payment: { ...session.payment, ...payment } }
   savePaymentRecovery('fundas', session)
@@ -19,6 +19,43 @@ const whatsappMessage = 'En breve, el comercio se comunicarÃ¡ por WhatsApp al nÃ
 describe('payment confirmation trust boundary', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear() })
   afterEach(() => { cleanup(); vi.useRealTimers() })
+  it('recovers the requested purchase after another tab saves a newer purchase', async () => {
+    savePaymentRecovery('fundas', session)
+    const second = { ...session, order: { ...session.order, actionId: '10000000-0000-4000-8000-000000000002', displayNumber: 'PED-2' }, recoveryToken: 'b'.repeat(43) }
+    savePaymentRecovery('fundas', second)
+    mocks.invoke.mockResolvedValue({ data: session, error: null })
+    page(`/t/fundas/pago?order=${session.order.actionId}&status=approved`)
+    expect(await screen.findByText('PED-1')).toBeVisible()
+    expect(screen.queryByText('PED-2')).not.toBeInTheDocument()
+    expect(mocks.invoke).toHaveBeenCalledWith('payment-status', { body: { actionId: session.order.actionId, recoveryToken: session.recoveryToken } })
+    expect(readPaymentRecovery('fundas')?.actionId).toBe(second.order.actionId)
+  })
+  it.each(['invalid', '', '10000000-0000-4000-8000-000000000099', `${session.order.actionId}&order=duplicate`])('does not fall back to another capability for an unmatched selector %s', async order => {
+    savePaymentRecovery('fundas', session)
+    page(`/t/fundas/pago?order=${order}`)
+    expect(await screen.findByText('Acceso no disponible')).toBeVisible()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
+  it('preserves a legacy purchase before updating the last-purchase pointer and requires matching IDs', () => {
+    localStorage.setItem('mozzi:payment-confirmation:store:fundas', JSON.stringify({ actionId: session.order.actionId, token: session.recoveryToken, expiresAt: session.recoveryExpiresAt }))
+    expect(readPaymentRecovery('fundas', session.order.actionId)?.token).toBe(session.recoveryToken)
+    expect(readPaymentRecovery('fundas', '10000000-0000-4000-8000-000000000002')).toBeNull()
+    const second = { ...session, order: { ...session.order, actionId: '10000000-0000-4000-8000-000000000002' }, recoveryToken: 'b'.repeat(43) }
+    savePaymentRecovery('fundas', second)
+    expect(readPaymentRecovery('fundas', session.order.actionId)?.token).toBe(session.recoveryToken)
+    expect(readPaymentRecovery('fundas')?.token).toBe(second.recoveryToken)
+    expect(readPaymentRecovery('another-store', session.order.actionId)).toBeNull()
+  })
+  it('rejects expired and mismatched per-order records and handles unavailable storage', () => {
+    const storageKey = `mozzi:payment-confirmation:store:fundas:${session.order.actionId}`
+    localStorage.setItem(storageKey, JSON.stringify({ actionId: session.order.actionId, token: session.recoveryToken, expiresAt: '2000-01-01T00:00:00Z' }))
+    expect(readPaymentRecovery('fundas', session.order.actionId)).toBeNull()
+    localStorage.setItem(storageKey, JSON.stringify({ actionId: '10000000-0000-4000-8000-000000000002', token: session.recoveryToken, expiresAt: session.recoveryExpiresAt }))
+    expect(readPaymentRecovery('fundas', session.order.actionId)).toBeNull()
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage disabled') })
+    expect(readPaymentRecovery('fundas', session.order.actionId)).toBeNull()
+    spy.mockRestore()
+  })
   it('never accepts a success query as proof or requests an order without its read capability', async () => {
     page()
     expect(await screen.findByText('Acceso no disponible')).toBeVisible()

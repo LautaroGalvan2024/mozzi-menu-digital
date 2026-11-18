@@ -100,7 +100,13 @@ export const inviteRestaurantUserSchema = z.object({
   fullName: singleLine(120, 2),
   email,
   role: z.enum(["restaurant_admin", "order_manager"]),
-}).strict();
+}).strict().or(
+  z.object({
+    restaurantId: uuid,
+    resendUserId: uuid,
+    role: z.enum(["restaurant_admin", "order_manager"]),
+  }).strict(),
+);
 
 const orderItemSchema = z.object({
   productId: uuid,
@@ -375,9 +381,16 @@ export const importProductsSchema = z.object({
 });
 
 export const expireOrdersSchema = z.object({
-  olderThanMinutes: z.number().int().min(15).max(43_200).default(120),
+  olderThanMinutes: z.number().int().min(15).max(43_200).optional(),
+  expirationMode: z.enum(["expires_at", "legacy_grace"]).optional(),
   limit: z.number().int().min(1).max(5_000).default(500),
-}).strict();
+}).strict().refine(
+  (value) => value.expirationMode !== "expires_at" || value.olderThanMinutes === undefined,
+  {
+    path: ["olderThanMinutes"],
+    message: "No combines vencimiento exacto con una ventana de gracia.",
+  },
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -6,7 +6,8 @@ import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
 import { processImage } from '../../lib/images/processImage'
-import { assetVariantPaths, responsiveAssetUrls } from '../../lib/images/responsive'
+import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { cleanupRestaurantImage } from '../../lib/images/cleanup'
 import { uploadRestaurantImage } from '../../lib/images/upload'
 import { parsePriceCents } from '../../lib/money'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
@@ -127,6 +128,7 @@ export function ProductEditorPage() {
   const [saving, setSaving] = useState(false)
   const saveInFlight = useRef(false)
   const promotionsSection = useRef<HTMLDetailsElement>(null)
+  const [keepPromotionsOpen, setKeepPromotionsOpen] = useState(false)
   const extrasSection = useRef<HTMLDetailsElement>(null)
   const organizationSection = useRef<HTMLDetailsElement>(null)
   const [error, setError] = useState<string | null>(null)
@@ -221,6 +223,7 @@ export function ProductEditorPage() {
     setImageFile(null)
     setError(null)
     setPendingSave(null)
+    setKeepPromotionsOpen(false)
   }, [productId, scope.selected?.id])
   useEffect(() => {
     if (draft || !scope.selected) return
@@ -326,7 +329,13 @@ export function ProductEditorPage() {
   if (!draft) return <LoadingScreen />
   function patch<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
     if (pendingSave || saving) return
+    if (key === 'promotionalPrice' && value === '') setKeepPromotionsOpen(true)
     setDraft((d) => (d ? { ...d, [key]: value } : d))
+  }
+  function removePromotion() {
+    if (pendingSave || saving) return
+    setKeepPromotionsOpen(true)
+    setDraft(value => value ? { ...value, promotionalPrice: '', promotionStartsAt: '', promotionEndsAt: '' } : value)
   }
   function patchGroup(id: string, values: Partial<GroupDraft>) {
     patch(
@@ -414,8 +423,8 @@ export function ProductEditorPage() {
     const maxCents = 1_000_000_000_000
     const base = parsePriceCents(currentDraft.basePrice) ?? Number.NaN
     const promo = currentDraft.promotionalPrice.trim() === '' ? null : parsePriceCents(currentDraft.promotionalPrice) ?? Number.NaN
-    const startsAt = currentDraft.promotionStartsAt ? new Date(currentDraft.promotionStartsAt) : null
-    const endsAt = currentDraft.promotionEndsAt ? new Date(currentDraft.promotionEndsAt) : null
+    const startsAt = promo !== null && currentDraft.promotionStartsAt ? new Date(currentDraft.promotionStartsAt) : null
+    const endsAt = promo !== null && currentDraft.promotionEndsAt ? new Date(currentDraft.promotionEndsAt) : null
     const moneyIsValid = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= maxCents
     setSaving(true)
     showEditorError(null)
@@ -478,9 +487,7 @@ export function ProductEditorPage() {
     let uploadedPath: string | null = null
     let catalogSaved = false
     const cleanupAsset = async (path: string) => {
-      const paths = assetVariantPaths(path)
-      const [storageResult, assetResult] = await Promise.all([supabase.storage.from('restaurant-assets').remove(paths), supabase.from('image_assets').update({ deleted_at: new Date().toISOString() }).eq('restaurant_id', restaurantId).in('path', paths)])
-      return !storageResult.error && !assetResult.error
+      return await cleanupRestaurantImage(restaurantId, path) !== 'pending'
     }
     try {
       saveInFlight.current = true
@@ -660,14 +667,19 @@ export function ProductEditorPage() {
             </div>
           </div>
         </section>
-          <details ref={promotionsSection} className="admin-disclosure" open={Boolean(draft.promotionalPrice || draft.quantityPrices.length || draft.quantityPricingMode === 'threshold') || undefined}>
+          <details ref={promotionsSection} className="admin-disclosure" open={keepPromotionsOpen || Boolean(draft.promotionalPrice || draft.quantityPrices.length || draft.quantityPricingMode === 'threshold') || undefined}>
             <summary>Promociones y precios especiales</summary>
             <div className="space-y-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <p className="max-w-xl text-sm text-stone-500">{draft.promotionalPrice.trim() === '' ? 'Sin promoción: se usa el precio base.' : 'Dejá el precio promocional vacío o quitá la promoción para volver al precio base.'}</p>
+                {draft.promotionalPrice !== '' || draft.promotionStartsAt || draft.promotionEndsAt ? <button type="button" className="button-secondary" onClick={removePromotion}><Trash2 className="h-4 w-4" />Quitar promoción</button> : null}
+              </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="field"><span>Precio promocional</span><input type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={e => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" /></label>
                 <label className="field"><span>Promoción desde</span><input type="datetime-local" value={draft.promotionStartsAt} onChange={e => patch('promotionStartsAt', e.target.value)} /></label>
                 <label className="field"><span>Promoción hasta</span><input type="datetime-local" value={draft.promotionEndsAt} onChange={e => patch('promotionEndsAt', e.target.value)} /></label>
               </div>
+              {draft.promotionalPrice.trim() !== '' && parsePriceCents(draft.promotionalPrice) === 0 ? <p className="text-sm text-amber-800" role="status">Con un precio promocional de 0, el producto se ofrece sin cargo. Para usar el precio base, quitá la promoción.</p> : null}
               <div className="border-t border-stone-100 pt-5">
           <label className="field mb-5"><span>Modalidad por cantidad</span><select value={draft.quantityPricingMode} onChange={event => patch('quantityPricingMode', event.target.value as 'bundles' | 'threshold')}><option value="bundles">Combos por precio total</option><option value="threshold">Precio unitario desde una cantidad mínima</option></select></label>
           {draft.quantityPricingMode === 'threshold' ? <div className="space-y-4">

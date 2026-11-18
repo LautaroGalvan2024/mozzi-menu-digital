@@ -1,0 +1,85 @@
+{
+  "date": "2026-11-18",
+  "sourceBranch": "codex/backend-hardening",
+  "publicDemo": {
+    "slug": "mozzi-demo",
+    "mode": "public read-only",
+    "loaded": true,
+    "checkoutReached": true,
+    "rpc": [
+      [
+        "get_public_catalog_meta",
+        200
+      ],
+      [
+        "get_public_catalog_page",
+        200
+      ],
+      [
+        "get_public_catalog_revision",
+        200
+      ],
+      [
+        "get_public_catalog_meta",
+        200
+      ],
+      [
+        "get_public_products_by_ids",
+        200
+      ]
+    ],
+    "orderCreated": false
+  },
+  "connectedAcceptance": {
+    "environment": "isolated native PostgreSQL17.11 + PostgREST14.18 + Supabase Auth2.197.0 + original Deno handlers via local gateway + compiled frontend",
+    "migrations": 43,
+    "tenant": "Mozzi Demo (synthetic)",
+    "scenarios": [
+      "public menu, cart and checkout",
+      "create WhatsApp order, recover confirmation",
+      "sign in as tenant-scoped operator and load orders",
+      "claim GET and authenticated navigation preserve order and event history"
+    ],
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0
+  },
+  "email": {
+    "invitationAfterCommit": true,
+    "delivery": "captured by local SMTP",
+    "messagesForInvitation": 1,
+    "replayNoNewEmail": true,
+    "immediateResendCooldown": true,
+    "localLinkOpened": true,
+    "passwordSet": true,
+    "authenticatedWithNewPassword": true,
+    "activeMembership": true
+  },
+  "payments": {
+    "provider": "simulated via loopback",
+    "externalProviderCalls": 0,
+    "realPostgres": true,
+    "realEdgeHandlers": true,
+    "scenarios": [
+      {
+        "providerFixture": "approved",
+        "confirmedByStatusEndpoint": "approved",
+        "repeatEventStable": true
+      },
+      {
+        "providerFixture": "pending",
+        "confirmedByStatusEndpoint": "pending",
+        "repeatEventStable": true
+      },
+      {
+        "providerFixture": "rejected",
+        "confirmedByStatusEndpoint": "rejected",
+        "repeatEventStable": true
+      }
+    ]
+  },
+  "hostedStaging": false,
+  "officialMercadoPagoSandboxVerified": false,
+  "productionOrderOrPaymentCreated": false,
+  "productionDeployment": false
+}

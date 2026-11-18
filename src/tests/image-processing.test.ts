@@ -46,25 +46,25 @@ describe('image processing', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
-  it('fits the 485 by 497 portrait within metadata limits without cropping', async () => {
+  it('keeps a small portrait at native resolution without cropping or upscaling', async () => {
     const { close, drawImage } = mockBitmap(485, 497)
     const result = await processImage(new File(['png'], 'Captura.PNG', { type: 'image/png' }))
     expect(result.variants.map(({ width, height }) => ({ width, height }))).toEqual([
-      { width: 320, height: 328 }, { width: 640, height: 656 }, { width: 1171, height: 1200 },
+      { width: 320, height: 328 }, { width: 485, height: 497 },
     ])
-    expect(result.filename).toMatch(/-w1171-1171\.webp$/)
+    expect(result.filename).toMatch(/-w485-485\.webp$/)
     for (const variant of result.variants) {
-      expect(variant.filename).toMatch(new RegExp(`-w1171-${variant.width}\\.webp$`))
+      expect(variant.filename).toMatch(new RegExp(`-w485-${variant.width}\\.webp$`))
       expect(variant.blob.size).toBeLessThanOrEqual(1024 * 1024)
     }
     expect(drawImage.mock.calls).toEqual([
-      [expect.anything(), 0, 0, 320, 328], [expect.anything(), 0, 0, 640, 656], [expect.anything(), 0, 0, 1171, 1200],
+      [expect.anything(), 0, 0, 320, 328], [expect.anything(), 0, 0, 485, 497],
     ])
     expect(close).toHaveBeenCalledOnce()
   })
 
   it.each([
-    { width: 200, height: 600, expected: [{ width: 320, height: 960 }, { width: 400, height: 1200 }] },
+    { width: 200, height: 600, expected: [{ width: 200, height: 600 }] },
     { width: 100, height: 2000, expected: [{ width: 60, height: 1200 }] },
     { width: 1, height: 2000, expected: [{ width: 1, height: 1200 }] },
   ])('deduplicates bounded variants for $width by $height images', async ({ width, height, expected }) => {
@@ -75,13 +75,12 @@ describe('image processing', () => {
     expect(result.filename).toMatch(new RegExp(`-w${result.width}-${result.width}\\.webp$`))
   })
 
-  it('preserves the existing square image sizes and names', async () => {
+  it('bounds square uploads to the original size using compatible responsive names', async () => {
     mockBitmap(500, 500)
     const result = await processImage(new File(['png'], 'logo.png', { type: 'image/png' }))
     expect(result.variants.map(({ width, height }) => ({ width, height }))).toEqual([
-      { width: 320, height: 320 }, { width: 640, height: 640 }, { width: 1200, height: 1200 },
+      { width: 320, height: 320 }, { width: 500, height: 500 },
     ])
-    expect(result.filename).toMatch(/-1200\.webp$/)
-    expect(result.filename).not.toContain('-w1200')
+    expect(result.filename).toMatch(/-w500-500\.webp$/)
   })
 })

@@ -1,0 +1,48 @@
+/* An absolute frame gives replaced images a definite width AND height. A
+   percentage-height image in an intrinsic grid row can otherwise grow beyond
+   its square and be clipped, even with object-fit: contain. */
+.store-product-media {
+  position: absolute;
+  inset: 9%;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.store-product-media > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: scale-down;
+  object-position: center;
+}
+
+.store-detail-image-button.store-product-media-trigger {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: #fff;
+  cursor: zoom-in;
+}
+
+.store-product-media-trigger .store-product-media { inset: 8%; }
+
+.store-image-placeholder.store-product-media-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
+  background: #f8fafb;
+  color: #94a3b8;
+}
+
+.store-product-media-fallback > span { font-size: .72rem; font-weight: 500; }
+.store-image-dialog[open] > img { object-fit: scale-down; }

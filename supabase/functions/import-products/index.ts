@@ -1,7 +1,7 @@
 import { activeRestaurantRole, requireAal2, verifyActor } from "../_shared/auth.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError, databaseApiError } from "../_shared/errors.ts";
-import { readJson, safeLog, serve } from "../_shared/http.ts";
+import { safeLog, serve } from "../_shared/http.ts";
 import { importProductsSchema, parseInput } from "../_shared/schemas.ts";
 
 const MAX_BODY_BYTES = 2 * 1_024 * 1_024;
@@ -31,10 +31,11 @@ const importResultSchema = z.object({
 }).strict();
 
 serve({
+  name: "import-products",
   maxBodyBytes: MAX_BODY_BYTES,
   handler: async (request, context) => {
     const actor = await verifyActor(request);
-    const input = parseInput(importProductsSchema, await readJson(request, MAX_BODY_BYTES));
+    const input = parseInput(importProductsSchema, await context.readJson());
     if (actor.authorization.isSuperAdmin) {
       await requireAal2(actor);
     } else if (activeRestaurantRole(actor, input.restaurantId) !== "restaurant_admin") {

@@ -141,15 +141,15 @@ No copies payloads con PII ni Authorization headers a un sistema de observabilid
 
 Ejecutá la operación server-side preparada para expirar pedidos viejos mediante un scheduler confiable. Protegela con `MAINTENANCE_SECRET`, usá lotes acotados y revisá eventos. Nunca actualices estados desde un job con SQL ad hoc no auditado.
 
-El repositorio no activa un cron remoto por defecto: hacerlo obligaría a elegir un scheduler y un almacén de secretos del entorno. Configurá un job que haga `POST` a `expire-orders`, tome `x-maintenance-secret` de su secret store y envíe `olderThanMinutes`/`limit`. No pongas el secreto en una URL, SQL versionado ni historial de shell. Alertá por fallo y comprobá el conteo devuelto; la RPC escribe un evento por pedido expirado.
+El repositorio no activa un cron remoto por defecto: hacerlo obligaría a elegir un scheduler y un almacén de secretos del entorno. Configurá un job que haga `POST` a `expire-orders`, tome `x-maintenance-secret` de su secret store y envíe `limit`. En la versión nueva, omitir `olderThanMinutes` procesa pedidos cuando llega su `expires_at`. Enviarlo explícitamente añade esa demora al vencimiento. No pongas el secreto en una URL, SQL versionado ni historial de shell. Alertá por fallo y comprobá el conteo devuelto; la RPC escribe un evento por pedido expirado.
 
 ### Tokens y rate limits
 
-`cleanup_rate_limits` permite retirar ventanas de rate limit antiguas desde un contexto `service_role`. Los tokens de evento vencidos y la idempotencia administrativa todavía no tienen un job de borrado versionado: `expire-orders` no los elimina. Antes de automatizar esa retención, agregá una migración/RPC server-side auditable y un scheduler con lotes acotados. Solo deben eliminarse datos auxiliares vencidos; los eventos de pedidos permanecen.
+`cleanup_rate_limits` permite retirar ventanas de rate limit antiguas desde un contexto `service_role`. El mantenimiento online purga por lotes los tokens de consulta online vencidos. Los tokens de evento de WhatsApp y la idempotencia administrativa todavía no tienen un job de borrado versionado: `expire-orders` no los elimina. Antes de automatizar esa retención, agregá una migración/RPC server-side auditable y un scheduler con lotes acotados. Solo deben eliminarse datos auxiliares vencidos; los eventos de pedidos permanecen.
 
 ### Assets huérfanos
 
-Quitar una imagen desde Marca o Producto primero elimina su referencia de negocio y después intenta borrar el objeto de Storage y marcar `image_assets.deleted_at`. Reemplazarla sigue el mismo cleanup sobre la ruta anterior. La interfaz informa fallos conocidos, pero las llamadas son best-effort: puede quedar un objeto sin referencia o metadata activa para un archivo ya borrado.
+Marca y Producto quitan primero la referencia de negocio. Luego llaman a `prepare_image_asset_cleanup`. PostgreSQL agrupa los tamaños de la imagen y comprueba referencias de comercios, categorías, productos y familias. Si puede retirarla, registra la baja y devuelve los objetos que Storage puede eliminar. Un fallo de Storage deja la solicitud disponible para repetir. Una versión anterior de la interfaz puede dejar bytes pendientes hasta que se utilice el flujo actualizado.
 
 No existe un barrido automático de assets huérfanos. Ejecutá `list_orphan_image_assets(restaurant_id)` desde una sesión administradora autorizada para obtener un inventario read-only y tenant-scoped. La RPC distingue:
 
@@ -158,7 +158,7 @@ No existe un barrido automático de assets huérfanos. Ejecutá `list_orphan_ima
 - `unreferenced_asset`: objeto y metadata activos sin referencia de negocio;
 - `unregistered_storage_object`: objeto del tenant sin fila en `image_assets`.
 
-Revisá cada resultado contra `restaurants`, `categories` y `products` antes de corregirlo. La RPC no borra ni marca nada; no ejecutes borrados recursivos por prefijos no validados.
+Revisá las referencias de comercio, categoría, producto y familia. Para retirar una imagen, prepará su baja con la RPC y usá únicamente los paths que devuelve. La RPC no borra ni marca nada; no ejecutes borrados recursivos por prefijos no validados.
 
 ## Retención
 
@@ -185,6 +185,20 @@ Antes de activar borrado automático: aprobar plazos por jurisdicción/contrato,
 - Los objetos de Storage requieren una estrategia de copia acorde al plan; un backup de Postgres no garantiza recuperar archivos.
 
 Ante corrupción, detené escrituras, preservá evidencia y restaurá a un entorno aislado. No promociones una restauración hasta ejecutar pruebas RLS y un smoke test completo.
+
+El respaldo manual `node scripts/database/backup-linked.mjs` requiere `PG_BIN` con clientes PostgreSQL 17 o compatibles y usa `BACKUP_DIRECTORY` si se define; el destino debe estar fuera del repositorio. Solo conecta al proyecto vinculado para leer. Mantiene un snapshot exportado mientras obtiene conteos, inventario y los tres dumps; luego cierra esa transacción antes de descargar Storage. El manifiesto conserva el formato de conteos/archivos consumido por la restauración y agrega `formatVersion: 2` y `complete: true`.
+
+Storage se valida por identidad, versión, metadata, tamaño y ETag disponible antes/después de copiar cada lote. Los bytes se guardan con checksum. Una sustitución o eliminación concurrente impide publicar un manifiesto completo; no se presenta como respaldo válido una mezcla de versiones. Esto no agrega retención al servicio: para completar copias durante cambios frecuentes, conservar los objetos originales durante la ventana del backup o repetirlo en un destino nuevo.
+
+`snapshot-checkpoint.json` permite reanudar con el contrato existente `BACKUP_REUSE_DUMPS=1`: conserva los conteos e inventario originales, verifica los checksums y reutiliza únicamente las copias ya comprobadas. No acepta dumps legacy sin ese checkpoint ni les agrega conteos actuales. `manifest.json` se publica mediante rename solamente cuando termina la verificación completa. Cada destino admite un solo escritor mediante `backup.lock`; si un proceso termina abruptamente, comprobar que ya no corre antes de retirar manualmente su lock. Si falló antes de generar el checkpoint, usar otro directorio y conservar los archivos parciales para revisión.
+
+La restauración sigue aceptando manifiestos anteriores; para los de versión 2 exige finalización y cobertura de todos los objetos del snapshot. Un restore de PostgreSQL no recrea por sí mismo los servicios administrados, las claves externas ni los bytes en Storage: el ensayo completo debe verificar esas partes por separado.
+
+## Verificación operativa en CI
+
+`npm run test:ops` ejecuta las pruebas Node de aislamiento de conexiones, mantenimiento y respaldo mediante enumeración explícita de archivos, compatible con Windows y Linux. Los scripts locales rechazan `PGHOSTADDR`, `PGSERVICE`, `PGSERVICEFILE` y `PGOPTIONS` heredados; requieren host loopback, puerto explícito y base `mozzi_*`. Nunca quitar esos controles para probar contra un proyecto remoto.
+
+El job de base en CI reconstruye Supabase local y ejecuta pgTAP. Después, `node scripts/database/local-ci-concurrency.mjs` descubre únicamente el stack local, crea una base `mozzi_ci_*` nueva y clona sus esquemas, extensiones y ACL para ejecutar los harnesses de carreras reales, incluidos assets/horarios y mantenimiento de pagos. También prueba el respaldo bajo escrituras concurrentes y cambios de Storage simulados. Los binarios de cliente PostgreSQL 17 se instalan en el runner Linux; las credenciales locales viajan por entorno y un archivo temporal restringido, nunca por argumentos o logs. El clon y ese archivo se eliminan al terminar. El smoke HTTP original corre aparte contra Auth/REST/Storage/handlers locales.
 
 ## Rotación e incidentes
 

@@ -1,5 +1,5 @@
 import { z } from "../_shared/deps.ts";
-import { readJson, serve } from "../_shared/http.ts";
+import { serve } from "../_shared/http.ts";
 import {
   authorizePaymentAdmin,
   beginPaymentConnection,
@@ -10,6 +10,7 @@ import {
 import { parseInput } from "../_shared/schemas.ts";
 
 serve({
+  name: "mercadopago-connect",
   maxBodyBytes: 2048,
   handler: async (request, context) => {
     const input = parseInput(
@@ -17,7 +18,7 @@ serve({
         restaurantId: z.string().uuid(),
         action: z.enum(["connect", "disconnect", "status"]).default("status"),
       }).strict(),
-      await readJson(request, 2048),
+      await context.readJson(),
     );
     const actor = await authorizePaymentAdmin(request, input.restaurantId);
     const admin = createAdminClient();

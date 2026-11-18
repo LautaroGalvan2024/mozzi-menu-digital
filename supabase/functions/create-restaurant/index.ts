@@ -3,8 +3,8 @@ import { createAdminClient } from "../_shared/clients.ts";
 import { getAppBaseUrl } from "../_shared/config.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError, databaseApiError } from "../_shared/errors.ts";
-import { jsonResponse, readJson, safeLog, serve } from "../_shared/http.ts";
-import { resolveOrInviteUser } from "../_shared/invitations.ts";
+import { jsonResponse, safeLog, serve } from "../_shared/http.ts";
+import { RestaurantInvitations } from "../_shared/invitations.ts";
 import { createRestaurantSchema, parseInput } from "../_shared/schemas.ts";
 
 const transactionResultSchema = z.object({
@@ -22,22 +22,18 @@ const transactionResultSchema = z.object({
 }).passthrough();
 
 serve({
+  name: "create-restaurant",
   maxBodyBytes: 32 * 1_024,
   handler: async (request, context) => {
     const actor = await requireSuperAdmin(request);
-    const input = parseInput(createRestaurantSchema, await readJson(request, 32 * 1_024));
+    const input = parseInput(createRestaurantSchema, await context.readJson());
 
     // The privileged client is deliberately created only after verified Auth, role, and AAL2.
     const admin = createAdminClient();
     const appBaseUrl = getAppBaseUrl();
-    const invitation = await resolveOrInviteUser(admin, {
-      email: input.administrator.email,
-      fullName: input.administrator.fullName,
-      redirectTo: `${appBaseUrl}/auth/callback?next=${encodeURIComponent("/auth/set-password")}`,
-    });
-    const membershipStatus = invitation.invited || !invitation.user.email_confirmed_at
-      ? "invited"
-      : "active";
+    const invitations = new RestaurantInvitations(admin);
+    const user = await invitations.resolve(input.administrator.email, input.administrator.fullName);
+    const membershipStatus = user.email_confirmed_at ? "active" : "invited";
 
     const { data, error } = await admin.rpc("create_restaurant_transaction", {
       p_payload: {
@@ -46,12 +42,12 @@ serve({
         createDefaultPaymentMethods: input.createBasicPaymentMethods,
         administrator: {
           ...input.administrator,
-          invitationSent: invitation.invited,
+          invitationSent: false,
           membershipStatus,
         },
       },
       p_actor_id: actor.user.id,
-      p_admin_user_id: invitation.user.id,
+      p_admin_user_id: user.id,
       p_admin_email: input.administrator.email,
       p_idempotency_key: input.idempotencyKey,
     });
@@ -60,7 +56,7 @@ serve({
     const parsed = transactionResultSchema.safeParse(data);
     if (!parsed.success) throw new Error("Invalid create_restaurant_transaction response");
     const restaurant = parsed.data.restaurant;
-    if (parsed.data.membership.userId !== invitation.user.id || restaurant.slug !== input.slug) {
+    if (parsed.data.membership.userId !== user.id || restaurant.slug !== input.slug) {
       throw new ApiError(
         409,
         "IDEMPOTENCY_CONFLICT",
@@ -68,16 +64,25 @@ serve({
       );
     }
 
-    safeLog("info", "restaurant.created", context.requestId, {
+    const delivery = parsed.data.membership.status === "invited"
+      ? await invitations.deliver(
+        restaurant.id,
+        user.id,
+        appBaseUrl + "/auth/callback?next=%2Fauth%2Fset-password",
+        "restaurant_admin",
+      )
+      : { invitationSent: false, deliveryPending: false };
+    safeLog(delivery.deliveryPending ? "warn" : "info", "restaurant.created", context.requestId, {
       actorId: actor.user.id,
       restaurantId: restaurant.id,
+      deliveryPending: delivery.deliveryPending,
       idempotentReplay: parsed.data.idempotentReplay,
     });
     return jsonResponse({
       restaurant,
       administrator: {
-        userId: invitation.user.id,
-        invitationSent: invitation.invited,
+        userId: user.id,
+        ...delivery,
         membershipStatus: parsed.data.membership.status,
       },
       idempotentReplay: parsed.data.idempotentReplay,

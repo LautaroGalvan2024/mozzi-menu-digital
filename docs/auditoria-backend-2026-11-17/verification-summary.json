@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-17",
+  "timezone": "America/Buenos_Aires",
+  "baseCommit": "e846d92db7e4aef920117b5f3e0b5472bd26e2ff",
+  "preexistingWorkingTreeChangesPreserved": true,
+  "productionMutations": false,
+  "functionalCodeChanges": false,
+  "securityCheck": "passed",
+  "typecheck": "passed",
+  "lint": { "errors": 0, "warnings": 1 },
+  "vitest": { "files": 71, "passed": 566, "failed": 0 },
+  "deno": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "testsPassed": 105,
+    "testsFailed": 0,
+    "formatCheck": "failed",
+    "filesWithLineEndingDifferences": 12
+  },
+  "database": {
+    "name": "mozzi_audit_20261117",
+    "host": "127.0.0.1",
+    "port": 55432,
+    "version": "17.11",
+    "migrationsApplied": 39,
+    "pgTapSuites": 26,
+    "pgTapAssertions": 1109,
+    "pgTapFailures": 0,
+    "concurrencySuites": 6,
+    "concurrencyScenarios": 50,
+    "reportedLockBarriers": 46,
+    "syntheticConcurrencyFixturesRetained": true,
+    "diagnosticProbesRolledBack": true,
+    "localClusterStoppedAfterAudit": true
+  },
+  "nodeMaintenanceInstallerTests": { "passed": 5, "failed": 0 },
+  "npmAudit": {
+    "highEntries": 6,
+    "rootAdvisory": "GHSA-fc5q-39xc-vjpf",
+    "installedPicomatch": "4.0.7",
+    "productionTreeReportedVulnerabilities": 0,
+    "scope": "npm dependency tree; not a complete dependency security certification"
+  },
+  "linkedMetadata": {
+    "transactionReadOnly": true,
+    "serverVersion": "17.6",
+    "migrationVersionsMatch": 39,
+    "publicTables": 26,
+    "publicTablesWithoutRls": 0,
+    "anonPrivateSchemaUsage": false,
+    "authenticatedPrivateSchemaUsage": false,
+    "matchingFunctionDefinitionsAndAcls": 156,
+    "securityDefinersWithoutPinnedSearchPath": 0,
+    "scope": "migration versions, RLS flags, schema usage and function definitions/ACLs; not a complete schema or deployment comparison"
+  }
+}

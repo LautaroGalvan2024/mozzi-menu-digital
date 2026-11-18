@@ -69,7 +69,7 @@ El asistente crea los archivos Edge; no los copies ni completes a mano. El runti
 
 ### Migraciones
 
-Las 23 migraciones versionadas crean enums, identidad, tenants, catálogo, horarios, pagos, entrega, pedidos y snapshots; también helpers, triggers, RPC, RLS, Storage, Realtime, rate limiting, auditoría, autorización por campo para los datos sensibles de `restaurants`, aislamiento de perfiles desactivados, escrituras administrativas transaccionales, inventario de assets huérfanos, una allowlist explícita de `EXECUTE` por RPC, reemplazos de horarios sin colisiones intermedias y precios reutilizables por cantidad.
+Las migraciones versionadas crean enums, identidad, tenants, catálogo, horarios, pagos, entrega, pedidos y snapshots; también helpers, triggers, RPC, RLS, Storage, Realtime, rate limiting, auditoría, autorización por campo para los datos sensibles de `restaurants`, aislamiento de perfiles desactivados, escrituras administrativas transaccionales, inventario de assets huérfanos, una allowlist explícita de `EXECUTE` por RPC, reemplazos de horarios sin colisiones intermedias y precios reutilizables por cantidad.
 
 Para probar que el entorno se reconstruye solo desde Git:
 
@@ -101,9 +101,16 @@ El script invoca la CLI sin shell y escribe `src/types/database.generated.ts` so
 | `create-restaurant` | JWT, Super Admin `aal2` | Crear tenant e invitar primer administrador de forma idempotente |
 | `invite-restaurant-user` | JWT y rol | Invitar/agregar miembros con mínimo privilegio |
 | `import-products` | JWT y admin de tenant o Super Admin `aal2` | Revalidar y aplicar transaccionalmente hasta 500 productos por lote |
+| `recover-order` | Token de recuperación | Recuperar la confirmación del pedido |
+| `create-payment` | Checkout público | Crear o recuperar un intento de pago |
+| `payment-status` | Token de recuperación | Consultar el pago del pedido correspondiente |
+| `mercadopago-connect` | JWT y autorización administrativa | Iniciar la vinculación o desconectar la cuenta |
+| `mercadopago-callback` | Retorno OAuth con estado de un solo uso | Completar la vinculación |
+| `mercadopago-webhook` | Notificación del proveedor | Verificar la notificación y reconciliar con el proveedor |
+| `reconcile-payments` | Secreto de mantenimiento | Revisar intentos de pago y vencer reservas |
 | `expire-orders` | Interna, secreto de mantenimiento | Expirar pedidos viejos en lotes; sin CORS de navegador |
 
-Todas las funciones mutables aceptan `POST`; las expuestas al navegador manejan `OPTIONS`. `verify_jwt = false` en el gateway permite que el handler procese preflight y aplique su verificación versionada; las funciones privadas siguen verificando el usuario con Auth antes de usar capacidad administrativa.
+Las operaciones de la aplicación usan `POST` y los handlers para navegador responden a `OPTIONS`. El retorno OAuth de Mercado Pago recibe `GET`. `verify_jwt = false` en el gateway permite que el handler procese preflight y aplique su verificación versionada; las funciones privadas siguen verificando el usuario con Auth antes de usar capacidad administrativa.
 
 En remoto:
 
@@ -115,6 +122,13 @@ supabase functions deploy create-restaurant
 supabase functions deploy invite-restaurant-user
 supabase functions deploy import-products
 supabase functions deploy expire-orders
+supabase functions deploy recover-order
+supabase functions deploy create-payment
+supabase functions deploy payment-status
+supabase functions deploy mercadopago-connect
+supabase functions deploy mercadopago-callback
+supabase functions deploy mercadopago-webhook
+supabase functions deploy reconcile-payments
 ```
 
 No se incluyó ningún valor real en el repositorio. Consultá [deployment](docs/deployment.md) antes de ejecutar estos pasos.
@@ -189,12 +203,11 @@ supabase test db
 
 `npm run security:check` detecta errores estáticos frecuentes sin imprimir el valor encontrado. GitHub Actions ejecuta lint, typecheck, unitarias, smoke E2E en Chromium, build, auditoría, formato/lint/typecheck/tests de Edge Functions, reconstrucción/pgTAP y Gitleaks. El flujo E2E conectado a Supabase se habilita solo con `E2E_LIVE=1` y un entorno aislado con fixtures; no uses credenciales productivas. La prueba opt-in que crea un pedido requiere además `E2E_CREATE_ORDER=1`, `E2E_RESTAURANT_SLUG` y un `E2E_BASE_URL` cuyo origen esté incluido en `APP_ALLOWED_ORIGINS`; nunca abre ni envía el WhatsApp.
 
+Para ejecutar los cuatro casos conectados, usá `node scripts/e2e/run-staging.mjs` con el [perfil de aceptación](scripts/e2e/README.md). El comando comprueba los destinos antes de abrir el navegador y exige cuatro casos aprobados sin omisiones.
+
 ### Verificación disponible en este checkout
 
-- El proyecto vinculado conserva las 22 migraciones anteriores aplicadas. La migración 23 de precios por cantidad está solamente en esta rama: `db push --dry-run` la detecta como única pendiente y no la aplicó. El repositorio contiene 10 suites y 276 aserciones pgTAP; la nueva suite de 59 aserciones queda pendiente de ejecución local. Después de aplicarla existirán 20 tablas públicas, todas con RLS.
-- En este host no hay Docker ni Podman; por eso no se pudieron repetir `supabase start`, `supabase db reset`, `supabase test db` ni la generación local de tipos contra el stack oficial. `supabase db lint` tampoco estuvo disponible por falta de `plpgsql_check`.
-- El baseline de Edge Functions se verificó previamente con Deno: formato de 34 archivos, lint de 33, typecheck y 30/30 tests. Esta rama agrega una prueba de cantidad canónica; Deno no está disponible en este host para repetir esa suite.
-- El proyecto vinculado tiene desplegado el baseline anterior. Esta rama no desplegó la migración, la actualización de `create-order` ni el frontend; el flujo productivo y los datos de El Nieto permanecen sin cambios.
+Consultá los resultados, el alcance local y las condiciones de publicación en [la verificación del backend](docs/VERIFICACION_BACKEND_2026-11-17.md). El historial de migraciones aplicado y la versión desplegada de cada función se comprueban en el entorno correspondiente.
 
 ## Deploy
 

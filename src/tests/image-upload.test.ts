@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(),
   insert: vi.fn(),
   getUser: vi.fn(),
+  rpc: vi.fn(),
 }))
 
 vi.mock('../lib/supabase/client', () => ({
@@ -14,6 +15,7 @@ vi.mock('../lib/supabase/client', () => ({
     storage: { from: () => ({ upload: mocks.upload, remove: mocks.remove }) },
     auth: { getUser: mocks.getUser },
     from: () => ({ insert: mocks.insert }),
+    rpc: mocks.rpc,
   },
 }))
 
@@ -31,7 +33,8 @@ const image: ProcessedImage = { ...variants[2]!, variants }
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.upload.mockResolvedValue({ error: null })
-  mocks.remove.mockResolvedValue({ error: null })
+  mocks.remove.mockImplementation(async (paths: string[]) => ({ data: paths.map(name => ({ name })), error: null }))
+  mocks.rpc.mockResolvedValue({ data: { retained: false, paths: [] }, error: null })
   mocks.getUser.mockResolvedValue({ data: { user: { id: 'actor-id' } } })
   mocks.insert.mockResolvedValue({ error: null })
 })
@@ -55,6 +58,7 @@ describe('responsive image upload', () => {
   })
 
   it('rolls back earlier variants if a later upload fails', async () => {
+    mocks.rpc.mockResolvedValue({ data: { retained: false, paths: ['restaurants/restaurant-id/cover/asset-320.webp'] }, error: null })
     mocks.upload
       .mockResolvedValueOnce({ error: null })
       .mockResolvedValueOnce({ error: new Error('storage unavailable') })
@@ -68,6 +72,9 @@ describe('responsive image upload', () => {
     expect(mocks.remove).toHaveBeenCalledWith([
       'restaurants/restaurant-id/cover/asset-320.webp',
     ])
+    expect(mocks.rpc).toHaveBeenCalledWith('prepare_image_asset_cleanup', {
+      p_restaurant_id: 'restaurant-id', p_path: 'restaurants/restaurant-id/cover/asset-320.webp',
+    })
     expect(mocks.insert).not.toHaveBeenCalled()
   })
 })

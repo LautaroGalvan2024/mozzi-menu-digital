@@ -2,7 +2,7 @@ import { createAdminClient } from "../_shared/clients.ts";
 import { getAppBaseUrl, getRateLimitSecret } from "../_shared/config.ts";
 import { hmacSha256Hex, randomToken, sha256Hex } from "../_shared/crypto.ts";
 import { ApiError, databaseApiError } from "../_shared/errors.ts";
-import { jsonResponse, readJson, safeLog, serve } from "../_shared/http.ts";
+import { jsonResponse, safeLog, serve } from "../_shared/http.ts";
 import { orderConfirmationResponse } from "../_shared/order-confirmation.ts";
 import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
 import { clientIp } from "../_shared/request-meta.ts";
@@ -15,9 +15,10 @@ const MAX_FORM_AGE_MS = 2 * 60 * 60 * 1_000;
 const CLIENT_EVENT_LIFETIME_MS = 30 * 60 * 1_000;
 
 serve({
+  name: "create-order",
   maxBodyBytes: MAX_BODY_BYTES,
   handler: async (request, context) => {
-    const input = parseInput(createOrderSchema, await readJson(request, MAX_BODY_BYTES));
+    const input = parseInput(createOrderSchema, await context.readJson());
     if (input.checkoutMode === "online") {
       throw new ApiError(422, "CHECKOUT_MODE_INVALID", "Usá el pago online de la tienda.");
     }

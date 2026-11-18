@@ -48,6 +48,9 @@ jobs:
       - name: Unit and integration tests
         run: npm run test
 
+      - name: Node operational safety and maintenance tests
+        run: node scripts/database/test-ops.mjs
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
@@ -92,7 +95,7 @@ jobs:
 
   database-security:
     name: Supabase database and RLS tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
@@ -109,6 +112,14 @@ jobs:
         with:
           version: 2.118.0
 
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
       - name: Set up Deno for original Edge handlers
         uses: denoland/setup-deno@v2
         with:
@@ -122,6 +133,11 @@ jobs:
 
       - name: Run pgTAP tests
         run: supabase test db
+
+      - name: Real database concurrency on a disposable local clone
+        run: node scripts/database/local-ci-concurrency.mjs
+        env:
+          PG_BIN: /usr/lib/postgresql/17/bin
 
       - name: Real local Auth, REST, Storage and Edge handler integration
         run: node scripts/database/local-http-smoke.mjs --with-edge-host

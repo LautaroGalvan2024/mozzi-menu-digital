@@ -1,7 +1,8 @@
-import { Check, Minus, Package, Plus, Search, X } from 'lucide-react'
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, Minus, Plus } from 'lucide-react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { cartProductName, variantLabel } from '../../lib/catalog-presentation'
-import { responsiveAssetUrls } from '../../lib/images/responsive'
+import { StoreProductMedia } from './StoreProductMedia'
+export { StoreProductMedia } from './StoreProductMedia'
 import { currentProductPrice, formatMoney } from '../../lib/money'
 import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
 import type { CartLine, PublicCatalogGroup, PublicProduct, PublicRestaurant } from '../../types/domain'
@@ -11,58 +12,6 @@ export const StoreServerTimeContext = createContext<Date>(FALLBACK_STORE_TIME)
 
 export function useStoreServerTime() {
   return useContext(StoreServerTimeContext)
-}
-
-export function StoreProductMedia({
-  product,
-  familyImagePath = null,
-  detail = false,
-}: {
-  product: PublicProduct
-  familyImagePath?: string | null
-  detail?: boolean
-}) {
-  const path = detail ? product.imagePath ?? familyImagePath : familyImagePath ?? product.imagePath
-  const image = responsiveAssetUrls(path)
-  const dialogRef = useRef<HTMLDialogElement>(null)
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    const close = () => dialog.removeAttribute('data-visible')
-    dialog.addEventListener('close', close)
-    return () => dialog.removeEventListener('close', close)
-  }, [])
-
-  if (!image.src) {
-    return <div className="store-image-placeholder" aria-label="Producto sin foto" role="img"><Package aria-hidden /></div>
-  }
-
-  const picture = <img
-    src={image.src}
-    srcSet={image.srcSet}
-    sizes={detail ? '(min-width: 900px) 520px, calc(100vw - 2rem)' : '(min-width: 1024px) 260px, (min-width: 640px) 33vw, 50vw'}
-    alt={detail ? product.family?.name ?? product.name : ''}
-    loading={detail ? 'eager' : 'lazy'}
-    decoding="async"
-  />
-
-  if (!detail) return picture
-
-  return <>
-    <button
-      type="button"
-      className="store-detail-image-button"
-      onClick={() => { dialogRef.current?.setAttribute('data-visible', ''); dialogRef.current?.showModal() }}
-      aria-label={`Ampliar foto de ${product.family?.name ?? product.name}`}
-    >
-      {picture}<span><Search aria-hidden />Ampliar</span>
-    </button>
-    <dialog ref={dialogRef} className="store-image-dialog" aria-label={`Foto ampliada de ${product.family?.name ?? product.name}`}>
-      <button type="button" onClick={() => dialogRef.current?.close()} aria-label="Cerrar foto"><X aria-hidden /></button>
-      <img src={image.src} srcSet={image.srcSet} sizes="100vw" alt={product.family?.name ?? product.name} />
-    </dialog>
-  </>
 }
 
 function firstPurchasable(variants: PublicProduct[]) {
@@ -91,12 +40,14 @@ export function productBenefit(product: PublicProduct, restaurant: PublicRestaur
 
 export function StoreProductConfigurator({
   group,
+  categoryName,
   restaurant,
   acceptsOrders,
   initialProductId,
   onAdd,
 }: {
   group: PublicCatalogGroup
+  categoryName?: string | undefined
   restaurant: PublicRestaurant
   acceptsOrders: boolean
   initialProductId?: string | undefined
@@ -206,14 +157,14 @@ export function StoreProductConfigurator({
   return <div className="store-product-detail">
     <div className="store-detail-image"><StoreProductMedia product={selected} familyImagePath={group.family?.imagePath ?? null} detail /></div>
     <div className="store-detail-content">
-      <p className="store-eyebrow">Producto</p>
+      <p className="store-eyebrow">{categoryName ?? 'Producto'}</p>
       <h1 id="store-product-title">{group.family?.name ?? selected.name}</h1>
       <div className="store-detail-statuses">
         <span className={`store-availability ${selected.available ? '' : 'is-unavailable'}`}>{selected.available ? <Check aria-hidden /> : null}{selected.available ? 'Disponible' : 'Agotado'}</span>
         {!acceptsOrders ? <span className="store-order-status is-paused"><span aria-hidden />Pedidos pausados</span> : null}
       </div>
       <div className="store-detail-pricing">
-        <p className="store-detail-price">{money(unitPriceCents)}</p>
+        <div><p className="store-detail-price">{money(unitPriceCents)}</p><p className="store-price-caption">Precio por unidad</p></div>
         {benefit ? <div className={`store-benefit is-${benefit.kind}`}><strong>{benefit.label}</strong><span>{benefit.detail}</span></div> : null}
       </div>
       {(group.family?.description ?? selected.description) ? <p className="store-detail-description">{group.family?.description ?? selected.description}</p> : null}
@@ -241,7 +192,10 @@ export function StoreProductConfigurator({
         </label>)}</div>
       </fieldset>)}
 
-      <label className="store-notes"><span>¿Querés aclarar algo? <small>Opcional</small></span><textarea rows={2} maxLength={300} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Información para el comercio" /></label>
+      <details className="store-notes-disclosure">
+        <summary>Agregar una aclaración <span>Opcional</span></summary>
+        <label className="store-notes"><span className="sr-only">¿Querés aclarar algo?</span><textarea rows={2} maxLength={300} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Información para el comercio" /></label>
+      </details>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="store-detail-purchase">
         <div className="store-quantity" aria-label="Cantidad">

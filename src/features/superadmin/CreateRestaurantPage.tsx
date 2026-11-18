@@ -11,7 +11,10 @@ import { parsePriceCents } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { restaurantCreateSchema } from '../../lib/validation/schemas'
 
-const createResponseSchema = z.object({ restaurant: z.object({ id: z.string().uuid() }) })
+const createResponseSchema = z.object({
+  restaurant: z.object({ id: z.string().uuid() }),
+  administrator: z.object({ deliveryPending: z.boolean().optional() }).optional(),
+})
 const amountSchema = z.string().refine(value => parsePriceCents(value) !== null, 'Ingresá un importe válido, desde 0 y con hasta 2 decimales.')
 const createFormSchema = restaurantCreateSchema.omit({ minimumOrderCents: true, initialDeliveryFeeCents: true }).extend({
   minimumOrder: amountSchema,
@@ -70,7 +73,10 @@ export function CreateRestaurantPage() {
         return
       }
       await invalidateRestaurantCreationQueries(queryClient)
-      navigate(`/superadmin/restaurantes/${result.data.restaurant.id}`, { replace: true })
+      const navigation = result.data.administrator?.deliveryPending
+        ? { replace: true, state: { invitationPending: true } }
+        : { replace: true }
+      navigate(`/superadmin/restaurantes/${result.data.restaurant.id}`, navigation)
     } catch {
       setError('No se pudo crear el comercio. Verificá tu conexión e intentá nuevamente.')
     }

@@ -83,7 +83,9 @@ export async function processImage(file: File): Promise<ProcessedImage> {
     bitmap.close()
     throw new Error('La imagen no tiene dimensiones válidas.')
   }
-  const maxWidth = Math.max(1, Math.min(MAX_DIMENSION, Math.floor(MAX_DIMENSION * bitmap.width / bitmap.height)))
+  // Keep small originals at their native resolution. Upscaling only increases
+  // transfer size and makes an already soft photo look worse in larger views.
+  const maxWidth = Math.max(1, Math.min(bitmap.width, MAX_DIMENSION, Math.floor(MAX_DIMENSION * bitmap.width / bitmap.height)))
   const baseName = `${crypto.randomUUID()}${maxWidth < MAX_DIMENSION ? `-w${maxWidth}` : ''}`
   try {
     const variants: ProcessedImageVariant[] = []

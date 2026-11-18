@@ -7,18 +7,14 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { validateLocalDatabaseEnvironment, pgBinary } from "./database/connection.mjs";
 
-const host = process.env.PGHOST;
-if (!["127.0.0.1", "localhost", "::1"].includes(host)
-  || process.env.PGHOSTADDR && !["127.0.0.1", "::1"].includes(process.env.PGHOSTADDR)
-  || process.env.MOZZI_ISOLATED_TEST_DB !== "1"
-  || !process.env.PGDATABASE
-  || ["postgres", "template0", "template1"].includes(process.env.PGDATABASE)
-  || process.env.PGSERVICE || process.env.PGSERVICEFILE) {
-  throw new Error("Requires explicit loopback PGHOST, a dedicated PGDATABASE, MOZZI_ISOLATED_TEST_DB=1 and no libpq service override.");
+const environment = validateLocalDatabaseEnvironment(process.env);
+if (environment.MOZZI_ISOLATED_TEST_DB !== "1" || environment.PGDATABASE.startsWith("mozzi_restore_")) {
+  throw new Error("Requires an explicitly enabled synthetic database; recovery databases are forbidden.");
 }
 
-const executable = process.env.S01_PSQL || "psql";
+const executable = environment.S01_PSQL || pgBinary(environment, "psql");
 const sessions = new Set();
 class Session {
   constructor(name) {
@@ -28,7 +24,7 @@ class Session {
     this.pending = null;
     this.closed = false;
     this.process = spawn(executable, ["-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1"], {
-      env: { ...process.env, PGAPPNAME: this.name, PGCONNECT_TIMEOUT: "5", PGOPTIONS: "-c statement_timeout=15000 -c lock_timeout=10000" },
+      env: { ...environment, PGAPPNAME: this.name, PGCONNECT_TIMEOUT: "5", PGOPTIONS: "-c statement_timeout=15000 -c lock_timeout=10000" },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });

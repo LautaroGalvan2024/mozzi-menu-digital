@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowRight, Clock3, Minus, Package, Plus, Search, ShoppingBag, Store, Truck, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Clock3, LoaderCircle, Minus, Package, Plus, Search, ShoppingBag, Store, Truck, X } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Link, useLocation, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigationType, useParams, useSearchParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { cartProductName } from '../../lib/catalog-presentation'
@@ -17,6 +17,7 @@ import { RestaurantHoursDialog } from '../public-menu/RestaurantHoursDialog'
 import { fetchPublicCatalogGroup } from '../public-menu/api'
 import { usePublicStoreCatalog } from '../public-menu/usePublicCatalog'
 import { readPaymentRecovery } from './payment-recovery'
+import { StoreCategoryFilters } from './StoreCategoryFilters'
 import { productBenefit, purchasablePrice, StoreProductConfigurator, StoreProductMedia, StoreServerTimeContext, useStoreServerTime } from './StoreProductConfigurator'
 import './public-store.css'
 
@@ -53,7 +54,7 @@ function ProductCard({ group, section, restaurant, acceptsOrders, detailState, o
   const configure = () => onConfigure({ product: product.available ? product : group.variants.find(variant => variant.available) ?? group.variants[0]!, variants: group.variants })
   const productDetailState = { ...detailState, selectedProductId: product.id }
 
-  return <article className="store-product-card">
+  return <article className={`store-product-card ${line ? 'is-in-cart' : ''}`}>
     <Link className="store-card-media-link" to={path} state={productDetailState} onClick={onOpen} aria-label={`Ver ${group.family?.name ?? product.name}`}><div className="store-card-image"><StoreProductMedia product={product} familyImagePath={group.family?.imagePath ?? null} />{!purchasable ? <span className="store-sold-out">Agotado</span> : benefit?.kind === 'promotion' ? <span className="store-offer-badge">{benefit.label}</span> : null}</div></Link>
     <div className="store-card-content">
       <Link className="store-card-title-link" to={path} state={productDetailState} onClick={onOpen}><h3>{group.family?.name ?? product.name}</h3></Link>
@@ -71,6 +72,7 @@ function ProductShelf({ id, title, description, section, groups, restaurant, acc
 export function PublicStorePage() {
   const { restaurantSlug, productId } = useParams()
   const location = useLocation()
+  const navigationType = useNavigationType()
   const [params, setParams] = useSearchParams()
   const cart = useCart()
   const { activateRestaurant, reconcileProducts } = cart
@@ -85,8 +87,17 @@ export function PublicStorePage() {
   const [coverPortrait, setCoverPortrait] = useState(false)
   const [announcement, setAnnouncement] = useState('')
   const [clientOpenedAt] = useState(() => new Date())
+  const [catalogMounted, setCatalogMounted] = useState(() => {
+    if (productId || location.search || location.hash || location.state || navigationType !== 'POP' || typeof window === 'undefined' || typeof window.matchMedia !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true
+    const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    if (navigation && navigation.type !== 'navigate') return true
+    try {
+      return sessionStorage.getItem(`mozzi:store-scroll:${restaurantSlug ?? ''}:${location.pathname}${location.search}`) !== null
+    } catch { return true }
+  })
   const restored = useRef(false)
   const searchEdited = useRef(false)
+  const pendingSearchNavigation = useRef<string | null>(null)
   const debouncedSearch = useDebouncedValue(search, 300)
   const showMerchandising = !productId && !search.trim() && !urlCategory && section === 'all'
   const catalog = usePublicStoreCatalog(restaurantSlug, section, urlCategory, debouncedSearch, 24)
@@ -100,8 +111,35 @@ export function PublicStorePage() {
   const storeNowMs = catalog.serverNow ? Date.parse(catalog.serverNow) : clientOpenedAt.getTime()
   const storeNow = new Date(storeNowMs)
 
+  useEffect(() => {
+    if (catalogMounted || catalog.isLoading || !catalog.meta.data) return
+    // Give the header its first paint before laying out the catalog. Requests
+    // and pagination already run above; this only splits the initial DOM work.
+    let nextFrame = 0
+    const reveal = () => setCatalogMounted(true)
+    const firstFrame = requestAnimationFrame(() => { nextFrame = requestAnimationFrame(reveal) })
+    const fallback = window.setTimeout(reveal, 100)
+    window.addEventListener('wheel', reveal, { passive: true, once: true })
+    window.addEventListener('touchmove', reveal, { passive: true, once: true })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      cancelAnimationFrame(nextFrame)
+      window.clearTimeout(fallback)
+      window.removeEventListener('wheel', reveal)
+      window.removeEventListener('touchmove', reveal)
+    }
+  }, [catalogMounted, catalog.isLoading, catalog.meta.data])
+
   useEffect(() => { if (restaurantSlug) activateRestaurant(restaurantSlug, 'store'); setSelection(null); setShowHours(false) }, [restaurantSlug, activateRestaurant])
-  useEffect(() => { searchEdited.current = false; setSearch(urlQuery) }, [urlQuery])
+  useEffect(() => {
+    if (pendingSearchNavigation.current === urlQuery) {
+      pendingSearchNavigation.current = null
+      return
+    }
+    pendingSearchNavigation.current = null
+    searchEdited.current = false
+    setSearch(urlQuery)
+  }, [urlQuery])
   useEffect(() => {
     if (productId) return
     if (!categoryParam || urlCategory) return
@@ -114,6 +152,7 @@ export function PublicStorePage() {
     const next = new URLSearchParams(params)
     if (debouncedSearch.trim()) next.set('q', debouncedSearch.trim()); else next.delete('q')
     searchEdited.current = false
+    pendingSearchNavigation.current = debouncedSearch.trim()
     setParams(next, { replace: true })
   }, [debouncedSearch, params, productId, search, setParams, urlQuery])
   useEffect(() => {
@@ -146,10 +185,10 @@ export function PublicStorePage() {
   }, [location.pathname, location.search, location.state, productId, restaurantSlug])
 
   if (categoryIsInvalid || catalog.isLoading || (productId && groupQuery.isLoading)) return <LoadingScreen label="Preparando la tienda…" />
-  if (!catalog.meta.data || !catalog.pages.data) return <main className="page-shell py-16"><ErrorPanel title="Tienda no disponible">No encontramos una tienda publicada con esta dirección.<button className="button-secondary mt-4" onClick={() => void catalog.meta.refetch()}>Reintentar</button></ErrorPanel></main>
+  if (!catalog.meta.data) return <main className="page-shell py-16"><ErrorPanel title="Tienda no disponible">No encontramos una tienda publicada con esta dirección.<button className="button-secondary mt-4" onClick={() => void catalog.meta.refetch()}>Reintentar</button></ErrorPanel></main>
 
   const { restaurant, categories } = catalog.meta.data
-  const categoryIcons = catalog.pages.data.pages[0]?.categoryIcons ?? {}
+  const categoryIcons = catalog.pages.data?.pages[0]?.categoryIcons ?? {}
   const detailGroup = productId ? groupQuery.data?.group : null
   const phrase = debouncedSearch.trim()
   const visibleGroups = catalog.groups.slice(0, visibleCount)
@@ -168,6 +207,12 @@ export function PublicStorePage() {
   const backPath = detailNavigation?.from ?? `${storePath}${location.search}`
   const hasMoreProducts = visibleCount < catalog.groups.length || catalog.pages.hasNextPage
   const landing = !productId && !hasFilters
+  const heroVisible = !productId && !urlCategory && section === 'all'
+  const searchPending = !catalog.refreshError && (search.trim() !== debouncedSearch.trim() || catalog.isUpdating)
+  const showingPrevious = Boolean(catalog.isShowingPreviousResults)
+  const catalogUnavailable = Boolean(!catalog.pages.data && catalog.refreshError)
+  const activeCategory = categories.find(category => category.id === urlCategory)
+  const catalogTitle = phrase ? `Resultados para “${phrase}”` : section === 'offers' ? 'Todas las ofertas' : section === 'featured' ? 'Productos destacados' : activeCategory?.name ?? 'Todos los productos'
 
   function updateParams(changes: { q?: string; category?: string; section?: PublicStoreCatalogSection }) {
     const next = new URLSearchParams(params)
@@ -185,24 +230,26 @@ export function PublicStorePage() {
     setVisibleState({ key: filterKey, count: visibleCount + 24 }); if (catalog.pages.hasNextPage) void catalog.pages.fetchNextPage()
   }
 
-  return <StoreServerTimeContext.Provider value={storeNow}><div className={`public-store ${itemCount > 0 ? 'has-cart-dock' : ''}`} style={{ '--brand': restaurant.primaryColor, '--brand-secondary': restaurant.secondaryColor } as CSSProperties}>
+  return <StoreServerTimeContext.Provider value={storeNow}><div className={`public-store ${itemCount > 0 ? 'has-cart-dock' : ''}`} onPointerDownCapture={() => { if (!catalogMounted) setCatalogMounted(true) }} onKeyDownCapture={() => { if (!catalogMounted) setCatalogMounted(true) }} style={{ '--brand': restaurant.primaryColor, '--brand-secondary': restaurant.secondaryColor } as CSSProperties}>
     <a href="#store-catalog" className="store-skip-link">Ir a los productos</a><p className="sr-only" role="status" aria-live="polite">{announcement}</p>
-    <header className={`store-header ${landing ? 'store-header-landing' : 'store-header-compact'}`}><div className="page-shell">
-      <div className="store-topbar"><Link to={storePath} className="store-identity"><span className="store-logo">{logo.src ? <img src={logo.src} srcSet={logo.srcSet} sizes="64px" decoding="async" alt="" /> : <Store aria-hidden />}</span><div className="min-w-0">{landing ? <span className="store-header-label">Tienda online</span> : <><span className="store-eyebrow">Tienda online</span><span className="store-brand-name">{restaurant.tradeName}</span></>}</div></Link><Link to={commercePath(restaurant.slug, 'store', '/carrito')} className="store-cart-link" aria-label={`Ver carrito, ${itemCount} productos`}><ShoppingBag aria-hidden /><span className="hidden sm:inline">Carrito</span><span className="store-cart-count">{itemCount}</span></Link></div>
-      {landing ? <section className={`store-hero ${cover.src ? 'has-cover' : 'has-brand-fallback'} ${coverPortrait ? 'has-portrait-cover' : ''}`} aria-labelledby="store-title">{cover.src ? <div className="store-hero-media"><img className="store-hero-image" src={cover.src} srcSet={cover.srcSet} sizes="(min-width: 1160px) 1128px, calc(100vw - 2rem)" decoding="async" fetchPriority="high" alt="" onLoad={event => setCoverPortrait(event.currentTarget.naturalHeight > event.currentTarget.naturalWidth * 1.15)} /></div> : null}<div className="store-hero-panel"><div className="store-hero-copy"><p className="store-hero-eyebrow">Tienda oficial · Compra directa</p><h1 id="store-title">{restaurant.tradeName}</h1>{restaurant.description ? <p className="store-description">{restaurant.description}</p> : null}</div><div className="store-hero-information"><div className="store-attention"><span className={`store-order-status ${acceptsOrders ? 'is-available' : 'is-paused'}`}><span aria-hidden />{acceptsOrders ? 'Recibimos pedidos' : 'Pedidos pausados'}</span><button className="store-hours" onClick={() => setShowHours(true)}><Clock3 aria-hidden />{restaurant.isOpen ? 'Abierto ahora' : 'Ver horarios'}</button></div><div className="store-hero-footer"><div className="store-fulfillment">{restaurant.pickupEnabled ? <span><Store aria-hidden /><span>Retiro{restaurant.address ? <small>{restaurant.address}</small> : null}</span></span> : null}{restaurant.deliveryEnabled ? <span><Truck aria-hidden /><span>Envíos locales</span></span> : null}</div><a className="store-hero-cta" href="#store-products">Explorar productos<ArrowRight aria-hidden /></a></div></div></div></section> : null}
+    <header className={`store-header ${heroVisible ? 'store-header-landing' : 'store-header-compact'}`}><div className="page-shell">
+      <div className="store-topbar"><Link to={storePath} className="store-identity"><span className="store-logo">{logo.src ? <img src={logo.src} srcSet={logo.srcSet} sizes="64px" decoding="async" alt="" /> : <Store aria-hidden />}</span><div className="min-w-0"><span className="store-eyebrow">Tienda online</span><span className="store-brand-name">{restaurant.tradeName}</span></div></Link><Link to={commercePath(restaurant.slug, 'store', '/carrito')} className="store-cart-link" aria-label={`Ver carrito, ${itemCount} productos`}><ShoppingBag aria-hidden /><span className="hidden sm:inline">Carrito</span><span className="store-cart-count">{itemCount}</span></Link></div>
+      {heroVisible ? <section className={`store-hero ${cover.src ? 'has-cover' : 'has-brand-fallback'} ${coverPortrait ? 'has-portrait-cover' : ''}`} aria-labelledby="store-title">{cover.src ? <div className="store-hero-media"><img className="store-hero-image" src={cover.src} srcSet={cover.srcSet} sizes="(min-width: 1160px) 1128px, calc(100vw - 2rem)" decoding="async" fetchPriority="high" alt="" onLoad={event => setCoverPortrait(event.currentTarget.naturalHeight > event.currentTarget.naturalWidth * 1.15)} /></div> : null}<div className="store-hero-panel"><div className="store-hero-copy"><p className="store-hero-eyebrow">Tienda oficial · Compra directa</p><h1 id="store-title">{restaurant.tradeName}</h1>{restaurant.description ? <p className="store-description">{restaurant.description}</p> : null}</div><div className="store-hero-information"><div className="store-attention"><span className={`store-order-status ${acceptsOrders ? 'is-available' : 'is-paused'}`}><span aria-hidden />{acceptsOrders ? 'Recibimos pedidos' : 'Pedidos pausados'}</span><button className="store-hours" onClick={() => setShowHours(true)}><Clock3 aria-hidden />{restaurant.isOpen ? 'Abierto ahora' : 'Ver horarios'}</button></div><div className="store-hero-footer"><div className="store-fulfillment">{restaurant.pickupEnabled ? <span><Store aria-hidden /><span>Retiro{restaurant.address ? <small>{restaurant.address}</small> : null}</span></span> : null}{restaurant.deliveryEnabled ? <span><Truck aria-hidden /><span>Envíos locales</span></span> : null}</div><a className="store-hero-cta" href="#store-products">Explorar productos<ArrowRight aria-hidden /></a></div></div></div></section> : null}
     </div></header>
 
-    <main id="store-catalog" className={`page-shell store-main ${productId ? 'store-main-detail' : ''}`} tabIndex={-1}>
+    <main id="store-catalog" className={`page-shell store-main ${productId ? 'store-main-detail' : hasFilters ? 'store-main-filtered' : ''}`} tabIndex={-1} aria-busy={!catalogMounted} style={catalogMounted ? undefined : { minHeight: '100vh' }}>
+      {catalogMounted ? <>
       {!productId && recovery ? <Link className="store-recovery" to={commercePath(restaurant.slug, 'store', '/pago')}><span className="store-recovery-icon"><ShoppingBag aria-hidden /></span><span><strong>Consultar mi última compra</strong><span>Revisá el estado del pedido y del pago.</span></span><ArrowRight aria-hidden /></Link> : null}
-      {catalog.isUpdating ? <p className="store-update-status" role="status">Actualizando productos y precios…</p> : null}{catalog.refreshError ? <p className="store-update-status is-error" role="status">No pudimos actualizar ahora. Mostramos la última versión disponible.</p> : null}
-      {productId ? detailGroup ? <section aria-labelledby="store-product-title"><Link className="store-back" to={backPath}><ArrowLeft aria-hidden />Volver a productos</Link><StoreProductConfigurator group={detailGroup} restaurant={restaurant} acceptsOrders={acceptsOrders} initialProductId={detailNavigation?.selectedProductId} onAdd={line => addLine(line, line.productName)} />{restaurant.pickupEnabled || restaurant.deliveryEnabled ? <div className="store-detail-delivery"><h2>Formas de entrega</h2><div>{restaurant.pickupEnabled ? <span><Store aria-hidden /><span><strong>Retiro en el local</strong>{restaurant.address ? <small>{restaurant.address}</small> : null}</span></span> : null}{restaurant.deliveryEnabled ? <span><Truck aria-hidden /><span><strong>Envíos locales</strong><small>Elegís la zona y ves el costo al finalizar.</small></span></span> : null}</div></div> : null}</section> : <ErrorPanel title="Producto no disponible" headingLevel={1}>Este producto ya no está en el catálogo. <Link className="underline" to={backPath}>Volver a la tienda</Link></ErrorPanel> : <>
+      {productId && catalog.isUpdating ? <p className="store-update-status" role="status">Actualizando productos y precios…</p> : null}{catalog.refreshError && catalog.pages.data ? <p className="store-update-status is-error" role="status">No pudimos actualizar ahora. Mostramos la última versión disponible.</p> : null}
+      {productId ? detailGroup ? <section aria-labelledby="store-product-title"><Link className="store-back" to={backPath}><ArrowLeft aria-hidden />Volver a productos</Link><StoreProductConfigurator group={detailGroup} categoryName={categories.find(category => category.id === detailGroup.categoryId)?.name} restaurant={restaurant} acceptsOrders={acceptsOrders} initialProductId={detailNavigation?.selectedProductId} onAdd={line => addLine(line, line.productName)} />{restaurant.pickupEnabled || restaurant.deliveryEnabled ? <div className="store-detail-delivery"><h2>Formas de entrega</h2><div>{restaurant.pickupEnabled ? <span><Store aria-hidden /><span><strong>Retiro en el local</strong>{restaurant.address ? <small>{restaurant.address}</small> : null}</span></span> : null}{restaurant.deliveryEnabled ? <span><Truck aria-hidden /><span><strong>Envíos locales</strong><small>Elegís la zona y ves el costo al finalizar.</small></span></span> : null}</div></div> : null}</section> : <ErrorPanel title="Producto no disponible" headingLevel={1}>Este producto ya no está en el catálogo. <Link className="underline" to={backPath}>Volver a la tienda</Link></ErrorPanel> : <>
         <section className="store-discovery" aria-label="Buscar en la tienda"><label className="store-search"><span className="sr-only">Buscar productos</span><Search aria-hidden /><input placeholder="¿Qué estás buscando?" value={search} onChange={event => editSearch(event.target.value)} /></label>{search ? <button className="store-clear-search" aria-label="Limpiar búsqueda" onClick={() => editSearch('')}><X aria-hidden /></button> : null}</section>
         {landing && categories.length ? <section className="store-category-showcase" aria-labelledby="store-category-title"><div className="store-section-heading"><div><p className="store-eyebrow">Explorá fácil</p><h2 id="store-category-title">Comprá por categoría</h2></div></div><div className="store-category-track">{categories.map(category => { const image = responsiveAssetUrls(category.imagePath); return <button type="button" key={category.id} onClick={() => updateParams({ category: category.id })}><span className={`store-category-image ${image.src ? '' : 'is-icon'}`}>{image.src ? <img src={image.src} srcSet={image.srcSet} sizes="96px" loading="lazy" decoding="async" alt="" /> : <CategoryIconGraphic name={category.name} iconKey={categoryIcons[category.id] ?? null} />}</span><strong>{category.name}</strong></button> })}</div></section> : null}
         {landing ? <><ProductShelf id="store-offers-title" title="Ofertas para aprovechar" description="Precios y beneficios vigentes en productos disponibles." section="offers" groups={offers.groups} restaurant={restaurant} acceptsOrders={acceptsOrders} detailState={detailState} onOpen={rememberScroll} onSection={value => updateParams({ section: value })} onConfigure={setSelection} onAdd={addLine} /><ProductShelf id="store-featured-title" title="Productos destacados" description="Una selección preparada por el comercio." section="featured" groups={featured.groups} restaurant={restaurant} acceptsOrders={acceptsOrders} detailState={detailState} onOpen={rememberScroll} onSection={value => updateParams({ section: value })} onConfigure={setSelection} onAdd={addLine} /></> : null}
-        <section id="store-products" className="store-products-section" aria-labelledby="store-products-title"><div className="store-catalog-heading"><div><p className="store-eyebrow">{section === 'offers' ? 'Promociones' : section === 'featured' ? 'Selección' : 'Todo el catálogo'}</p><h2 id="store-products-title">{section === 'offers' ? 'Todas las ofertas' : section === 'featured' ? 'Productos destacados' : hasFilters ? 'Resultados' : 'Todos los productos'}</h2></div><p className="store-result-count" role="status" aria-live="polite">Mostrando {visibleGroups.length} {visibleGroups.length === 1 ? 'producto' : 'productos'}</p></div><div className="store-catalog-controls">{categories.length ? <nav className="store-categories" aria-label="Filtrar por categoría"><button aria-pressed={!urlCategory} onClick={() => updateParams({ category: '' })}>Todos</button>{categories.map(category => <button key={category.id} aria-pressed={urlCategory === category.id} onClick={() => updateParams({ category: category.id })}>{category.name}</button>)}</nav> : null}{hasFilters ? <div className="store-active-filters"><p>{section === 'offers' ? 'Ofertas' : section === 'featured' ? 'Destacados' : urlCategory ? categories.find(category => category.id === urlCategory)?.name : 'Todos los productos'}{phrase ? <> · “{phrase}”</> : null}</p><button onClick={clearFilters}>Limpiar filtros<X aria-hidden /></button></div> : null}</div>
-          {visibleGroups.length ? <><div className={`store-grid ${visibleGroups.length === 1 ? 'is-single' : ''}`}>{visibleGroups.map(group => <ProductCard key={group.id} group={group} section={section} restaurant={restaurant} acceptsOrders={acceptsOrders} detailState={detailState} onOpen={rememberScroll} onConfigure={setSelection} onAdd={addLine} />)}</div>{hasMoreProducts ? <div className="store-load-more"><button type="button" className="button-secondary" disabled={catalog.pages.isFetchingNextPage} onClick={loadMoreProducts}>{catalog.pages.isFetchingNextPage ? 'Cargando…' : 'Ver más productos'}</button></div> : null}</> : <section className="store-empty" aria-labelledby="store-empty-title"><span className="store-empty-icon">{hasFilters ? <Search aria-hidden /> : <Package aria-hidden />}</span><h3 id="store-empty-title">{hasFilters ? 'No encontramos productos' : 'El catálogo está en preparación'}</h3><p>{hasFilters ? 'Probá con otro nombre o explorá todas las categorías.' : 'Este comercio todavía no tiene productos publicados.'}</p>{hasFilters ? <button className="button-secondary" onClick={clearFilters}>Ver todos los productos<ArrowRight aria-hidden /></button> : null}</section>}
+        <section id="store-products" className="store-products-section" aria-labelledby="store-products-title"><div className="store-catalog-heading"><div className="store-catalog-title">{activeCategory && !phrase ? <span className="store-catalog-icon"><CategoryIconGraphic name={activeCategory.name} iconKey={categoryIcons[activeCategory.id] ?? null} /></span> : null}<div><p className="store-eyebrow">{section === 'offers' ? 'Promociones' : section === 'featured' ? 'Selección del comercio' : 'Nuestro catálogo'}</p><h2 id="store-products-title">{catalogTitle}</h2><p className="store-catalog-description">{phrase ? 'Encontrá lo que buscás y sumalo a tu pedido.' : activeCategory?.description || 'Elegí tus favoritos y armá tu pedido.'}</p></div></div><p className="store-result-count" role="status" aria-live="polite">{catalogUnavailable ? 'Catálogo no disponible' : searchPending ? <><LoaderCircle className="store-search-spinner" aria-hidden />Actualizando productos…</> : showingPrevious ? 'Mostramos los resultados anteriores' : <>Mostrando {visibleGroups.length} {visibleGroups.length === 1 ? 'producto' : 'productos'}</>}</p></div><div className="store-catalog-controls">{categories.length ? <StoreCategoryFilters categories={categories} selectedId={urlCategory} onSelect={category => updateParams({ category })} /> : null}{hasFilters ? <div className="store-active-filters"><p>{section === 'offers' ? 'Ofertas' : section === 'featured' ? 'Destacados' : urlCategory ? categories.find(category => category.id === urlCategory)?.name : 'Todos los productos'}{phrase ? <> · “{phrase}”</> : null}</p><button onClick={clearFilters}>Limpiar filtros<X aria-hidden /></button></div> : null}</div>
+          {visibleGroups.length ? <><div className={`store-grid ${visibleGroups.length === 1 ? 'is-single' : ''} ${showingPrevious ? 'is-updating' : ''}`} aria-busy={searchPending}>{visibleGroups.map(group => <ProductCard key={group.id} group={group} section={section} restaurant={restaurant} acceptsOrders={acceptsOrders} detailState={detailState} onOpen={rememberScroll} onConfigure={setSelection} onAdd={addLine} />)}</div>{hasMoreProducts && !searchPending && !showingPrevious ? <div className="store-load-more"><button type="button" className="button-secondary" disabled={catalog.pages.isFetchingNextPage} onClick={loadMoreProducts}>{catalog.pages.isFetchingNextPage ? 'Cargando…' : 'Ver más productos'}</button></div> : null}</> : catalogUnavailable ? <ErrorPanel title="No pudimos cargar los productos" action={<button type="button" className="button-secondary" onClick={() => void catalog.pages.refetch()}>Reintentar</button>}>Revisá tu conexión e intentá nuevamente.</ErrorPanel> : searchPending ? <div className="store-results-loading" role="status"><LoaderCircle className="store-search-spinner" aria-hidden /><span>Buscando productos…</span></div> : <section className="store-empty" aria-labelledby="store-empty-title"><span className="store-empty-icon">{hasFilters ? <Search aria-hidden /> : <Package aria-hidden />}</span><h3 id="store-empty-title">{hasFilters ? 'No encontramos productos' : 'El catálogo está en preparación'}</h3><p>{hasFilters ? 'Probá con otro nombre o explorá todas las categorías.' : 'Este comercio todavía no tiene productos publicados.'}</p>{hasFilters ? <button className="button-secondary" onClick={clearFilters}>Ver todos los productos<ArrowRight aria-hidden /></button> : null}</section>}
         </section>
       </>}
+      </> : null}
     </main>
     {itemCount > 0 ? <div className="store-cart-dock"><Link to={commercePath(restaurant.slug, 'store', '/carrito')}><span><ShoppingBag aria-hidden />Ver carrito · {itemCount}</span><span>{money(cart.subtotalCents)}<ArrowRight aria-hidden /></span></Link></div> : null}
     {selection ? <ProductDialog product={selection.product} variants={selection.variants} restaurant={restaurant} now={storeNow} onClose={() => setSelection(null)} onAdd={line => addLine(line, line.productName)} /> : null}

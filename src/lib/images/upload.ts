@@ -1,5 +1,6 @@
 import { supabase } from '../supabase/client'
 import type { ProcessedImage } from './processImage'
+import { cleanupRestaurantImage } from './cleanup'
 
 export type AssetKind = 'logo' | 'cover' | 'categories' | 'products' | 'promotions'
 
@@ -22,7 +23,7 @@ export async function uploadRestaurantImage({ restaurantId, kind, entityId, imag
       upsert: false,
     })
     if (uploadError) {
-      if (uploadedPaths.length) await supabase.storage.from('restaurant-assets').remove(uploadedPaths)
+      if (uploadedPaths.length) await cleanupRestaurantImage(restaurantId, uploadedPaths[0]!)
       throw new Error('No se pudo subir la imagen.')
     }
     uploadedPaths.push(path)
@@ -31,7 +32,7 @@ export async function uploadRestaurantImage({ restaurantId, kind, entityId, imag
   const { data: userData } = await supabase.auth.getUser()
   const actorId = userData.user?.id
   if (!actorId) {
-    await supabase.storage.from('restaurant-assets').remove(uploadedPaths)
+    await cleanupRestaurantImage(restaurantId, uploadedPaths[0]!)
     throw new Error('La sesión expiró antes de registrar la imagen.')
   }
   const { error: assetError } = await supabase.from('image_assets').insert(variants.map((variant, index) => ({
@@ -47,7 +48,7 @@ export async function uploadRestaurantImage({ restaurantId, kind, entityId, imag
     created_by: actorId,
   })))
   if (assetError) {
-    await supabase.storage.from('restaurant-assets').remove(uploadedPaths)
+    await cleanupRestaurantImage(restaurantId, uploadedPaths[0]!)
     throw new Error('No se pudo registrar la imagen.')
   }
   return uploadedPaths.at(-1)!

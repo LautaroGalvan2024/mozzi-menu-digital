@@ -2,7 +2,7 @@ import { createAdminClient } from "../_shared/clients.ts";
 import { sha256Hex } from "../_shared/crypto.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError, databaseApiError } from "../_shared/errors.ts";
-import { readJson, safeLog, serve } from "../_shared/http.ts";
+import { safeLog, serve } from "../_shared/http.ts";
 import { parseInput, registerWhatsappOpenedSchema } from "../_shared/schemas.ts";
 
 const resultSchema = z.object({
@@ -13,9 +13,10 @@ const resultSchema = z.object({
 }).passthrough();
 
 serve({
+  name: "register-whatsapp-opened",
   maxBodyBytes: 4 * 1_024,
-  handler: async (request, context) => {
-    const input = parseInput(registerWhatsappOpenedSchema, await readJson(request, 4 * 1_024));
+  handler: async (_request, context) => {
+    const input = parseInput(registerWhatsappOpenedSchema, await context.readJson());
     const tokenHash = await sha256Hex(input.clientEventToken);
     const admin = createAdminClient();
     const { data, error } = await admin.rpc("register_whatsapp_opened", {

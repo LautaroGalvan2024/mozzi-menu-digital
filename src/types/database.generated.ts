@@ -1586,6 +1586,34 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_auth_user_by_email: {
+        Args: { p_email: string }
+        Returns: string | null
+      }
+      claim_restaurant_invitation: {
+        Args: { p_restaurant_id: string; p_user_id: string; p_resend?: boolean; p_expected_role?: Database['public']['Enums']['restaurant_role'] }
+        Returns: Json
+      }
+      finish_restaurant_invitation: {
+        Args: { p_lease_id: string; p_success: boolean }
+        Returns: boolean
+      }
+      prepare_image_asset_cleanup: {
+        Args: { p_restaurant_id: string; p_path: string }
+        Returns: Json
+      }
+      get_public_catalog_preview: {
+        Args: { p_restaurant_slug: string; p_channel?: string; p_product_id?: string | null }
+        Returns: Json
+      }
+      expire_online_reservations_report: {
+        Args: { p_before?: string; p_limit?: number }
+        Returns: Json
+      }
+      finish_online_reconciliation: {
+        Args: { p_attempt_id: string; p_succeeded: boolean }
+        Returns: undefined
+      }
       activate_inventory_from_product_stock: {
         Args: { p_restaurant_id: string; p_operation_id: string; p_expected_policy_version: number; p_other_channels?: string }
         Returns: Json

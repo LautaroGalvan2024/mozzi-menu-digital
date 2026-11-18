@@ -1,14 +1,13 @@
 // Disposable loopback-only PostgreSQL test. Mock extensions never send HTTP.
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 import { buildInstallationSql, validateConfiguration } from './configure-commerce-maintenance.mjs'
 
 const env = localDatabaseEnvironment()
 const database = `mozzi_scheduler_${randomBytes(6).toString('hex')}`
 const reader = `${database}_reader`
-const psql = path.join(env.PG_BIN, process.platform === 'win32' ? 'psql.exe' : 'psql')
+const psql = pgBinary(env, 'psql')
 const query = (input, target = database) => run(psql, ['-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-d',target], { env, input }).trim()
 const projectRef = 'abcdefghijklmnopqrst'
 const firstSecret = 'synthetic_only_0123456789_0123456789'

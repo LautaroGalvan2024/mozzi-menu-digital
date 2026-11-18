@@ -6,13 +6,18 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 
 const directory = process.argv[2] && path.resolve(process.argv[2])
 if (!directory || directory === process.cwd() || directory.startsWith(process.cwd() + path.sep)) {
   throw new Error('Specify an existing restricted backup directory outside the repository')
 }
 const manifest = JSON.parse(readFileSync(path.join(directory, 'manifest.json'), 'utf8'))
+if (manifest.formatVersion !== undefined) {
+  assert.equal(manifest.formatVersion, 2, 'Unsupported backup manifest format')
+  assert.equal(manifest.complete, true, 'A completed snapshot backup is required')
+  assert.equal(manifest.assets?.length, manifest.counts?.storage_objects, 'Storage snapshot must be complete')
+}
 function verifyFile(relative, expected) {
   if (typeof relative !== 'string' || !/^[a-f0-9]{64}$/.test(expected ?? '')) throw new Error('Incomplete backup checksum manifest')
   const filename = path.resolve(directory, relative)
@@ -25,14 +30,14 @@ for (const asset of manifest.assets ?? []) verifyFile(asset.file, asset.sha256)
 const sourceEnv = localDatabaseEnvironment()
 const database = `mozzi_restore_${new Date().toISOString().replace(/\D/g, '').slice(0, 17)}`
 const env = { ...sourceEnv, PGDATABASE: database }
-const psql = path.join(env.PG_BIN, 'psql.exe')
+const psql = pgBinary(env, 'psql')
 const query = (sql, name = database) => run(psql, ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-d', name], { env, input: sql }).trim()
 assert.match(query('show server_version;', 'postgres'), /^17\./)
 assert.equal(query(`select count(*) from pg_database where datname='${database}';`, 'postgres'), '0', 'Restore target must be new')
 query(`create database "${database}";`, 'postgres')
 query('create schema extensions; create schema auth; create schema storage; create schema private; create schema supabase_migrations; create extension pgcrypto with schema extensions; create extension "uuid-ossp" with schema extensions; create extension pg_trgm with schema extensions; create publication supabase_realtime;')
 
-const restored = spawnSync(path.join(env.PG_BIN, 'pg_restore.exe'), [
+const restored = spawnSync(pgBinary(env, 'pg_restore'), [
   '--dbname', database, '--exit-on-error', '--single-transaction', '--no-owner', '--no-acl',
   '--schema=auth', '--schema=storage', '--schema=public', '--schema=private', '--schema=supabase_migrations',
   path.join(directory, 'database.dump'),

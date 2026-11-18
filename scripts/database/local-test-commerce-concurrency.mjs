@@ -2,14 +2,13 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 
 const env = localDatabaseEnvironment()
 const databaseArgument = process.argv.find(value => value.startsWith('--database='))
 if (databaseArgument) env.PGDATABASE = databaseArgument.slice('--database='.length)
 if (!/^mozzi_[a-z0-9_]+$/.test(env.PGDATABASE) || env.PGDATABASE.startsWith('mozzi_restore_')) throw new Error('Synthetic test database required; never seed a recovery database')
-const executable = path.join(env.PG_BIN, 'psql.exe')
+const executable = pgBinary(env, 'psql')
 const args = ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1']
 const query = sql => run(executable, args, { env, input: sql }).trim()
 const literal = value => `'${String(value).replaceAll("'", "''")}'`
@@ -116,8 +115,18 @@ const expiry = fixture()
 const created = result(query(`begin;set local role service_role;${beginCheckout(expiry, randomUUID())}commit;`))
 query(`update private.online_payment_attempts set expires_at=now()-interval '1 minute' where id=${literal(created.attemptId)};`)
 const approval = `select 'RESULT:'||public.reconcile_online_payment(${literal(created.attemptId)},'synthetic-${created.attemptId}','approved',1000,'ARS',now())::text;`
-const [, expirationResult] = await race(approval, "select 'RESULT:'||public.expire_online_reservations()::text;")
-assert.equal(result(expirationResult), 0)
+const approvalHolder = new Session(`approval_holder_${randomUUID().slice(0, 8)}`)
+try {
+  await approvalHolder.command(`begin;set local statement_timeout='12s';set local role service_role;${approval}`)
+  // Maintenance must return while approval still owns the order/attempt locks.
+  // Waiting for a lock barrier here would contradict its new NOWAIT contract.
+  const expirationResult = query("begin;set local statement_timeout='2s';set local role service_role;select 'RESULT:'||public.expire_online_reservations()::text;commit;")
+  assert.equal(result(expirationResult), 0)
+  await approvalHolder.command('commit;')
+} finally {
+  await approvalHolder.command('rollback;').catch(() => {})
+  approvalHolder.close()
+}
 assert.equal(query(`select payment_status from public.orders where id=${literal(created.orderId)};`), 'approved')
 assert.equal(query(`select reserved from public.inventory_balances where product_id=${literal(expiry.product)};`), '1')
 
@@ -135,7 +144,7 @@ assert.throws(() => query(beginCheckout(transition, transitionKey, true)), /PAYM
 assert.equal(query(`select count(*) from public.orders where restaurant_id=${literal(transition.tenant)};`), '1')
 assert.equal(query(`select reserved from public.inventory_balances where product_id=${literal(transition.product)};`), '1')
 
-console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 4, scenarios: [
+console.log(JSON.stringify({ database: env.PGDATABASE, passed: true, barriers: 3, nonBlockingRaces: 1, scenarios: [
   'concurrent retry: one order, one stock hold, one preference creator',
   'different buyers: only one can reserve last unit; losing order rolls back',
   'approval racing expiration: approved reservation remains held',

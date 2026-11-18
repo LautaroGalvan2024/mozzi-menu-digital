@@ -31,6 +31,7 @@ export function corsHeaders(
   headers.set("Access-Control-Allow-Origin", origin);
   headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
   headers.set("Access-Control-Allow-Methods", methods.join(", "));
+  headers.set("Access-Control-Expose-Headers", "X-Request-Id");
   headers.set("Access-Control-Max-Age", "600");
   headers.set("Vary", "Origin");
   return headers;

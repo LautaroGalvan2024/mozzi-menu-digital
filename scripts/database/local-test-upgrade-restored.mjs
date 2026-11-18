@@ -3,12 +3,12 @@
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { localDatabaseEnvironment, run } from './connection.mjs'
+import { localDatabaseEnvironment, pgBinary, run } from './connection.mjs'
 
 const database = process.argv.find(value => value.startsWith('--database='))?.slice(11)
 if (!/^mozzi_restore_[0-9]+$/.test(database ?? '')) throw new Error('An explicit restored database is required')
 const env = { ...localDatabaseEnvironment(), PGDATABASE: database }
-const query = statement => run(path.join(env.PG_BIN, 'psql.exe'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { env, input: statement }).trim()
+const query = statement => run(pgBinary(env, 'psql'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], { env, input: statement }).trim()
 const quote = value => `"${value.replaceAll('"', '""')}"`
 const tables = JSON.parse(query(`select json_agg(x) from (
  select table_schema,table_name,array_agg(column_name order by ordinal_position) columns

@@ -1,0 +1,9 @@
+Reviewed final effective definitions from local mozzi_audit_20261117 reconstructed from all 39 migrations. No production inspection.
+
+public.create_order_transaction -> private.create_commerce_order -> private.create_order_transaction_with_request_hash -> private.create_order_transaction_without_request_hash. The wrapper takes restaurant FOR SHARE and a tenant/key advisory lock; no restaurant-exclusive lock appears before product FOR SHARE. The core later writes restaurant_order_counters (separate relation) and inserts items; snapshot_order_variant requests product FOR SHARE then family FOR SHARE.
+
+public.save_product_family -> private.lock_catalog_codes takes restaurant FOR SHARE and tenant SKU allocator FOR UPDATE, then the family upsert, then product FOR UPDATE. Checkout does not acquire the SKU allocator. Thus no earlier common exclusive restaurant lock excludes the product/family lock inversion in the legacy public RPC.
+
+public.save_product_family_with_stock takes inventory_authorize(..., true, true), which locks restaurant FOR UPDATE first. That current UI path is serialized with checkout and does not exhibit this particular inversion. Do not claim that the current UI family editor was reproduced failing.
+
+Classification: reachable lock-order risk for public legacy save_product_family vs WhatsApp checkout, corroborated against effective DB function definitions; NOT a reproduced concurrent deadlock. No concurrent fixture was committed.

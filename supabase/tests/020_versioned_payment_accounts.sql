@@ -113,6 +113,10 @@ select is(public.reconcile_online_payment((select (response->>'attemptId')::uuid
 select is(public.reconcile_online_payment((select (response->>'attemptId')::uuid from versioned_results where label='test-paid'),'test-payment-020','refunded',1000,'ARS',now()+interval '1 minute')->>'paymentStatus','refunded','historical sandbox refund still reconciles after production activation');
 select is((select payment_status from public.orders where id=(select (response->>'orderId')::uuid from versioned_results where label='production')),'pending','sandbox events do not credit the production order');
 select is((select reserved from public.inventory_balances where product_id='29000000-0000-4000-8000-000000000004'),2::bigint,'historical refund releases only its own reservation');
+-- Scheduling is independent of account routing: make these recently checked
+-- fixtures due before asserting that historical identities remain intact.
+update private.online_payment_attempts set next_reconcile_at=now()
+where restaurant_id='29000000-0000-4000-8000-000000000002';
 select ok(exists(select 1 from jsonb_array_elements(public.list_online_reconciliation()) x where x->>'accountId'='29000000-0000-4000-8000-000000000005' and x->>'liveMode'='false'),'reconciliation queue includes retained sandbox connection identity');
 select ok(exists(select 1 from jsonb_array_elements(public.list_online_reconciliation()) x where x->>'liveMode'='true'),'reconciliation queue also includes production connection identity');
 

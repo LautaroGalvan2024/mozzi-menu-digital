@@ -4,9 +4,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { localDatabaseEnvironment } from './database/connection.mjs'
+import { localDatabaseEnvironment, pgBinary } from './database/connection.mjs'
 
 const env = localDatabaseEnvironment()
 const databaseArgument = process.argv.find(value => value.startsWith('--database='))
@@ -18,7 +17,7 @@ class Session {
   constructor(label) {
     this.name = `inventory_${label}_${randomUUID()}`
     this.output = ''; this.stderr = ''; this.pending = null; this.closed = false
-    this.process = spawn(path.join(env.PG_BIN, 'psql.exe'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
+    this.process = spawn(pgBinary(env, 'psql'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
       env: { ...env, PGAPPNAME: this.name, PGCONNECT_TIMEOUT: '5', PGOPTIONS: '-c statement_timeout=15000 -c lock_timeout=10000' },
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     })

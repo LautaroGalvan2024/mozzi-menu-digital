@@ -32,6 +32,18 @@ describe('CreateRestaurantPage', () => {
   })
   afterEach(cleanup)
 
+  it('opens the created restaurant with a retry notice when email delivery is pending', async () => {
+    const id = '71000000-0000-4000-8000-000000000001'
+    mocks.invoke.mockResolvedValueOnce({ data: { restaurant: { id }, administrator: { deliveryPending: true } }, error: null })
+    show()
+    completeIdentity()
+    await userEvent.click(screen.getByRole('button', { name: 'Crear e invitar' }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/superadmin/restaurantes/' + id, {
+      replace: true, state: { invitationPending: true },
+    }))
+    expect(mocks.invoke).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps optional settings collapsed and creates with the existing operational defaults', async () => {
     const user = userEvent.setup()
     const { details } = show()

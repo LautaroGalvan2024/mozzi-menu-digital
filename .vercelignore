@@ -18,6 +18,7 @@
 /e2e/
 /playwright-report/
 /test-results/
+/artifacts/
 /coverage/
 /.tmp/
 *.log

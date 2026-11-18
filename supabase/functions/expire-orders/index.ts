@@ -4,6 +4,7 @@ import { constantTimeEqual } from "../_shared/crypto.ts";
 import { ApiError, databaseApiError, toApiError } from "../_shared/errors.ts";
 import { jsonResponse, readJson, safeLog } from "../_shared/http.ts";
 import { expireOrdersSchema, parseInput } from "../_shared/schemas.ts";
+import { orderExpirationCutoff } from "./policy.ts";
 
 const MAX_BODY_BYTES = 2 * 1_024;
 
@@ -19,7 +20,7 @@ Deno.serve(async (request) => {
     }
 
     const input = parseInput(expireOrdersSchema, await readJson(request, MAX_BODY_BYTES));
-    const before = new Date(Date.now() - input.olderThanMinutes * 60_000).toISOString();
+    const before = orderExpirationCutoff(input);
     // The service client is created only after the dedicated maintenance secret is verified.
     const admin = createAdminClient();
     const { data, error } = await admin.rpc("expire_orders", {

@@ -135,7 +135,7 @@ await import(Deno.args[0]);
     APP_BASE_URL: origin, APP_ALLOWED_ORIGINS: origin,
     RATE_LIMIT_HASH_SECRET: randomBytes(48).toString('hex'), TURNSTILE_ENABLED: 'false',
   }
-  for (const handler of ['import-products', 'create-order', 'recover-order']) {
+  for (const handler of ['import-products', 'create-order', 'recover-order', 'invite-restaurant-user']) {
     const child = spawn('deno', ['run', '--no-prompt', '--allow-env', '--allow-net=127.0.0.1,localhost,[::1]',
       `--allow-read=${process.cwd()},${temporaryDirectory}`, '--config', path.resolve('supabase/functions/deno.json'),
       '--lock', path.resolve('supabase/functions/deno.lock'), '--frozen', temporaryLauncherFile,
@@ -262,6 +262,18 @@ async function main() {
     pass('Edge validates real Auth session, imports through user RPC and denies manager')
   }
 
+  if (withEdge) {
+    stage = 'local invitation and replay'
+    const invite = body => http('/functions/v1/invite-restaurant-user', { token: admin.token, body, headers: { Origin: origin } })
+    const body = { restaurantId: a, fullName: 'Synthetic invite', email: 'invite-' + suffix + '@example.test', role: 'order_manager' }
+    const first = accepted(await invite(body), 'invite through local Auth and SMTP capture')
+    check(first.membership?.status === 'invited' && first.invitationSent === true, 'First invitation did not deliver')
+    const replay = accepted(await invite(body), 'repeat invitation')
+    check(replay.membership?.id === first.membership.id && replay.invitationSent === false, 'Repeated invitation changed identity or sent twice')
+    const again = accepted(await invite({ restaurantId: a, resendUserId: first.membership.userId, role: 'order_manager' }), 'immediate resend')
+    check(again.invitationSent === false, 'Resend bypassed cooldown')
+    pass('local Auth, committed membership and delivery replay')
+  }
   stage = 'Storage service and policies'
   const image = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j/aQAAAAASUVORK5CYII=', 'base64'))
   const objectPath = `restaurants/${a}/products/http-smoke-${suffix}.png`
@@ -273,6 +285,8 @@ async function main() {
       token, body: image, raw: true, headers: { 'Content-Type': 'image/png' },
     }), `Storage ${label} write`, [400, 401, 403])
   }
+  const cleanup = accepted(await rpc('prepare_image_asset_cleanup', { p_restaurant_id: a, p_path: objectPath }, admin.token), 'prepare Storage cleanup')
+  check(cleanup.retained === false && cleanup.paths?.includes(objectPath), 'Unreferenced image missing from cleanup plan')
   accepted(await http('/storage/v1/object/restaurant-assets', { method: 'DELETE', token: admin.token, body: { prefixes: [objectPath] } }), 'Storage owner delete')
   const removedImage = await http(`/storage/v1/object/public/restaurant-assets/${objectPath}`, { method: 'GET' })
   check([400, 404].includes(removedImage.status), 'Storage owner delete did not remove the uploaded image')

@@ -31,7 +31,7 @@ Deno.test("admin client sends only the explicitly selected secret key", async ()
       );
     };
 
-    const { error } = await createAdminClient().rpc("test_admin_rpc");
+    const { error } = await createAdminClient().rpc("get_actor_authorization");
 
     assertEquals(error, null);
     assertEquals(apiKey, "sb_secret_selected_value");

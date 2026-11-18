@@ -1,0 +1,79 @@
+{
+  "date": "2026-11-17",
+  "productionMutations": false,
+  "scope": "Local functional verification; Docker stack and external service integration pending in CI/staging",
+  "database": {
+    "suites": 30,
+    "assertions": 1261,
+    "failed": 0
+  },
+  "upgrade": {
+    "database": "PostgreSQL 17.11 local",
+    "oldPublicRpcCount": 63,
+    "newPublicRpcCount": 70,
+    "oldRpcSignaturesDefaultsReturnTypesSecurityDefinerAndGrantsPreserved": true,
+    "fixtureTablesWithIdenticalRowDigests": [
+      "members",
+      "families",
+      "products",
+      "profiles",
+      "categories",
+      "restaurants"
+    ],
+    "historicalInvitationPreserved": true,
+    "migrations": [
+      "202611170001_payment_maintenance_hardening.sql",
+      "202611170002_asset_hours_integrity.sql",
+      "202611170003_public_catalog_preview.sql",
+      "202611170004_invitation_delivery_outbox.sql"
+    ]
+  },
+  "vitest": {
+    "files": 72,
+    "passed": 585
+  },
+  "deno": 121,
+  "nodeOperations": 12,
+  "chromium": {
+    "passed": 85,
+    "serviceConnectedSkipped": 4
+  },
+  "mobilePerformance": [
+    {
+      "scenario": "public menu meets mobile Web Vitals budgets under slow network and 4x CPU",
+      "passed": true,
+      "lcpMs": 2060,
+      "cls": 0,
+      "longestInitialTaskMs": 142
+    },
+    {
+      "scenario": "public storefront meets mobile Web Vitals budgets under slow network and 4x CPU",
+      "passed": true,
+      "lcpMs": 2056,
+      "cls": 0,
+      "longestInitialTaskMs": 130
+    }
+  ],
+  "concurrency": {
+    "suites": 9,
+    "scenarios": 64
+  },
+  "backup": {
+    "scenarios": 5,
+    "storageTransport": "simulated",
+    "postgres": "17.11"
+  },
+  "npmAudit": {
+    "source": "registry.npmjs.org",
+    "installed": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 6,
+      "critical": 0,
+      "total": 6
+    },
+    "production": 0,
+    "advisory": "GHSA-fc5q-39xc-vjpf"
+  }
+}

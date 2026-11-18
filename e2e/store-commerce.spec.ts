@@ -26,6 +26,66 @@ const summary = { order: { actionId, displayNumber: 'CM-001', status: 'generated
 async function fixture(page: Page) {
   await routePublicCatalog(page, catalog, 'casa-movil', 'store')
 }
+
+async function observeStoreMount(page: Page, holdInitialFrame = false) {
+  await page.addInitScript(({ holdInitialFrame }) => {
+    const stages: { busy: boolean; cards: number }[] = []
+    Object.defineProperty(window, '__storeMountStages', { value: stages })
+    const pending = () => document.querySelector('#store-catalog[aria-busy="true"]') !== null
+    new MutationObserver(() => {
+      if (!document.querySelector('#store-title')) return
+      const main = document.querySelector('#store-catalog')
+      if (main) stages.push({ busy: main.getAttribute('aria-busy') === 'true', cards: main.querySelectorAll('.store-product-card').length })
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] })
+    if (!holdInitialFrame) return
+    const frame = window.requestAnimationFrame.bind(window)
+    const timeout = window.setTimeout.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (pending()) timeout(() => callback(time), 1_000)
+      else callback(time)
+    })
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) =>
+      timeout(handler, delay === 100 && pending() ? 1_000 : delay, ...args)) as typeof window.setTimeout
+  }, { holdInitialFrame })
+}
+
+for (const input of ['keyboard', 'wheel'] as const) {
+  test(`initial store paint keeps ${input} navigation responsive before the catalog frame`, async ({ page }) => {
+    await fixture(page)
+    await observeStoreMount(page, true)
+    await page.goto('/t/casa-movil')
+    await expect.poll(() => page.evaluate(() => document.querySelector('#store-catalog')?.getAttribute('aria-busy')), { intervals: [10] }).toBe('true')
+    if (input === 'keyboard') {
+      await page.keyboard.press('Tab')
+      await expect(page.getByRole('link', { name: 'Ir a los productos' })).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.locator('#store-catalog')).toBeFocused()
+    } else {
+      await page.mouse.wheel(0, 600)
+    }
+    await expect(page.locator('#store-catalog')).toHaveAttribute('aria-busy', 'false', { timeout: 500 })
+    await expect(page.getByRole('heading', { name: 'Funda de silicona' })).toHaveCount(1)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+    const stages = await page.evaluate(() => (window as Window & { __storeMountStages: { busy: boolean; cards: number }[] }).__storeMountStages)
+    expect(stages.some(stage => stage.busy && stage.cards === 0)).toBe(true)
+    expect(stages.some(stage => !stage.busy && stage.cards > 0)).toBe(true)
+  })
+}
+
+for (const mode of ['reduced-motion', 'saved-scroll', 'hash-target', 'filtered'] as const) {
+  test(`store ${mode} renders the complete catalog without an intermediate mount`, async ({ page }) => {
+    await fixture(page)
+    await observeStoreMount(page)
+    if (mode === 'reduced-motion') await page.emulateMedia({ reducedMotion: 'reduce' })
+    else if (mode === 'saved-scroll') await page.addInitScript(() => sessionStorage.setItem('mozzi:store-scroll:casa-movil:/t/casa-movil', '0'))
+    await page.goto(`/t/casa-movil${mode === 'hash-target' ? '#store-products' : mode === 'filtered' ? '?q=Funda' : ''}`)
+    await expect(page.getByRole('heading', { name: 'Funda de silicona' })).toHaveCount(1)
+    const stages = await page.evaluate(() => (window as Window & { __storeMountStages: { busy: boolean; cards: number }[] }).__storeMountStages)
+    expect(stages.some(stage => stage.busy)).toBe(false)
+    expect(stages.some(stage => stage.cards > 0)).toBe(true)
+  })
+}
+
 async function addRedVariant(page: Page, testInfo?: TestInfo) {
   await page.goto('/t/casa-movil')
   await expect(page.getByRole('heading', { name: 'Funda de silicona' })).toHaveCount(1)

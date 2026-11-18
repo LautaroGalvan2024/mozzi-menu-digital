@@ -133,8 +133,8 @@ test.describe('flexible catalog import', () => {
       await page.goto('/admin/catalogo/importar')
       await page.getByRole('button', { name: 'Sólo imágenes', exact: true }).click()
       const png = await page.evaluate(() => {
-        const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2
-        const context = canvas.getContext('2d')!; context.fillStyle = '#f08010'; context.fillRect(0, 0, 2, 2)
+        const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 800
+        const context = canvas.getContext('2d')!; context.fillStyle = '#f08010'; context.fillRect(0, 0, canvas.width, canvas.height)
         return canvas.toDataURL('image/png').split(',')[1]!
       })
       const zip = new JSZip().file('carpeta/000123.png', Buffer.from(png, 'base64')).file('carpeta/8445290067401_alimento.png', Buffer.from(png, 'base64'))

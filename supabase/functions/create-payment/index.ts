@@ -2,7 +2,7 @@ import { getRateLimitSecret, getSupabaseUrl } from "../_shared/config.ts";
 import { hmacSha256Hex, randomToken, sha256Hex } from "../_shared/crypto.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError } from "../_shared/errors.ts";
-import { readJson, safeLog, serve } from "../_shared/http.ts";
+import { safeLog, serve } from "../_shared/http.ts";
 import { assertCheckoutUrl } from "../_shared/mercadopago-core.ts";
 import {
   beginPaymentCheckout,
@@ -35,9 +35,10 @@ const beginSchema = z.object({
 });
 
 serve({
+  name: "create-payment",
   maxBodyBytes: 192 * 1024,
   handler: async (request, context) => {
-    const input = parseInput(createOrderSchema, await readJson(request, 192 * 1024));
+    const input = parseInput(createOrderSchema, await context.readJson());
     if (input.channel !== "store" || input.checkoutMode !== "online") {
       throw new ApiError(422, "CHECKOUT_MODE_INVALID", "Elegí el pago online de la tienda.");
     }

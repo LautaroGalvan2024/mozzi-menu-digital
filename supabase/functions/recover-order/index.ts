@@ -2,7 +2,7 @@ import { createAdminClient } from "../_shared/clients.ts";
 import { getAppBaseUrl, getRateLimitSecret } from "../_shared/config.ts";
 import { hmacSha256Hex, sha256Hex } from "../_shared/crypto.ts";
 import { databaseApiError } from "../_shared/errors.ts";
-import { readJson, serve } from "../_shared/http.ts";
+import { serve } from "../_shared/http.ts";
 import {
   orderConfirmationResponse,
   parseRecoveryRequest,
@@ -14,9 +14,10 @@ import { clientIp } from "../_shared/request-meta.ts";
 const MAX_BODY_BYTES = 4 * 1_024;
 
 serve({
+  name: "recover-order",
   maxBodyBytes: MAX_BODY_BYTES,
-  handler: async (request) => {
-    const input = parseRecoveryRequest(await readJson(request, MAX_BODY_BYTES));
+  handler: async (request, context) => {
+    const input = parseRecoveryRequest(await context.readJson());
     const admin = createAdminClient();
     const ipHash = await hmacSha256Hex(
       getRateLimitSecret(),

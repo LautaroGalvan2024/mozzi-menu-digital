@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { subscribeCatalogInvalidations } from '../../lib/catalog-cache'
 import type { CommerceChannel } from '../../lib/commerce-channel'
 import { env } from '../../lib/env'
@@ -19,6 +19,24 @@ import {
   PublicCatalogCategoryInvalidError,
   PublicCatalogCursorStaleError,
 } from './api'
+
+// React rechecks the clock before committing a retained page, including after a
+// suspended browser tab resumes. The timeout wakes a page with no other updates.
+function useSnapshotIsCurrent(expiresAt: number | null) {
+  const read = useCallback(() => expiresAt === null || expiresAt > Date.now(), [expiresAt])
+  const subscribe = useCallback((notify: () => void) => {
+    if (expiresAt === null || !Number.isFinite(expiresAt)) return () => {}
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const check = () => {
+      const remaining = expiresAt - Date.now()
+      if (remaining <= 0) notify()
+      else timeout = setTimeout(check, Math.min(remaining, 2_147_000_000))
+    }
+    check()
+    return () => clearTimeout(timeout)
+  }, [expiresAt])
+  return useSyncExternalStore(subscribe, read)
+}
 
 export function publicCatalogMetaQueryOptions(slug: string, channel: CommerceChannel) {
   return queryOptions({
@@ -253,6 +271,37 @@ export function usePublicStoreCatalog(
     pages.data.pages.every(page => page.revision === meta.data!.revision),
   )
 
+  // Keep a settled result on screen while another filter is loading. This is
+  // display-only: cursors and pagination always belong to the active query.
+  const [lastSnapshot, setLastSnapshot] = useState<{
+    slug: string
+    section: PublicStoreCatalogSection
+    categoryId: string
+    search: string
+    limit: number
+    revision: number
+    receivedAt: number
+    pages: NonNullable<typeof pages.data>
+  } | null>(null)
+  useEffect(() => {
+    if (consistent && slug && meta.data && pages.data) {
+      setLastSnapshot({ slug, section, categoryId, search: normalizedSearch, limit: normalizedLimit, revision: meta.data.revision, receivedAt: Date.now(), pages: pages.data })
+    }
+  }, [categoryId, consistent, meta.data, normalizedLimit, normalizedSearch, pages.data, section, slug])
+
+  const snapshotFirstPage = lastSnapshot?.pages.pages[0]
+  const snapshotExpiresAt = snapshotFirstPage?.validUntil && snapshotFirstPage.serverNow
+    ? (snapshotFirstPage.clientAnchorAt ?? lastSnapshot!.receivedAt) + Date.parse(snapshotFirstPage.validUntil) - Date.parse(snapshotFirstPage.serverNow)
+    : null
+  const snapshotIsCurrent = useSnapshotIsCurrent(snapshotExpiresAt)
+  const retainedSnapshot = enabled && lastSnapshot && lastSnapshot.slug === slug && lastSnapshot.revision === meta.data?.revision &&
+    snapshotIsCurrent ? lastSnapshot : null
+  const visiblePages = consistent ? pages.data : retainedSnapshot?.pages
+  const isShowingPreviousResults = Boolean(!consistent && retainedSnapshot && (
+    retainedSnapshot.section !== section || retainedSnapshot.categoryId !== categoryId ||
+    retainedSnapshot.search !== normalizedSearch || retainedSnapshot.limit !== normalizedLimit
+  ))
+
   useEffect(() => {
     if (!pages.error || !(pages.error instanceof PublicCatalogCursorStaleError) || staleReset.current) return
     staleReset.current = true
@@ -326,17 +375,17 @@ export function usePublicStoreCatalog(
     })
   }, [client, meta.data?.restaurant.id, slug])
 
-  const visiblePages = consistent ? pages.data : undefined
   return {
     meta,
-    pages: { ...pages, data: visiblePages },
+    pages: { ...pages, data: visiblePages, hasNextPage: consistent && pages.hasNextPage },
     groups: visiblePages?.pages.flatMap(page => page.items) ?? [],
-    isLoading: !consistent && !meta.error && !pages.error,
+    isLoading: !visiblePages && lastSnapshot?.slug !== slug && !meta.error && !pages.error,
+    isShowingPreviousResults,
     isUpdating:
-      Boolean(meta.data && pages.data && !consistent) ||
+      Boolean(meta.data && !consistent && !pages.error) ||
       (meta.isFetching && !meta.isLoading) ||
       (pages.isFetching && !pages.isFetchingNextPage),
-    refreshError: consistent ? meta.error ?? pages.error ?? revision.error : null,
+    refreshError: meta.data ? meta.error ?? pages.error ?? revision.error : null,
     serverNow: visiblePages?.pages[0]?.serverNow ?? null,
     validUntil: visiblePages?.pages[0]?.validUntil ?? null,
   }

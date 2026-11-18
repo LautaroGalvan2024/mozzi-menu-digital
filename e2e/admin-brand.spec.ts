@@ -75,6 +75,28 @@ const screens: { key: string; route: string; title: string; account: Account }[]
 
 test.describe('administrative identity across secondary screens', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'Uses only synthetic sessions and e2e.invalid read mocks.')
+  test('an administrator can retry a pending invitation without changing the membership', async ({ page }) => {
+    await readOnlyFixture(page, 'admin')
+    const membership = { id: '73000000-0000-4000-8000-000000000003', user_id: staffId, role: 'order_manager', status: 'invited', created_at: '2026-10-27T12:00:00Z' }
+    await page.route('https://e2e.invalid/rest/v1/restaurant_members?**', async route => {
+      if (new URL(route.request().url()).searchParams.has('user_id')) return route.fallback()
+      await route.fulfill({ json: [membership] })
+    })
+    const attempts: unknown[] = []
+    await page.route('https://e2e.invalid/functions/v1/invite-restaurant-user', async route => {
+      attempts.push(route.request().postDataJSON())
+      await route.fulfill({ json: { invitationSent: attempts.length === 2, deliveryPending: attempts.length === 1 } })
+    })
+    await page.goto('/admin/usuarios')
+    const resend = page.getByRole('button', { name: 'Reenviar invitación' })
+    await resend.click()
+    await expect(page.getByRole('status').filter({ hasText: 'El acceso quedó guardado' })).toBeVisible()
+    await resend.click()
+    await expect(page.getByRole('status').filter({ hasText: 'Invitación enviada por correo' })).toBeVisible()
+    const body = { restaurantId: commerceId, resendUserId: staffId, role: 'order_manager' }
+    expect(attempts).toEqual([body, body])
+  })
+
   test('uploads a portrait cover within database bounds and removes every generated variant', async ({ page }) => {
     const fixture = await readOnlyFixture(page, 'admin')
     const uploads = new Map<string, Buffer>()
@@ -100,9 +122,14 @@ test.describe('administrative identity across secondary screens', () => {
       } else if (request.method() === 'GET' && path.startsWith('/storage/v1/object/public/restaurant-assets/')) {
         const bytes = uploads.get(path.replace('/storage/v1/object/public/restaurant-assets/', ''))
         await route.fulfill({ status: bytes ? 200 : 404, contentType: 'image/webp', body: bytes ?? '' })
+      } else if (request.method() === 'POST' && path === '/rest/v1/rpc/prepare_image_asset_cleanup') {
+        expect(request.postDataJSON().p_restaurant_id).toBe(commerceId)
+        expect(uploads.has(request.postDataJSON().p_path)).toBe(true)
+        expect(fixture.restaurant.cover_path).toBeNull()
+        await route.fulfill({ json: { paths: [...uploads.keys()], retained: false } })
       } else if (request.method() === 'DELETE' && path === '/storage/v1/object/restaurant-assets') {
         removed.push(...request.postDataJSON().prefixes)
-        await route.fulfill({ json: [] })
+        await route.fulfill({ json: removed.map(name => ({ name })) })
       } else if (request.method() === 'PATCH' && path === '/rest/v1/image_assets') {
         await route.fulfill({ status: 204 })
       } else await route.fallback()
@@ -120,9 +147,9 @@ test.describe('administrative identity across secondary screens', () => {
     const cover = page.getByRole('img', { name: 'Portada actual' })
     await expect(cover).toBeVisible()
     expect(dimensions.map(({ width, height }) => ({ width, height }))).toEqual([
-      { width: 320, height: 328 }, { width: 640, height: 656 }, { width: 1171, height: 1200 },
+      { width: 320, height: 328 }, { width: 485, height: 497 },
     ])
-    await expect(cover).toHaveAttribute('srcset', /320w, .*640w, .*1171w$/)
+    await expect(cover).toHaveAttribute('srcset', /320w, .*485w$/)
     await expect(page.getByRole('alert')).toHaveCount(0)
     page.on('dialog', dialog => dialog.accept())
     await page.getByRole('button', { name: 'Eliminar' }).click()
