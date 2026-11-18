@@ -95,14 +95,14 @@ export function LoginPage() {
     >
       <form className="space-y-5" onSubmit={submit} noValidate>
         <label className="field">
-          <span>Correo</span>
-          <input type="email" autoComplete="email" {...form.register('email')} />
-          {form.formState.errors.email ? <small>{form.formState.errors.email.message}</small> : null}
+          <span id="login-email-label">Correo</span>
+          <input type="email" autoComplete="email" aria-labelledby="login-email-label" aria-invalid={Boolean(form.formState.errors.email)} aria-describedby={form.formState.errors.email ? 'login-email-error' : undefined} {...form.register('email')} />
+          {form.formState.errors.email ? <small id="login-email-error" role="alert">{form.formState.errors.email.message}</small> : null}
         </label>
         <label className="field">
-          <span>Contraseña</span>
-          <input type="password" autoComplete="current-password" {...form.register('password')} />
-          {form.formState.errors.password ? <small>{form.formState.errors.password.message}</small> : null}
+          <span id="login-password-label">Contraseña</span>
+          <input type="password" autoComplete="current-password" aria-labelledby="login-password-label" aria-invalid={Boolean(form.formState.errors.password)} aria-describedby={form.formState.errors.password ? 'login-password-error' : undefined} {...form.register('password')} />
+          {form.formState.errors.password ? <small id="login-password-error" role="alert">{form.formState.errors.password.message}</small> : null}
         </label>
         {serverError ? <p className="form-error" role="alert">{serverError}</p> : null}
         <button className="button-primary w-full" disabled={form.formState.isSubmitting} type="submit">

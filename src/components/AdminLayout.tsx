@@ -79,7 +79,7 @@ export function AdminLayout() {
         {!isManager ? <div className="admin-nav-secondary">{secondaryGroups.map(group => {
           const active = group.links.some(link => location.pathname === link.to)
           const Icon = group.icon
-          return <details className="admin-nav-group" key={`${group.label}:${active}`} open={active || undefined}>
+          return <details className={`admin-nav-group ${active ? 'has-active' : ''}`} key={`${group.label}:${active}`} open={active || undefined}>
             <summary><Icon aria-hidden /><span>{group.label}</span><ChevronDown className="admin-nav-chevron" aria-hidden /></summary>
             <div>{group.links.map(link => <NavLink key={link.to} to={link.to} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}>{link.label}</NavLink>)}</div>
           </details>
@@ -95,9 +95,9 @@ export function AdminLayout() {
     <div className="admin-workspace" inert={open}>
       <header className="admin-topbar">
         <button ref={menuButton} className="icon-button lg:hidden" type="button" onClick={() => setOpen(true)} aria-label="Abrir navegación" aria-expanded={open} aria-controls="admin-navigation"><Menu className="h-5 w-5" aria-hidden /></button>
-        <div className="admin-breadcrumb"><span>{scope.selected?.name}</span><span aria-hidden>/</span><strong>{currentSection}</strong></div>
+        <nav className="admin-breadcrumb" aria-label="Ubicación en el panel"><span>{scope.selected?.name}</span><span aria-hidden>/</span><strong>{currentSection}</strong></nav>
         <span className="ml-auto sm:hidden"><MozziBrand compact /></span>
-        <span className="admin-workspace-label">Panel de gestión</span>
+        <span className="admin-workspace-label"><LayoutDashboard aria-hidden />Panel de gestión</span>
       </header>
       <main id="admin-content" tabIndex={-1} className="admin-content"><Outlet key={scope.selected?.id} /></main>
     </div>

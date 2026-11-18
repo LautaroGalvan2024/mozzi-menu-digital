@@ -37,13 +37,13 @@ export function ClaimOrderPage() {
   if (query.isLoading) return <LoadingScreen label="Verificando acceso al pedido…" />
   if (query.error || !query.data) return <main className="page-shell py-16"><ErrorPanel title="No pudimos abrir el pedido">{query.error?.message ?? 'Enlace inválido.'}</ErrorPanel></main>
   const order = query.data
-  return <main className="min-h-screen bg-stone-100 p-4 py-8">
+  return <main className="admin-app min-h-screen bg-[#f7f8fa] px-4 py-8 text-[#24272e] sm:py-12">
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
         <div><p className="text-xs font-bold uppercase tracking-[.18em] text-orange-700">Acceso operativo seguro</p><h1 className="font-display text-3xl font-bold">{order.displayNumber}</h1></div>
         <LockKeyhole className="h-8 w-8 text-stone-400" aria-hidden />
       </div>
-      <section className="overflow-hidden rounded-[2rem] border border-stone-200 bg-white shadow-lg">
+      <section className="overflow-hidden rounded-[10px] border border-[#e6e8ec] bg-white shadow-xs">
         <div className="border-b border-stone-200 p-6"><div className="flex flex-wrap justify-between gap-3">
           <div><p className="text-sm text-stone-500">Cliente</p><h2 className="font-display text-xl font-bold">{order.customerName}</h2>
             <a className="text-sm font-semibold text-orange-700 underline" href={`tel:${order.customerPhone}`}>{order.customerPhone}</a>

@@ -1,2 +1,15 @@
+import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router'
-export function NotFoundPage(){return <main className="grid min-h-screen place-items-center bg-stone-100 p-4"><div className="text-center"><p className="font-display text-8xl font-bold text-orange-600">404</p><h1 className="mt-4 font-display text-3xl font-bold">No encontramos esa página</h1><Link className="button-primary mt-6" to="/">Volver al inicio</Link></div></main>}
+import { MozziBrand } from '../components/MozziBrand'
+import './not-found.css'
+
+export function NotFoundPage() {
+  return <main className="not-found">
+    <div className="not-found-content">
+      <MozziBrand />
+      <p className="not-found-code">404</p>
+      <h1>No encontramos esa página</h1>
+      <Link to="/" className="not-found-home"><ArrowLeft size={17} aria-hidden /> Volver al inicio</Link>
+    </div>
+  </main>
+}

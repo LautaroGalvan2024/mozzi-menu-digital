@@ -11,6 +11,7 @@ import { useRestaurantScope } from './RestaurantScope'
 import { useRestaurant } from './useRestaurant'
 import { orderMetricsSchema } from '../orders/orderMetrics'
 import { PublicChannelsCard } from './PublicChannelsCard'
+import { AdminMetric } from '../../components/AdminMetric'
 
 export function AdminDashboardPage() {
   const scope = useRestaurantScope()
@@ -57,15 +58,11 @@ export function AdminDashboardPage() {
   ] as const
   return <>
     <PageHeader eyebrow={selected.name} title="Resumen" description="Una mirada a la actividad de tu comercio hoy." actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos<ArrowUpRight className="h-4 w-4" aria-hidden /></Link>} />
-    <section aria-label="Resumen del día" className="surface-card overflow-hidden">
-      <div className="grid grid-cols-2 xl:grid-cols-4">
-        {metricsSummary.map((metric, index) => <article key={metric.label} className={`min-w-0 p-4 sm:p-6 ${index > 0 ? 'xl:border-l xl:border-stone-200' : ''} ${index % 2 ? 'border-l border-stone-200' : ''} ${index > 1 ? 'border-t border-stone-200 xl:border-t-0' : ''}`}>
-          <h2 className="min-h-10 text-sm font-medium text-stone-500 xl:min-h-0">{metric.label}</h2>
-          <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-stone-900 tabular-nums sm:text-[1.75rem]">{metric.value}</p>
-          <p className="mt-2 text-xs text-stone-500">{metric.detail}</p>
-        </article>)}
+    <section aria-label="Resumen del día">
+      <div className="admin-metric-grid admin-overview-grid">
+        {metricsSummary.map((metric, index) => <AdminMetric key={metric.label} {...metric} amount={index > 1} />)}
       </div>
-      <p className="border-t border-stone-100 px-5 py-3 text-xs leading-5 text-stone-500 sm:px-6">Según el horario local del comercio. Los importes corresponden a pedidos, no confirman cobros ni reintegros.</p>
+      <p className="admin-metric-note">Según el horario local del comercio. Los importes corresponden a pedidos, no confirman cobros ni reintegros.</p>
     </section>
 
     <section aria-label="Accesos del comercio" className="my-6 grid gap-3 sm:grid-cols-2">

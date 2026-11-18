@@ -1,4 +1,4 @@
-import { Minus, Package, Plus, X } from 'lucide-react'
+import { Minus, Package, Plus, Utensils, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { formatMoney, currentProductPrice } from '../../lib/money'
 import { calculateQuantityPricing, effectiveQuantityPrices } from '../../lib/quantity-pricing'
@@ -127,7 +127,7 @@ function ProductConfiguration({ product, variants, onVariantChange, restaurant, 
           ) : restaurant.channel === 'store' ? (
             <div className="grid h-32 place-items-center bg-stone-100 sm:h-44"><Package className="h-14 w-14 text-stone-400" aria-hidden /><span className="sr-only">Producto sin foto</span></div>
           ) : (
-            <div className="grid h-44 place-items-center bg-orange-50 text-5xl sm:h-56" role="img" aria-label="Sin imagen">🍽️</div>
+            <div className="grid h-44 place-items-center bg-orange-50 text-5xl sm:h-56" role="img" aria-label="Sin imagen"><Utensils aria-hidden /></div>
           )}
           <div className="p-5 pb-6 sm:p-7 sm:pb-8">
             <div className="pr-10">

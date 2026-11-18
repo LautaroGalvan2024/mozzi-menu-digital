@@ -1,6 +1,7 @@
 import { commercePath, useCommerceChannel, type CommerceChannel } from '../../lib/commerce-channel'
 import { CheckCircle2, Clipboard, ExternalLink } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { QueryClientContext } from '@tanstack/react-query'
+import { useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { formatMoney } from '../../lib/money'
@@ -9,6 +10,11 @@ import { whatsappWebUrl } from '../../lib/phone'
 import { supabase } from '../../lib/supabase/client'
 import { generatedOrderSchema } from '../../lib/validation/schemas'
 import { useCart } from '../cart/CartProvider'
+import { queryKeys } from '../../lib/queryKeys'
+import type { PublicCatalogMeta, PublicMenu } from '../../types/domain'
+import { MenuIdentity } from '../public-menu/MenuIdentity'
+import '../public-menu/menu-experience.css'
+import '../store/store-purchase.css'
 
 export function OrderGeneratedPage() {
   const { restaurantSlug = '' } = useParams()
@@ -20,6 +26,19 @@ function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceC
   const location = useLocation()
   const navigate = useNavigate()
   const cart = useCart()
+  // Reuse only public identity already loaded for this commerce. Confirmation
+  // and recovery never issue a new catalog request for decorative information.
+  const queryClient = useContext(QueryClientContext)
+  const cachedRestaurant = queryClient?.getQueryData<PublicCatalogMeta>(queryKeys.publicCatalog.meta(slug, channel))?.restaurant
+    ?? queryClient?.getQueriesData<PublicMenu>({ queryKey: queryKeys.publicCatalog.menu(slug, channel) })
+      .map(([, data]) => data?.restaurant)
+      .find(restaurant => restaurant?.slug === slug && (restaurant.channel ?? 'menu') === channel)
+  const brandStyle = cachedRestaurant ? {
+    '--brand': cachedRestaurant.primaryColor,
+    '--brand-secondary': cachedRestaurant.secondaryColor,
+    '--store-brand': cachedRestaurant.primaryColor,
+    '--store-accent': cachedRestaurant.secondaryColor,
+  } as CSSProperties : undefined
   const [initial] = useState(() => generatedOrderSchema.safeParse(location.state))
   const [generated, setGenerated] = useState(() => initial.success ? initial.data : null)
   const [reference] = useState(() => readOrderRecovery(slug, Date.now(), channel))
@@ -61,7 +80,7 @@ function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceC
   }, [cart, generated, initial.success, location.pathname, location.state, navigate])
 
   if (recovering && !generated) return <LoadingScreen label="Recuperando la confirmación…" />
-  if (!generated) return <main className="page-shell py-16"><ErrorPanel title="Esta confirmación no está disponible">{recoveryError ?? 'El acceso temporal venció o no está guardado en este dispositivo. Revisá WhatsApp o consultá al comercio antes de generar otro pedido.'}<div className="mt-4 flex flex-wrap gap-3">{reference ? <button className="button-primary" disabled={recovering} onClick={() => void recover()}>Reintentar recuperación</button> : null}<Link className="button-secondary" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div></ErrorPanel></main>
+  if (!generated) return <main className={`page-shell py-16 ${channel === 'menu' ? 'menu-experience menu-state' : 'store-confirmation'}`} style={brandStyle}><ErrorPanel title="Esta confirmación no está disponible">{recoveryError ?? 'El acceso temporal venció o no está guardado en este dispositivo. Revisá WhatsApp o consultá al comercio antes de generar otro pedido.'}<div className="mt-4 flex flex-wrap gap-3">{reference ? <button className="button-primary" disabled={recovering} onClick={() => void recover()}>Reintentar recuperación</button> : null}<Link className="button-secondary" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div></ErrorPanel></main>
   const orderResult = generated
   const stillPending = ['generated', 'whatsapp_opened'].includes(orderResult.order.status)
   const priceChanged = orderResult.estimatedTotalCents !== undefined && orderResult.estimatedTotalCents !== orderResult.order.totalCents
@@ -93,7 +112,8 @@ function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceC
     catch { setCopied(false); setCopyError(true) }
   }
 
-  return <main className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#ffe2d3,transparent_45%),#f7f4ef] p-4"><section className="w-full max-w-xl rounded-[2rem] bg-white p-6 text-center shadow-2xl shadow-stone-900/10 sm:p-9">
+  return <main className={`grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#ffe2d3,transparent_45%),#f7f4ef] p-4 ${channel === 'menu' ? 'menu-experience menu-confirmation' : 'store-confirmation'}`} style={brandStyle}><section className="w-full max-w-xl rounded-[2rem] bg-white p-6 text-center shadow-2xl shadow-stone-900/10 sm:p-9">
+    {cachedRestaurant ? channel === 'menu' ? <MenuIdentity restaurant={cachedRestaurant} /> : <p className="store-confirmation-identity">{cachedRestaurant.tradeName}</p> : null}
     <CheckCircle2 className="mx-auto h-16 w-16 text-emerald-600" aria-hidden /><p className="mt-5 text-xs font-bold uppercase tracking-[.2em] text-orange-700">{initial.success ? 'Pedido generado' : 'Pedido recuperado'}</p><h1 className="mt-2 font-display text-4xl font-bold">{orderResult.order.displayNumber}</h1><p className="mt-3 text-lg font-bold">{formatMoney(orderResult.order.totalCents, orderResult.order.currencyCode)}</p>
     <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-stone-600">{stillPending ? 'Todavía falta enviarlo por WhatsApp. Luego, el comercio debe aceptarlo para que quede confirmado.' : `Este pedido ya está ${statusLabels[orderResult.order.status]}. Se recuperó el mismo pedido, sin crear otro.`}</p>
     {priceChanged ? <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-left" role="alert"><p>El total cambió desde la estimación de {formatMoney(orderResult.estimatedTotalCents!, orderResult.order.currencyCode)}. El total registrado es {formatMoney(orderResult.order.totalCents, orderResult.order.currencyCode)}.</p><label className="mt-3 flex gap-2 text-sm"><input type="checkbox" checked={priceAccepted} onChange={event => setPriceAccepted(event.target.checked)} />Revisé el detalle y acepto el total actualizado antes de enviarlo.</label><p className="mt-2 text-xs">Si no lo aceptás, consultá al comercio por este número de pedido.</p></div> : null}

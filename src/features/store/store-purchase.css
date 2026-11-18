@@ -2,10 +2,8 @@
   --store-brand: #18181b;
   --store-accent: #f4f4f5;
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--store-accent) 45%, transparent) 0, transparent 26rem),
-    #f6f7f8;
-  color: #18181b;
+  background: #f7f5ef;
+  color: #252820;
 }
 
 .store-purchase .store-purchase-shell {
@@ -23,7 +21,7 @@
 
 .store-purchase-steps {
   margin-top: 1rem;
-  border-bottom: 1px solid #e4e4e7;
+  border-bottom: 1px solid #deded3;
   padding-bottom: 1rem;
 }
 
@@ -93,16 +91,17 @@
 }
 
 .store-purchase .store-purchase-heading h1 {
-  color: #18181b;
-  letter-spacing: -.035em;
+  color: #252820;
+  font-weight: 600;
+  letter-spacing: -.045em;
 }
 
 .store-purchase .store-surface-card,
 .store-purchase .form-card {
-  border: 1px solid #e4e4e7;
-  border-radius: 1.25rem;
-  background: rgba(255, 255, 255, .98);
-  box-shadow: 0 1px 2px rgba(24, 24, 27, .04), 0 12px 35px rgba(24, 24, 27, .035);
+  border: 1px solid #e1dfd6;
+  border-radius: .75rem;
+  background: #fff;
+  box-shadow: none;
 }
 
 .store-purchase .form-card {
@@ -111,13 +110,17 @@
 
 .store-purchase .form-card-title {
   font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -.02em;
 }
 
 .store-purchase .field input,
 .store-purchase .field select,
 .store-purchase .field textarea {
-  border-color: #d4d4d8;
+  border-color: #d4d5ca;
+  border-radius: .5rem;
   background: #fff;
+  box-shadow: none;
 }
 
 .store-purchase .field input:focus,
@@ -129,19 +132,23 @@
 
 .store-purchase .choice-card {
   min-height: 4.5rem;
-  border-radius: 1rem;
+  border-radius: .5rem;
   background: #fff;
 }
 
+.store-purchase .choice-card > svg { color: var(--store-brand); }
+.store-purchase .choice-card input { accent-color: var(--store-brand); }
+.store-purchase :focus-visible { outline: 3px solid color-mix(in srgb, var(--store-brand) 65%, #686c62); outline-offset: 3px; }
+
 .store-purchase .choice-card-selected {
   border-color: color-mix(in srgb, var(--store-brand) 72%, #18181b);
-  background: color-mix(in srgb, var(--store-accent) 32%, #fff);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--store-brand) 12%, transparent);
+  background: color-mix(in srgb, var(--store-brand) 4%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--store-brand) 50%, transparent);
 }
 
 .store-cart-line {
-  border-radius: 1.25rem;
-  box-shadow: 0 1px 2px rgba(24, 24, 27, .04);
+  border-radius: .75rem;
+  box-shadow: none;
 }
 
 .store-cart-line-media {
@@ -151,11 +158,12 @@
 
 .store-cart-summary,
 .store-checkout-summary {
-  border: 1px solid #dedee3;
-  border-radius: 1.25rem;
-  background: rgba(255, 255, 255, .98);
-  color: #18181b;
-  box-shadow: 0 14px 40px rgba(24, 24, 27, .1);
+  border: 1px solid #d4d5ca;
+  border-top: 3px solid color-mix(in srgb, var(--store-brand) 16%, #252820);
+  border-radius: .75rem;
+  background: #fdfcf8;
+  color: #252820;
+  box-shadow: 0 6px 24px rgb(37 40 32 / .05);
 }
 
 .store-purchase .store-primary-action {
@@ -164,12 +172,12 @@
   width: 100%;
   align-items: center;
   justify-content: center;
-  border-radius: .9rem;
-  border: 1px solid color-mix(in srgb, var(--store-brand) 42%, #18181b);
-  background: color-mix(in srgb, var(--store-brand) 26%, #18181b);
+  border-radius: .5rem;
+  border: 1px solid color-mix(in srgb, var(--store-brand) 16%, #252820);
+  background: color-mix(in srgb, var(--store-brand) 16%, #252820);
   padding: .75rem 1rem;
   color: #fff;
-  font-weight: 800;
+  font-weight: 650;
   text-decoration: none;
   transition: transform .15s ease, background-color .15s ease;
 }
@@ -351,12 +359,103 @@
 
 @media (min-width: 1024px) {
   .store-checkout-mobile-summary > summary {
-    display: none;
+    margin-top: .85rem;
   }
 
-  .store-checkout-mobile-summary:not([open]) > :not(summary) {
-    display: block;
+  .store-checkout-mobile-summary > summary strong {
+    font-size: 1.3rem;
+    font-variant-numeric: tabular-nums;
   }
+}
+
+.store-payment,
+.store-confirmation {
+  min-height: 100dvh;
+  background: #f7f5ef;
+  color: #252820;
+}
+
+.store-payment-card,
+.store-confirmation > section {
+  border: 1px solid #e1dfd6;
+  border-radius: .85rem;
+  box-shadow: 0 8px 32px rgb(37 40 32 / .04);
+}
+
+.store-payment-header h1,
+.store-confirmation h1 {
+  font-weight: 600;
+  letter-spacing: -.045em;
+  text-wrap: balance;
+}
+
+.store-payment-order,
+.store-payment-next,
+.store-confirmation details {
+  border-radius: .6rem;
+}
+
+.store-payment-order {
+  border-color: #e1dfd6;
+  background: #f7f5ef;
+}
+
+.store-payment .button-primary,
+.store-confirmation .button-primary {
+  border-color: #252820;
+  border-radius: .5rem;
+  background: #252820;
+  box-shadow: none;
+  color: #fff;
+}
+
+.store-payment .button-secondary,
+.store-confirmation .button-secondary {
+  border-color: #d4d5ca;
+  border-radius: .5rem;
+  background: #fff;
+  box-shadow: none;
+}
+
+.store-payment :focus-visible,
+.store-confirmation :focus-visible {
+  outline: 3px solid #686c62;
+  outline-offset: 3px;
+}
+
+.store-confirmation .text-orange-700 {
+  color: #686c62;
+  font-weight: 600;
+  letter-spacing: .13em;
+}
+
+.store-confirmation-identity {
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #e1dfd6;
+  padding-bottom: 1rem;
+  color: #252820;
+  font-size: .9rem;
+  font-weight: 600;
+}
+
+.store-confirmation .button-primary {
+  border-color: color-mix(in srgb, var(--store-brand, #252820) 16%, #252820);
+  background: color-mix(in srgb, var(--store-brand, #252820) 16%, #252820);
+}
+
+.store-purchase .button-primary {
+  border-color: color-mix(in srgb, var(--store-brand) 16%, #252820);
+  border-radius: .5rem;
+  background: color-mix(in srgb, var(--store-brand) 16%, #252820);
+  box-shadow: none;
+}
+
+.store-purchase .button-primary:disabled,
+.store-confirmation .button-primary:disabled,
+.store-payment .button-primary:disabled {
+  border-color: #e4e4e7;
+  background: #e4e4e7;
+  color: #a1a1aa;
 }
 
 @media (prefers-reduced-motion: reduce) {

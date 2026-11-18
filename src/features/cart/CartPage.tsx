@@ -14,6 +14,7 @@ import { useCart } from './CartProvider'
 import { validateCartLines } from './cartValidation'
 import { commercePath, useCommerceChannel } from '../../lib/commerce-channel'
 import { StorePurchaseSteps } from '../store/StorePurchaseSteps'
+import { MenuIdentity } from '../public-menu/MenuIdentity'
 
 export function CartPage() {
   const { restaurantSlug } = useParams()
@@ -39,7 +40,7 @@ export function CartPage() {
   }, [cart.restaurantSlug, cart.channel, channel, menu.data, menu.dataUpdatedAt, reconcileProducts])
 
   if (menu.isLoading) return <LoadingScreen />
-  if (!menu.data) return <main className="page-shell py-16"><ErrorPanel>No pudimos cargar el catálogo para actualizar tu carrito.</ErrorPanel></main>
+  if (!menu.data) return <main className={`page-shell py-16 ${channel === 'menu' ? 'menu-experience menu-state' : ''}`}><ErrorPanel>No pudimos cargar el catálogo para actualizar tu carrito.</ErrorPanel></main>
   const restaurant = menu.data.restaurant
   if (cart.restaurantSlug !== restaurant.slug || (cart.channel ?? 'menu') !== channel) return <LoadingScreen label="Recuperando tu carrito…" />
   const issues = validateCartLines(cart.lines, products)
@@ -50,9 +51,10 @@ export function CartPage() {
   const dialogProduct = editingVariants.find(product => product.id === editingLine?.productId) ?? editingProduct
 
   return <main
-    className={`min-h-screen py-5 sm:py-8 ${channel === 'store' ? 'store-purchase store-cart-page' : 'bg-stone-100'}`}
-    style={channel === 'store' ? { '--store-brand': restaurant.primaryColor || '#18181b', '--store-accent': restaurant.secondaryColor || '#f4f4f5' } as CSSProperties : undefined}
+    className={`min-h-screen py-5 sm:py-8 ${channel === 'store' ? 'store-purchase store-cart-page' : 'menu-experience menu-purchase menu-cart-page'}`}
+    style={(channel === 'store' ? { '--store-brand': restaurant.primaryColor || '#18181b', '--store-accent': restaurant.secondaryColor || '#f4f4f5' } : { '--brand': restaurant.primaryColor, '--brand-secondary': restaurant.secondaryColor }) as CSSProperties & Record<`--${string}`, string>}
   ><div className={`page-shell max-w-5xl ${channel === 'store' ? 'store-purchase-shell' : ''}`}>
+    {channel === 'menu' ? <MenuIdentity restaurant={restaurant} /> : null}
     <Link to={commercePath(restaurant.slug, channel)} className={`inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-semibold text-stone-600 ${channel === 'store' ? 'store-purchase-back' : ''}`}><ArrowLeft className="h-4 w-4" aria-hidden />Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link>
     {channel === 'store' ? <StorePurchaseSteps slug={restaurant.slug} current={1} /> : null}
     <div className={`mt-5 ${channel === 'store' ? 'store-purchase-heading' : ''}`}><h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">{channel === 'store' ? 'Tu carrito' : 'Tu pedido'}</h1>
@@ -78,13 +80,13 @@ export function CartPage() {
           </div>
         </article>
       })}</section>
-      <aside className={`h-fit rounded-3xl p-5 lg:sticky lg:top-6 ${channel === 'store' ? 'store-cart-summary' : 'bg-stone-950 text-white'}`}>
+      <aside className={`h-fit rounded-3xl p-5 lg:sticky lg:top-6 ${channel === 'store' ? 'store-cart-summary' : 'menu-order-summary'}`}>
         <h2 className="font-display text-xl font-bold">Resumen</h2><div className={`mt-5 flex justify-between text-sm ${channel === 'store' ? 'text-stone-600' : 'text-stone-300'}`}><span>Subtotal estimado</span><strong className={channel === 'store' ? 'text-stone-950' : 'text-white'}>{formatMoney(cart.subtotalCents, restaurant.currencyCode, restaurant.locale)}</strong></div>
         <p className={`mt-3 text-xs leading-5 ${channel === 'store' ? 'text-stone-600' : 'text-stone-300'}`}>El envío y los ajustes por medio de pago se muestran en el siguiente paso, antes de confirmar.</p>
         {invalid ? <p className="mt-4 rounded-xl bg-amber-300 p-3 text-xs font-semibold text-amber-950">Revisá los productos marcados antes de continuar. Conservamos tus notas y opciones.</p> : null}
         {cart.subtotalCents < restaurant.minimumOrderCents ? <p className="mt-4 rounded-xl bg-amber-300 p-3 text-xs font-semibold text-amber-950">Faltan {formatMoney(restaurant.minimumOrderCents - cart.subtotalCents, restaurant.currencyCode, restaurant.locale)} para el mínimo del comercio.</p> : null}
         {cart.itemCount > 100 || cart.lines.length > 25 ? <p className="mt-4 rounded-xl bg-red-200 p-3 text-xs font-semibold text-red-950">El pedido admite hasta 25 renglones y 100 unidades. Ajustá el carrito para continuar.</p> : null}
-        {canContinue ? <Link className={channel === 'store' ? 'store-primary-action mt-5' : 'mt-5 flex min-h-12 items-center justify-center rounded-xl bg-orange-600 font-bold hover:bg-orange-500'} to={commercePath(restaurant.slug, channel, '/checkout')}>Continuar</Link> : <button type="button" disabled className={channel === 'store' ? 'store-primary-action mt-5' : 'mt-5 flex min-h-12 w-full items-center justify-center rounded-xl bg-stone-700 font-bold text-stone-400'}>Continuar</button>}
+        {canContinue ? <Link className={channel === 'store' ? 'store-primary-action mt-5' : 'menu-primary-action mt-5'} to={commercePath(restaurant.slug, channel, '/checkout')}>Continuar</Link> : <button type="button" disabled className={channel === 'store' ? 'store-primary-action mt-5' : 'menu-primary-action mt-5'}>Continuar</button>}
         {!acceptsOrders ? <p className={`mt-3 text-center text-xs ${channel === 'store' ? 'text-amber-800' : 'text-amber-300'}`}>{channel === 'store' ? 'La tienda no recibe compras en este momento.' : 'El comercio está cerrado.'} Podés conservar el carrito para más tarde.</p> : null}
       </aside>
     </div>}

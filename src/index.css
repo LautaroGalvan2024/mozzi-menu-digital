@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: optional;
+  src: url('/fonts/inter-latin-variable.woff2') format('woff2');
+}
+
 @theme {
   --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Aptos Display", Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sans);
 }
 
 :root {

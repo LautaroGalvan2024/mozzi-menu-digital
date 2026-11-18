@@ -1,4 +1,4 @@
-import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store } from 'lucide-react'
+import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store, Utensils } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
@@ -15,6 +15,7 @@ import type { PublicCatalogGroup } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
 import { RestaurantHoursDialog } from './RestaurantHoursDialog'
 import { usePublicCatalog } from './usePublicCatalog'
+import './menu-experience.css'
 
 function RecentOrderLink({ slug }: { slug: string }) {
   const [reference] = useState(() => readOrderRecovery(slug))
@@ -67,9 +68,9 @@ export function PublicMenuPage() {
     reconcileProducts(catalog.groups.flatMap((group) => group.variants))
   }, [cart.restaurantSlug, cart.channel, catalog.groups, catalog.meta.data, reconcileProducts])
 
-  if (!env.isSupabaseConfigured) return <main className="page-shell py-16"><ErrorPanel title="Falta conectar Supabase">Ejecutá <code>npm run setup:project</code> desde la raíz y reiniciá la aplicación.</ErrorPanel></main>
-  if (catalog.isLoading) return <LoadingScreen label="Preparando el menú…" />
-  if (!catalog.meta.data || !catalog.pages.data) return <main className="page-shell py-16"><ErrorPanel action={<button className="button-secondary" onClick={() => void Promise.all([catalog.meta.refetch(), catalog.pages.refetch()])}>Reintentar</button>}>{catalog.meta.error instanceof Error ? catalog.meta.error.message : catalog.pages.error instanceof Error ? catalog.pages.error.message : 'No encontramos este menú.'}</ErrorPanel></main>
+  if (!env.isSupabaseConfigured) return <main className="menu-experience menu-state page-shell py-16"><ErrorPanel title="Falta conectar Supabase">Ejecutá <code>npm run setup:project</code> desde la raíz y reiniciá la aplicación.</ErrorPanel></main>
+  if (catalog.isLoading) return <main className="menu-experience menu-state"><LoadingScreen label="Preparando el menú…" /></main>
+  if (!catalog.meta.data || !catalog.pages.data) return <main className="menu-experience menu-state page-shell py-16"><ErrorPanel action={<button className="button-secondary" onClick={() => void Promise.all([catalog.meta.refetch(), catalog.pages.refetch()])}>Reintentar</button>}>{catalog.meta.error instanceof Error ? catalog.meta.error.message : catalog.pages.error instanceof Error ? catalog.pages.error.message : 'No encontramos este menú.'}</ErrorPanel></main>
 
   const { restaurant } = catalog.meta.data
   const selectedCategory = catalog.meta.data.categories.find((category) => category.id === categoryId)
@@ -91,26 +92,14 @@ export function PublicMenuPage() {
   const nextOpeningLabel = formatNextOpeningAt(restaurant.nextOpeningAt, restaurant.timezone)
   return (
     <div
-      className="min-h-screen bg-[#f7f4ef]"
+      className="menu-experience menu-catalog min-h-screen"
       style={{ '--brand': restaurant.primaryColor, '--brand-secondary': restaurant.secondaryColor } as React.CSSProperties}
     >
       <RecentOrderLink key={restaurant.slug} slug={restaurant.slug} />
-      <header className="relative overflow-hidden border-b-4 border-[var(--brand)] bg-stone-950 text-white">
-        <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full opacity-25 blur-3xl" style={{ backgroundColor: 'var(--brand-secondary)' }} />
-        {coverImage.src ? <img src={coverImage.src} srcSet={coverImage.srcSet} sizes="100vw" decoding="async" alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" fetchPriority="high" /> : null}
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(12,10,9,.58)_0%,rgba(12,10,9,.76)_48%,rgba(12,10,9,.96)_100%)]" />
-        <div className="page-shell relative flex min-h-[260px] flex-col justify-end py-5 sm:min-h-[310px] sm:py-7">
-          <a
-            href={shareUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Compartir el menú de ${restaurant.tradeName} por WhatsApp`}
-            className="absolute right-4 top-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/30 bg-[#25d366] px-3.5 py-2 text-sm font-bold text-[#063b1d] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#20bd5a] focus-visible:outline-white sm:right-6 sm:top-6 sm:px-4"
-          >
-            <MessageCircle className="h-5 w-5" aria-hidden />
-            Compartir por WhatsApp
-          </a>
-          <div className="flex items-end gap-3 sm:gap-4">
+      <header className={`menu-masthead ${coverImage.src ? 'menu-masthead-with-cover' : 'menu-masthead-no-cover'}`}>
+        {coverImage.src ? <div className="menu-cover"><img src={coverImage.src} srcSet={coverImage.srcSet} sizes="(min-width: 1280px) 1200px, 100vw" decoding="async" alt="" fetchPriority="high" /></div> : null}
+        <div className="page-shell menu-restaurant">
+          <div className="menu-restaurant-title">
             {logoImage.src ? (
               <img
                 src={logoImage.src}
@@ -118,49 +107,58 @@ export function PublicMenuPage() {
                 sizes="96px"
                 decoding="async"
                 alt={`Logo de ${restaurant.tradeName}`}
-                className="h-20 w-20 shrink-0 rounded-2xl border-2 border-white/90 bg-white object-cover shadow-xl sm:h-24 sm:w-24 sm:rounded-3xl sm:border-4"
+                className="menu-logo"
               />
             ) : (
               <div
-                className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl border-2 border-white/90 shadow-xl sm:h-24 sm:w-24 sm:rounded-3xl sm:border-4"
-                style={{ backgroundColor: 'var(--brand)' }}
+                className="menu-logo menu-logo-placeholder"
               >
-                <Store className="h-9 w-9 drop-shadow-[0_1px_2px_rgba(0,0,0,.9)] sm:h-10 sm:w-10" aria-hidden />
+                <Store className="h-8 w-8" aria-hidden />
               </div>
             )}
-            <div className="min-w-0 pb-0.5 sm:pb-1">
-              <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold shadow-sm ${restaurant.isOpen ? 'bg-emerald-400 text-emerald-950' : 'bg-amber-300 text-amber-950'}`}>
+            <div className="min-w-0">
+              <span className={`menu-open-status ${restaurant.isOpen ? 'is-open' : 'is-closed'}`}>
                 {restaurant.isOpen ? 'Abierto ahora' : 'Cerrado'}
               </span>
-              <h1 className="mt-1.5 truncate font-display text-3xl font-bold tracking-tight text-white sm:mt-2 sm:text-4xl">{restaurant.tradeName}</h1>
+              <h1 className="menu-restaurant-name">{restaurant.tradeName}</h1>
             </div>
           </div>
-          {restaurant.description ? <p className="mt-3 line-clamp-2 max-w-2xl text-sm leading-5 text-stone-200 sm:mt-4 sm:leading-6">{restaurant.description}</p> : null}
-          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs font-medium text-stone-200 sm:gap-y-2">
-            <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-white" aria-hidden />{restaurant.address}, {restaurant.city}</span>
+          {restaurant.description ? <p className="menu-restaurant-description">{restaurant.description}</p> : null}
+          <div className="menu-restaurant-meta">
+            <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4" aria-hidden />{restaurant.address}, {restaurant.city}</span>
             <button
               type="button"
-              className="flex min-h-8 items-center gap-1.5 rounded-lg text-left transition hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              className="menu-hours-trigger"
               onClick={() => setShowHours(true)}
               aria-haspopup="dialog"
             >
-              <Clock3 className="h-4 w-4 shrink-0 text-white" aria-hidden />
+              <Clock3 className="h-4 w-4 shrink-0" aria-hidden />
               <span>
                 {restaurant.isOpen
                   ? `Demora estimada: ${restaurant.defaultPreparationMinutes} min`
                   : nextOpeningLabel
                     ? `Próxima apertura: ${nextOpeningLabel}`
                     : 'Consultá los horarios'}
-                <span className="ml-1.5 font-bold text-white underline decoration-white/50 underline-offset-2">Ver horarios</span>
+                <span className="ml-1.5 font-semibold underline underline-offset-4">Ver horarios</span>
               </span>
             </button>
           </div>
+          <a
+            href={shareUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Compartir el menú de ${restaurant.tradeName} por WhatsApp`}
+            className="menu-share"
+          >
+            <MessageCircle className="h-5 w-5" aria-hidden />
+            Compartir por WhatsApp
+          </a>
         </div>
       </header>
 
-      <div className="sticky top-0 z-30 border-b border-stone-200/90 bg-[#f7f4ef]/95 shadow-[0_1px_12px_rgba(41,37,36,.04)] backdrop-blur">
-        <div className="page-shell py-3">
-          <label className="relative block">
+      <div className="menu-browse-bar sticky top-0 z-30">
+        <div className="page-shell menu-browse-inner">
+          <label className="menu-search relative block">
             <span className="sr-only">Buscar en el menú</span>
             <Search className="pointer-events-none absolute left-3.5 top-3 h-5 w-5 text-stone-400" aria-hidden />
             <input
@@ -172,7 +170,7 @@ export function PublicMenuPage() {
           </label>
           {catalog.isUpdating ? <p className="mt-2 text-xs font-medium text-stone-500" role="status">Actualizando…</p> : null}
           {catalog.refreshError ? <p className="mt-2 text-xs font-medium text-amber-800" role="status">No se pudo actualizar ahora. Seguís viendo la última versión disponible.</p> : null}
-          <nav className="scrollbar-none mt-3 flex gap-2 overflow-x-auto pb-0.5" aria-label="Categorías">
+          <nav className="menu-categories scrollbar-none flex gap-2 overflow-x-auto" aria-label="Categorías">
             <button
               type="button"
               aria-pressed={!categoryId}
@@ -194,33 +192,33 @@ export function PublicMenuPage() {
         </div>
       </div>
 
-      <main className="page-shell py-7 pb-32 sm:py-9">
+      <main className="page-shell menu-catalog-content">
           <section className="scroll-mt-40">
-            <div className="mb-4 sm:mb-5">
+            <div className="menu-section-heading">
               <h2 className="font-display text-2xl font-bold tracking-tight text-stone-950 sm:text-[1.7rem]">{selectedCategory?.name ?? (debouncedSearch.trim() ? 'Resultados' : 'Todos los productos')}</h2>
               {selectedCategory?.description ? <p className="mt-1 max-w-2xl text-sm leading-5 text-stone-600">{selectedCategory.description}</p> : null}
             </div>
-            <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+            <div className="menu-product-grid">
               {cards.map(({ group, product, price, available }) => {
                 const image = responsiveAssetUrls(product.family?.imagePath ?? product.imagePath)
                 const hasQuantityPromotion = group.variants.some((variant) => variant.quantityThreshold ? variant.quantityThreshold.unitPriceCents < currentProductPrice(variant) : effectiveQuantityPrices(currentProductPrice(variant), variant.quantityPrices).length > 0)
                 return (
                   <article
                     key={group.id}
-                    className="group overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition duration-200 focus-within:border-[var(--brand)] focus-within:ring-3 focus-within:ring-[var(--brand)]/15 hover:-translate-y-0.5 hover:shadow-lg sm:rounded-3xl"
+                    className={`menu-product-card group ${image.src ? '' : 'menu-product-no-photo'}`}
                   >
                     <button
-                      className="grid h-full w-full grid-cols-[minmax(0,1fr)_7rem] text-left disabled:cursor-not-allowed sm:grid-cols-[minmax(0,1fr)_8.5rem]"
+                      className="menu-product-button disabled:cursor-not-allowed"
                       onClick={() => available && setSelectedGroupId(group.id)}
                       disabled={!available}
                     >
-                      <div className="flex min-h-36 min-w-0 flex-col p-4 sm:min-h-40 sm:p-5">
-                        <div className="flex items-start justify-between gap-2">
+                      <div className="menu-product-copy">
+                        <div className="menu-product-title">
                           <h3 className="font-display text-lg font-bold leading-tight text-stone-950">{product.family?.name ?? product.name}</h3>
                           {product.featured ? <span className="shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-stone-900" style={{ backgroundColor: 'color-mix(in srgb, var(--brand) 15%, white)', borderColor: 'color-mix(in srgb, var(--brand) 45%, #d6d3d1)' }}>Favorito</span> : null}
                         </div>
                         <p className="mt-2 line-clamp-2 text-sm leading-5 text-stone-600">{product.description}</p>
-                        <div className="mt-auto pt-3">
+                        <div className="menu-product-price mt-auto pt-3">
                           <p className="font-display text-base font-bold text-stone-950">{group.variants.length > 1 ? 'Desde ' : ''}{formatMoney(price, restaurant.currencyCode, restaurant.locale)}</p>
                           {price === currentProductPrice(product) && price !== product.basePriceCents ? <p className="mt-0.5 text-xs text-stone-400 line-through">{formatMoney(product.basePriceCents, restaurant.currencyCode, restaurant.locale)}</p> : null}
                           {hasQuantityPromotion ? <span className="mt-1.5 inline-flex rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800">Promos por cantidad</span> : null}
@@ -228,9 +226,9 @@ export function PublicMenuPage() {
                         </div>
                       </div>
                       {image.src ? (
-                        <img loading="lazy" decoding="async" src={image.src} srcSet={image.srcSet} sizes="(min-width: 1024px) 14rem, 8.5rem" alt={product.family?.name ?? product.name} className={`h-full min-h-36 w-full object-cover transition duration-300 sm:min-h-40 ${!available ? 'grayscale opacity-60' : 'group-hover:scale-[1.025]'}`} />
+                        <img loading="lazy" decoding="async" src={image.src} srcSet={image.srcSet} sizes="(min-width: 768px) 168px, 104px" alt={product.family?.name ?? product.name} className={`menu-product-photo ${!available ? 'grayscale opacity-60' : ''}`} />
                       ) : (
-                        <div className="grid min-h-36 place-items-center text-4xl sm:min-h-40" style={{ backgroundColor: 'color-mix(in srgb, var(--brand) 8%, white)' }} role="img" aria-label="Sin imagen">🍲</div>
+                        <div className="menu-product-photo menu-photo-placeholder" role="img" aria-label="Sin imagen"><Utensils aria-hidden /></div>
                       )}
                     </button>
                   </article>
@@ -246,8 +244,7 @@ export function PublicMenuPage() {
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-3 pt-3 sm:px-4" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
           <Link
             to={`/r/${restaurant.slug}/carrito`}
-            className="pointer-events-auto mx-auto flex min-h-14 max-w-xl items-center justify-between gap-4 rounded-2xl border px-4 font-bold text-white shadow-[0_18px_42px_rgba(12,10,9,.3)] transition hover:-translate-y-0.5 hover:bg-stone-900 sm:px-5"
-            style={{ backgroundColor: '#1c1917', borderColor: 'var(--brand)' }}
+            className="menu-cart-dock pointer-events-auto mx-auto flex min-h-14 max-w-xl items-center justify-between gap-4 px-4 font-bold text-white sm:px-5"
           >
             <span className="flex items-center gap-2"><ShoppingBag className="h-5 w-5" aria-hidden />Ver carrito · {cart.itemCount}</span>
             <span className="shrink-0">{formatMoney(cart.subtotalCents, restaurant.currencyCode, restaurant.locale)}</span>

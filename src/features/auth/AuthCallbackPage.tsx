@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { LoadingScreen } from '../../components/Feedback'
+import { AuthShell } from './AuthShell'
 import { supabase } from '../../lib/supabase/client'
 import { relativeReturnToSchema } from '../../lib/validation/schemas'
 
@@ -31,6 +32,6 @@ export function AuthCallbackPage() {
     })
   }, [navigate])
 
-  if (error) return <main className="page-shell py-20"><p className="form-error" role="alert">{error}</p></main>
+  if (error) return <AuthShell title="Enlace de acceso" subtitle=""><p className="form-error" role="alert">{error}</p></AuthShell>
   return <LoadingScreen label="Validando el enlace seguro…" />
 }

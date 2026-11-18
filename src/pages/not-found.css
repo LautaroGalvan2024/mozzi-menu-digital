@@ -1,0 +1,32 @@
+.not-found {
+  display: grid;
+  min-height: 100dvh;
+  align-items: center;
+  padding: clamp(1.5rem, 6vw, 5rem);
+  background: #f7f8fa;
+  color: #24272e;
+}
+.not-found-content { width: min(100%, 42rem); margin: auto; }
+.not-found .mozzi-logo { width: 11.75rem; }
+.not-found-code {
+  margin-top: clamp(2.5rem, 9vh, 6rem);
+  color: #b94700;
+  font-size: clamp(4rem, 10vw, 7.5rem);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -.065em;
+}
+.not-found h1 { margin-block: .75rem 1.75rem; font-size: clamp(1.65rem, 4vw, 2.6rem); line-height: 1.12; font-weight: 650; letter-spacing: -.04em; }
+.not-found-home {
+  display: inline-flex;
+  min-height: 2.875rem;
+  align-items: center;
+  gap: .6rem;
+  padding: .6rem 1rem;
+  border-radius: .44rem;
+  background: #ff6d00;
+  color: #121212;
+  font-size: .9rem;
+  font-weight: 650;
+}
+.not-found-home:hover { background: #ff862e; }

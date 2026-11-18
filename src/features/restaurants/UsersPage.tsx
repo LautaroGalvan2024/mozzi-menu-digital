@@ -97,7 +97,7 @@ export function UsersPage() {
     {message && <p role="status" className="form-success mb-5">{message}</p>}
     <div className="space-y-3">{query.data?.map(member => {
       const manageable = isSuperAdmin || (canInvite && member.role === 'order_manager')
-      return <article className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4 sm:flex-row sm:items-center" key={member.id}>
+      return <article className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center" key={member.id}>
         <span className="grid h-11 w-11 place-items-center rounded-xl bg-stone-100 text-stone-500">{member.role === 'restaurant_admin' ? <Shield className="h-5 w-5" /> : <UserCog className="h-5 w-5" />}</span>
         <div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{member.profiles?.full_name ?? 'Invitación pendiente'}</h2>
           <p className="truncate text-sm text-stone-500">{member.profiles?.email ?? `Usuario …${member.user_id.slice(-8)}`}</p></div>

@@ -7,6 +7,7 @@ import { WhatsAppIcon } from '../../components/WhatsAppIcon'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { paymentSessionSchema, paymentStatusSchema, readPaymentRecovery, savePaymentRecovery, type PaymentStatus } from './payment-recovery'
+import './store-purchase.css'
 
 type PaymentPresentation = {
   title: string
@@ -139,11 +140,11 @@ function PaymentConfirmation({ slug, requestedOrder }: { slug: string; requested
   const canPay = result?.payment.checkoutUrl && ['unpaid', 'created', 'pending', 'rejected'].includes(result.payment.status) && !paymentExpired && !['cancelled', 'completed', 'expired'].includes(result.order.status) && (!result.payment.expiresAt || Date.parse(result.payment.expiresAt) > now) && !result.payment.requiresRefund && !result.payment.reviewRequired && !error && !busy
   const Icon = presentation?.icon ?? (error || !reference ? ShieldAlert : LoaderCircle)
   const tone = presentation?.tone ?? 'neutral'
-  return <main className="min-h-screen bg-stone-50 px-4 py-8 sm:grid sm:place-items-center sm:py-12">
-    <section aria-labelledby="payment-result-title" className="mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
+  return <main className="store-payment min-h-screen bg-stone-50 px-4 py-8 sm:grid sm:place-items-center sm:py-12">
+    <section aria-labelledby="payment-result-title" className="store-payment-card mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
       <div className={`h-1.5 ${tone === 'success' ? 'bg-emerald-500' : tone === 'attention' ? 'bg-amber-400' : 'bg-stone-300'}`} />
       <div className="p-6 sm:p-8">
-        <header className="text-center" aria-live="polite">
+        <header className="store-payment-header text-center" aria-live="polite">
           <div className={`mx-auto grid h-20 w-20 place-items-center rounded-full ${tone === 'success' ? 'bg-emerald-50 text-emerald-600 ring-8 ring-emerald-50/50' : tone === 'attention' ? 'bg-amber-50 text-amber-700' : 'bg-stone-100 text-stone-500'}`}>
             <Icon className={`h-10 w-10 ${!result && reference && !error ? 'animate-spin' : ''}`} aria-hidden />
           </div>
@@ -152,12 +153,12 @@ function PaymentConfirmation({ slug, requestedOrder }: { slug: string; requested
           {presentation ? <p className="mt-3 text-sm leading-6 text-stone-600">{presentation.description}</p> : null}
         </header>
         {result && presentation ? <>
-          <dl className="mt-7 rounded-2xl border border-stone-200 bg-stone-50 p-4 sm:p-5">
+          <dl className="store-payment-order mt-7 rounded-2xl border border-stone-200 bg-stone-50 p-4 sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><dt className="text-sm text-stone-600">Pedido</dt><dd className="break-all text-sm font-semibold text-stone-950">{result.order.displayNumber}</dd></div>
             <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><dt className="text-sm text-stone-600">Total de la compra</dt><dd className="text-2xl font-bold tracking-tight text-stone-950">{formatMoney(result.order.totalCents, result.order.currencyCode)}</dd></div>
             {orderLabels[result.order.status] ? <div className="mt-4 border-t border-stone-200 pt-3"><dt className="text-xs text-stone-500">Estado del pedido</dt><dd className="mt-1 text-sm font-medium text-stone-700">{orderLabels[result.order.status]}</dd></div> : null}
           </dl>
-          <div className={`mt-5 flex gap-3 rounded-2xl p-4 sm:p-5 ${presentation.whatsapp ? 'bg-emerald-50 text-emerald-950' : 'bg-stone-50 text-stone-800'}`}>
+          <div className={`store-payment-next mt-5 flex gap-3 rounded-2xl p-4 sm:p-5 ${presentation.whatsapp ? 'bg-emerald-50 text-emerald-950' : 'bg-stone-50 text-stone-800'}`}>
             {presentation.whatsapp ? <WhatsAppIcon className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700" /> : <ArrowUpRight className="mt-0.5 h-5 w-5 shrink-0 text-stone-500" aria-hidden />}
             <div><h2 className="text-sm font-bold">{presentation.nextTitle}</h2><p className={`mt-1.5 text-sm leading-6 ${presentation.whatsapp ? 'text-emerald-900' : 'text-stone-600'}`}>{presentation.nextDescription}</p>{presentation.whatsapp ? <p className="mt-2 text-xs leading-5 text-emerald-800">Si compraste fuera del horario de atención, te contactarán cuando el comercio vuelva a abrir.</p> : null}</div>
           </div>

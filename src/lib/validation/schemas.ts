@@ -255,8 +255,8 @@ export const generatedOrderSchema = z.object({
 
 export const checkoutSchema = z
   .object({
-    customerName: z.string().trim().min(2).max(120),
-    customerPhone: z.string().trim().min(8).max(40).refine((value) => {
+    customerName: z.string().trim().min(2, 'Ingresá un nombre de al menos 2 caracteres.').max(120, 'El nombre puede tener hasta 120 caracteres.'),
+    customerPhone: z.string().trim().min(8, 'Ingresá el teléfono con el código de país y área.').max(40, 'El teléfono puede tener hasta 40 caracteres.').refine((value) => {
       let compact = value.normalize('NFKC').replace(/[\s().-]/g, '')
       if (compact.startsWith('00')) compact = `+${compact.slice(2)}`
       if (!compact.startsWith('+')) compact = `+${compact}`

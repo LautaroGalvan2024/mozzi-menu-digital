@@ -212,7 +212,7 @@ export function CategoriesPage() {
       <div className="space-y-3">
         {query.data?.map(row => (
           <button
-            className="flex w-full items-center gap-4 rounded-xl border border-stone-200 bg-white p-4 text-left hover:border-orange-400"
+            className="surface-card flex w-full items-center gap-4 p-4 text-left hover:border-orange-400"
             disabled={saving}
             key={row.id}
             onClick={() => { setError(null); setDraft(categoryDraft(row)) }}
