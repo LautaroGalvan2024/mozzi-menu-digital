@@ -76,6 +76,7 @@
 .menu-experience .button-secondary { border-radius: 8px; border-color: #dcded4; box-shadow: none; font-size: 12px; }
 .menu-experience .field { color: #4b5045; font-size: 12px; font-weight: 600; }
 .menu-experience .field > input, .menu-experience .field > textarea, .menu-experience .field > select { min-height: 46px; border-color: #dcded5; border-radius: 7px; box-shadow: none; font-size: 14px; }
+.menu-search input::placeholder, .menu-experience .field > input::placeholder, .menu-experience .field > textarea::placeholder { color: var(--menu-muted); opacity: 1; }
 .menu-experience .field > input:focus, .menu-experience .field > textarea:focus, .menu-experience .field > select:focus { border-color: var(--menu-action); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand, #506342) 12%, transparent); }
 .menu-experience .choice-card { border-radius: 8px; min-height: 74px; border-color: var(--menu-line); }
 .menu-experience .choice-card-selected { background: color-mix(in srgb, var(--brand, #506342) 5%, #fff); border-color: color-mix(in srgb, var(--brand, #506342) 55%, #c4c9bd); box-shadow: none; }
@@ -160,6 +161,7 @@
   .menu-experience .field > input, .menu-experience .field > textarea, .menu-experience .field > select { font-size: 16px; }
   .menu-experience .product-dialog > div, .menu-experience .hours-dialog > div { border-radius: 18px 18px 0 0; }
   .menu-experience .product-dialog h2 { font-size: 29px; }
+  .menu-experience .product-dialog .button-primary > .truncate { white-space: normal; overflow: visible; text-overflow: clip; }
   .menu-confirmation > section { padding: 27px 21px; }
   .menu-confirmation h1 { font-size: 37px; }
 }

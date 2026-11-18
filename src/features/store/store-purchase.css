@@ -1,6 +1,7 @@
 .store-purchase {
   --store-brand: #18181b;
   --store-accent: #f4f4f5;
+  --store-control: color-mix(in srgb, var(--store-brand) 16%, #252820);
   min-height: 100dvh;
   background: #f7f5ef;
   color: #252820;
@@ -48,7 +49,7 @@
   min-height: 2.75rem;
   gap: .55rem;
   border-radius: .75rem;
-  color: #71717a;
+  color: #52525b;
   font-size: .78rem;
   font-weight: 700;
   text-decoration: none;
@@ -126,8 +127,8 @@
 .store-purchase .field input:focus,
 .store-purchase .field select:focus,
 .store-purchase .field textarea:focus {
-  border-color: color-mix(in srgb, var(--store-brand) 72%, #18181b);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--store-brand) 16%, transparent);
+  border-color: var(--store-control);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--store-control) 16%, transparent);
 }
 
 .store-purchase .choice-card {
@@ -136,14 +137,15 @@
   background: #fff;
 }
 
-.store-purchase .choice-card > svg { color: var(--store-brand); }
-.store-purchase .choice-card input { accent-color: var(--store-brand); }
-.store-purchase :focus-visible { outline: 3px solid color-mix(in srgb, var(--store-brand) 65%, #686c62); outline-offset: 3px; }
+.store-purchase .choice-card > svg { color: var(--store-control); }
+.store-purchase .choice-card input { accent-color: var(--store-control); }
+.store-purchase :focus-visible { outline: 3px solid var(--store-control); outline-offset: 3px; }
+.store-purchase .choice-card:has(input:focus-visible) { outline-color: var(--store-control); }
 
 .store-purchase .choice-card-selected {
-  border-color: color-mix(in srgb, var(--store-brand) 72%, #18181b);
+  border-color: var(--store-control);
   background: color-mix(in srgb, var(--store-brand) 4%, #fff);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--store-brand) 50%, transparent);
+  box-shadow: inset 0 0 0 1px var(--store-control);
 }
 
 .store-cart-line {

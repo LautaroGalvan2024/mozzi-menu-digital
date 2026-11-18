@@ -87,7 +87,7 @@ describe('cart validation and deliberate reconfiguration', () => {
     render(app())
     expect(await screen.findByText(/La opción «Blanco» ya no está disponible/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled()
-    await userEvent.click(screen.getByRole('button', { name: 'Reconfigurar Arroz' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Editar detalles de Arroz' }))
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByLabelText('Observaciones para este producto')).toHaveValue(line.notes)
     await userEvent.click(within(dialog).getByRole('button', { name: /Guardar cambios/ }))

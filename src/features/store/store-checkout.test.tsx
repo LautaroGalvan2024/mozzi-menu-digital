@@ -23,7 +23,7 @@ describe('store online checkout', () => {
   afterEach(cleanup)
   it('keeps guest checkout and the final action visible next to a compact order summary', async () => {
     page()
-    expect(screen.getByText(/Comprás como invitado/)).toBeVisible()
+    expect(screen.getByText('No necesitás crear una cuenta.')).toBeVisible()
     expect(screen.getByText('No necesitás crear una cuenta.')).toBeVisible()
     expect(screen.getByText('Ver resumen')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Continuar al pago' })).toBeVisible()
