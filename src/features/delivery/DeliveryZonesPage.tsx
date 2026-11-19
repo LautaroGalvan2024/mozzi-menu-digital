@@ -1,9 +1,12 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MapPin, Plus, Save, X } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { CalendarClock, MapPin, Plus, Save, X } from 'lucide-react'
+import { useRef, useState, type FormEvent } from 'react'
 import { z } from 'zod'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { EmptyState, ErrorPanel } from '../../components/Feedback'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
+import { SectionNavigation } from '../../components/SectionNavigation'
+import { useDialogFocus } from '../../components/useDialogFocus'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import { formatMoney, parsePriceCents } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
@@ -13,6 +16,13 @@ import { useStageOneFeatures } from '../restaurants/stage-one-features'
 import { loadDeliverySchedules, saveDeliveryZone } from './delivery-api'
 import { DeliverySchedule, emptyDeliveryPolicy, type DeliveryPolicyInput, type DeliverySchedulePolicy } from './delivery-schedule'
 import { DeliveryScheduleFields } from './DeliveryScheduleFields'
+import '../restaurants/settings-workspace.css'
+
+const zoneSections = [
+  { id: 'details', label: 'Zona y tarifas', icon: MapPin },
+  { id: 'calendar', label: 'Calendario de reparto', icon: CalendarClock },
+] as const
+type ZoneSection = typeof zoneSections[number]['id']
 
 const zoneSchema = z.object({
   id: z.string().uuid(), restaurant_id: z.string().uuid(), name: z.string(), description: z.string(),
@@ -24,7 +34,7 @@ type ZoneDraft = { name: string; description: string; fee: string; minimum: stri
 
 export function DeliveryZonesPage() {
   const { selected } = useRestaurantScope()
-  return selected ? <DeliveryZonesWorkspace key={selected.id} restaurantId={selected.id} /> : <LoadingScreen />
+  return selected ? <DeliveryZonesWorkspace key={selected.id} restaurantId={selected.id} /> : <AdminLoading label="Cargando zonas de envío…" variant="list" />
 }
 
 function DeliveryZonesWorkspace({ restaurantId }: { restaurantId: string }) {
@@ -47,7 +57,7 @@ function DeliveryZonesWorkspace({ restaurantId }: { restaurantId: string }) {
     enabled: schedulingEnabled,
     queryFn: () => loadDeliverySchedules(restaurantId),
   })
-  if (query.isLoading || restaurant.isLoading || loadingFeatures || scheduleQuery.isLoading) return <LoadingScreen />
+  if (query.isLoading || restaurant.isLoading || loadingFeatures || scheduleQuery.isLoading) return <AdminLoading label="Cargando zonas de envío…" variant="list" />
   const loadError = query.error ?? restaurant.error ?? (schedulingEnabled ? scheduleQuery.error : null)
   if (loadError || !query.data) return <ErrorPanel action={<button className="button-secondary" type="button" onClick={() => void Promise.all([
     query.refetch(), restaurant.refetch(), ...(schedulingEnabled ? [scheduleQuery.refetch()] : []),
@@ -69,15 +79,18 @@ function DeliveryZonesWorkspace({ restaurantId }: { restaurantId: string }) {
   }
   return <>
     <PageHeader eyebrow="Logística" title="Zonas de envío" description={schedulingEnabled ? 'Definí dónde entregás, el costo y, si querés, los días de reparto.' : 'Definí dónde entregás y cuánto cuesta el envío.'} actions={<button className="button-primary" type="button" onClick={() => { setMessage(''); setEditing('new') }}><Plus className="h-4 w-4" />Nueva zona</button>} />
-    {message ? <p className="form-success mb-4" role="status">{message}</p> : null}
-    {!zones.length ? <p className="surface-card p-5 text-sm text-stone-600">Creá tu primera zona de envío.{schedulingEnabled ? ' Los días de reparto son opcionales.' : ''}</p> : null}
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{zones.map(zone => {
+    {message ? <InlineFeedback tone="success" className="mb-4">{message}</InlineFeedback> : null}
+    {!zones.length ? <EmptyState title="No hay zonas de envío" description={schedulingEnabled ? 'Creá una zona para definir la tarifa. Los días de reparto son opcionales.' : 'Creá una zona para delimitar dónde entregás y cuánto cuesta el envío.'} /> : null}
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{zones.map(zone => {
       const policy = schedules.find(item => item.zoneId === zone.id)
-      return <button key={zone.id} onClick={() => { setMessage(''); setEditing(zone) }} className="surface-card p-5 text-left hover:border-orange-400" type="button">
-        <span className="grid h-10 w-10 place-items-center rounded-xl bg-stone-100 text-stone-500"><MapPin className="h-5 w-5" /></span>
-        <h2 className="mt-4 font-display text-xl font-bold">{zone.name}</h2><p className="mt-1 text-sm text-stone-500">{zone.description}</p>
-        <dl className="mt-4 space-y-1 text-sm"><div className="flex justify-between"><dt>Envío</dt><dd className="font-semibold">{formatMoney(zone.delivery_fee_cents, currency, locale)}</dd></div><div className="flex justify-between"><dt>Mínimo</dt><dd>{formatMoney(zone.minimum_order_cents, currency, locale)}</dd></div>{zone.free_shipping_from_cents !== null ? <div className="flex justify-between"><dt>Gratis desde</dt><dd>{formatMoney(zone.free_shipping_from_cents, currency, locale)}</dd></div> : null}</dl>
-        {schedulingEnabled ? <p className="mt-3 text-xs text-stone-500">{!zone.active ? 'Zona inactiva' : policy?.menuEnabled || policy?.storeEnabled ? 'Con días de reparto' : 'Entrega a coordinar'}</p> : null}
+      return <button key={zone.id} onClick={() => { setMessage(''); setEditing(zone) }} className="surface-card zone-summary-card min-w-0 p-4 text-left" type="button">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex min-w-0 items-center gap-2 font-display text-base font-bold"><MapPin className="h-4 w-4 shrink-0" aria-hidden /><span className="wrap-anywhere">{zone.name}</span></h2>
+          <span className={`status-badge ${zone.active ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-stone-200 bg-stone-100 text-stone-600'}`}>{zone.active ? 'Zona activa' : 'Zona inactiva'}</span>
+        </div>
+        {zone.description ? <p className="settings-help mt-1">{zone.description}</p> : null}
+        <dl className="mt-3 space-y-1 border-t border-stone-200 pt-2 text-sm"><div className="flex flex-wrap justify-between gap-x-3"><dt>Envío</dt><dd className="font-semibold">{formatMoney(zone.delivery_fee_cents, currency, locale)}</dd></div><div className="flex flex-wrap justify-between gap-x-3"><dt>Mínimo</dt><dd>{formatMoney(zone.minimum_order_cents, currency, locale)}</dd></div>{zone.free_shipping_from_cents !== null ? <div className="flex flex-wrap justify-between gap-x-3"><dt>Gratis desde</dt><dd>{formatMoney(zone.free_shipping_from_cents, currency, locale)}</dd></div> : null}</dl>
+        {schedulingEnabled && zone.active ? <p className="settings-help mt-2">{policy?.menuEnabled || policy?.storeEnabled ? 'Con días de reparto' : 'Entrega a coordinar'}</p> : null}
       </button>
     })}</div>
     {editing ? <DeliveryZoneForm key={editing === 'new' ? 'new' : editing.id} restaurantId={restaurantId} zone={editing === 'new' ? null : editing} zones={zones} policy={schedules.find(item => editing !== 'new' && item.zoneId === editing.id)} schedulingEnabled={schedulingEnabled} timezone={restaurant.data?.timezone ?? 'America/Argentina/Cordoba'} onClose={() => setEditing(null)} onSaved={saved} /> : null}
@@ -100,45 +113,27 @@ export function DeliveryZoneForm({ restaurantId, zone, zones, policy, scheduling
   const [copyZoneIds, setCopyZoneIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [section, setSection] = useState<ZoneSection>('details')
+  const [issueSection, setIssueSection] = useState<ZoneSection | null>(null)
   const dialog = useRef<HTMLElement>(null)
   const busy = useRef(false)
-  const close = useRef(onClose)
-  useEffect(() => { close.current = onClose }, [onClose])
-
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null
-    dialog.current?.querySelector<HTMLInputElement>('input')?.focus()
-    const keyboard = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy.current) close.current()
-      if (event.key !== 'Tab') return
-      const items = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button,input,select,textarea,summary') ?? []).filter(item => {
-        if (item.matches(':disabled')) return false
-        let parent = item.parentElement
-        while (parent && parent !== dialog.current) {
-          if (parent instanceof HTMLDetailsElement && !parent.open && item.tagName !== 'SUMMARY') return false
-          parent = parent.parentElement
-        }
-        return true
-      })
-      const first = items[0]; const last = items.at(-1)
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
-    }
-    document.addEventListener('keydown', keyboard)
-    return () => { document.removeEventListener('keydown', keyboard); previous?.focus() }
-  }, [])
+  useDialogFocus(dialog, true, () => { if (!busy.current) onClose() })
 
   function patch<K extends keyof ZoneDraft>(key: K, value: ZoneDraft[K]) { setDraft(current => ({ ...current, [key]: value })) }
   async function save(event: FormEvent) {
     event.preventDefault()
     if (busy.current) return
     setError('')
+    setIssueSection(null)
     const fee = parsePriceCents(draft.fee); const minimum = parsePriceCents(draft.minimum)
     const freeFrom = draft.freeFrom.trim() === '' ? null : parsePriceCents(draft.freeFrom)
-    if (!draft.name.trim() || fee === null || minimum === null || (draft.freeFrom.trim() !== '' && freeFrom === null)) { setError('Revisá el nombre y los importes. Usá hasta dos decimales.'); return }
+    if (!draft.name.trim() || fee === null || minimum === null || (draft.freeFrom.trim() !== '' && freeFrom === null)) {
+      showIssue('details', 'Revisá el nombre y los importes. Usá hasta dos decimales.', !draft.name.trim() ? 'zone-name' : fee === null ? 'zone-fee' : minimum === null ? 'zone-minimum' : 'zone-free-from')
+      return
+    }
     let validated: DeliveryPolicyInput | null
     try { validated = schedulingEnabled ? new DeliverySchedule(calendar).toInput() : null }
-    catch (failure) { setError(failure instanceof z.ZodError ? failure.issues[0]?.message ?? 'Revisá los días de reparto.' : 'Revisá los días de reparto.'); return }
+    catch (failure) { showIssue('calendar', failure instanceof z.ZodError ? failure.issues[0]?.message ?? 'Revisá los días de reparto.' : 'Revisá los días de reparto.', 'zone-calendar-heading'); return }
     busy.current = true; setSaving(true)
     try {
       const result = await saveDeliveryZone({ restaurantId, zoneId, zone: {
@@ -150,13 +145,39 @@ export function DeliveryZoneForm({ restaurantId, zone, zones, policy, scheduling
     finally { busy.current = false; setSaving(false) }
   }
 
-  return <div className="modal-backdrop"><section ref={dialog} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="delivery-zone-title">
-    <div className="flex justify-between gap-4"><h2 id="delivery-zone-title" className="font-display text-2xl font-bold">{zone ? 'Editar zona' : 'Nueva zona'}</h2><button className="icon-button" disabled={saving} onClick={onClose} aria-label="Cerrar" type="button"><X /></button></div>
-    <form onSubmit={save} noValidate><fieldset disabled={saving}>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="field sm:col-span-2"><span>Nombre</span><input maxLength={120} value={draft.name} onChange={event => patch('name', event.target.value)} placeholder="Ej.: Centro" /></label><label className="field sm:col-span-2"><span>Descripción</span><input maxLength={1000} value={draft.description} onChange={event => patch('description', event.target.value)} /></label><label className="field"><span>Costo de envío</span><input inputMode="decimal" value={draft.fee} onChange={event => patch('fee', event.target.value)} /></label><label className="field"><span>Pedido mínimo</span><input inputMode="decimal" value={draft.minimum} onChange={event => patch('minimum', event.target.value)} /></label><label className="field"><span>Envío gratis desde</span><input inputMode="decimal" value={draft.freeFrom} onChange={event => patch('freeFrom', event.target.value)} placeholder="Sin promoción" /></label><label className="check-field"><input type="checkbox" checked={draft.active} onChange={event => patch('active', event.target.checked)} />Activa</label></div>
-      {schedulingEnabled ? <DeliveryScheduleFields value={calendar} onChange={setCalendar} timezone={timezone} zones={zones.filter(item => item.id !== zoneId)} copyZoneIds={copyZoneIds} onCopyChange={setCopyZoneIds} /> : null}
-    </fieldset>
-    {error ? <p className="form-error mt-4" role="alert">{error}</p> : null}
-    <div className="mt-6 flex justify-end gap-2"><button className="button-secondary" disabled={saving} onClick={onClose} type="button">Cancelar</button><button aria-busy={saving} className="button-primary" disabled={saving} type="submit"><Save className="h-4 w-4" />{saving ? 'Guardando…' : 'Guardar zona'}</button></div></form>
+  function showIssue(current: ZoneSection, text: string, focusId: string) {
+    setSection(current)
+    setIssueSection(current)
+    setError(text)
+    requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>(`#${focusId}`)?.focus())
+  }
+
+  return <div className="modal-backdrop"><section ref={dialog} tabIndex={-1} className="modal-card settings-form-dialog" role="dialog" aria-modal="true" aria-labelledby="delivery-zone-title">
+    <header className="settings-dialog-header"><h2 id="delivery-zone-title" className="font-display text-xl font-bold">{zone ? 'Editar zona' : 'Nueva zona'}</h2><button className="icon-button" disabled={saving} onClick={onClose} aria-label="Cerrar" type="button"><X aria-hidden /></button></header>
+    <form className="settings-dialog-form" onSubmit={save} noValidate>
+      <div className="settings-dialog-body">
+        {schedulingEnabled ? <SectionNavigation label="Sección de la zona" panelPrefix="delivery-zone" sections={zoneSections} selected={section} onSelect={setSection} invalidSections={issueSection ? new Set([issueSection]) : undefined} /> : null}
+        <fieldset disabled={saving}>
+          <div id="delivery-zone-details" className="settings-panel" hidden={section !== 'details'}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="field sm:col-span-2"><span>Nombre</span><input id="zone-name" maxLength={120} value={draft.name} onChange={event => patch('name', event.target.value)} placeholder="Ej.: Centro" /></label>
+              <label className="field sm:col-span-2"><span>Descripción</span><input maxLength={1000} value={draft.description} onChange={event => patch('description', event.target.value)} /></label>
+              <label className="field"><span>Costo de envío</span><input id="zone-fee" inputMode="decimal" value={draft.fee} onChange={event => patch('fee', event.target.value)} /></label>
+              <label className="field"><span>Pedido mínimo</span><input id="zone-minimum" inputMode="decimal" value={draft.minimum} onChange={event => patch('minimum', event.target.value)} /></label>
+              <label className="field"><span>Envío gratis desde</span><input id="zone-free-from" inputMode="decimal" value={draft.freeFrom} onChange={event => patch('freeFrom', event.target.value)} placeholder="Sin promoción" /></label>
+              <label className="check-field settings-option self-end"><input type="checkbox" checked={draft.active} onChange={event => patch('active', event.target.checked)} />Activa</label>
+            </div>
+          </div>
+          {schedulingEnabled ? <div id="delivery-zone-calendar" className="settings-panel" hidden={section !== 'calendar'}>
+            <h3 id="zone-calendar-heading" className="sr-only" tabIndex={-1}>Calendario de reparto</h3>
+            <DeliveryScheduleFields value={calendar} onChange={setCalendar} timezone={timezone} zones={zones.filter(item => item.id !== zoneId)} copyZoneIds={copyZoneIds} onCopyChange={setCopyZoneIds} />
+          </div> : null}
+        </fieldset>
+      </div>
+      <footer className="settings-dialog-footer">
+        {error ? <InlineFeedback tone="error">{error}</InlineFeedback> : null}
+        <div className="settings-dialog-actions"><button className="button-secondary" disabled={saving} onClick={onClose} type="button">Cancelar</button><button aria-busy={saving} className="button-primary" disabled={saving} type="submit"><Save className="h-4 w-4" aria-hidden />{saving ? 'Guardando…' : 'Guardar zona'}</button></div>
+      </footer>
+    </form>
   </section></div>
 }

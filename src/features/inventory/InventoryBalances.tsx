@@ -2,9 +2,11 @@ import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { AdminDataRegion } from '../../components/AdminDataWorkspace'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { hasNoStock, type CountDraft, type InventoryItem } from './inventory'
 
 const overscan = 8
+const minimumVirtualRows = 48
 const initialViewportHeight = 640
 const quantityFormatter = new Intl.NumberFormat('es-AR')
 
@@ -63,14 +65,15 @@ export function InventoryBalances({
 
   const redesignedRowHeight = compact ? (isAdmin ? 184 : 140) : 76
   const rowHeight = redesigned ? redesignedRowHeight : (compact ? 190 : 68)
-  const firstRow = Math.max(0, Math.floor(viewport.scrollTop / rowHeight) - overscan)
-  const lastRow = Math.min(items.length, firstRow + Math.ceil(viewport.height / rowHeight) + overscan * 2)
+  const virtualized = items.length >= minimumVirtualRows
+  const firstRow = virtualized ? Math.max(0, Math.floor(viewport.scrollTop / rowHeight) - overscan) : 0
+  const lastRow = virtualized ? Math.min(items.length, firstRow + Math.ceil(viewport.height / rowHeight) + overscan * 2) : items.length
   const columnCount = (redesigned ? 4 : 5) + (isAdmin ? 1 : 0)
-  const hasEmptyState = redesigned && !items.length
+  const hasEmptyState = items.length === 0
 
   return (
     <AdminDataRegion className="form-card admin-inventory-balances" aria-labelledby="inventory-balances-title">
-      <div className={clsx('flex flex-wrap items-end justify-between gap-3', redesigned && 'stock-balances-header')}>
+      <div className="stock-balances-header">
         <div>
           <h2 className="form-card-title" id="inventory-balances-title">
             {redesigned ? 'Existencias' : `Existencias · ${items.length} productos cargados`}
@@ -78,7 +81,7 @@ export function InventoryBalances({
           {redesigned ? (
             <p>El stock disponible es el total menos las unidades reservadas.</p>
           ) : (
-            <><p className="text-sm">Total menos reservado = disponible para vender.</p><p className="text-sm">Sin cantidad cargada, se permiten pedidos sin controlar stock.</p></>
+            <><p>Total menos reservado = disponible para vender.</p><p>Sin cantidad cargada, se permiten pedidos sin controlar stock.</p></>
           )}
         </div>
         <div className={clsx('w-full sm:max-w-xs', redesigned && 'stock-search')}>
@@ -90,22 +93,25 @@ export function InventoryBalances({
         </div>
       </div>
       {counting && !allItemsLoaded ? <p className="mt-3 text-sm text-amber-800" role="status">Cargando el catálogo completo para garantizar un conteo sin productos omitidos…</p> : null}
-      {redesigned && !counting ? <p className="stock-result-count" role="status">{searching ? 'Buscando productos…' : `${items.length} ${items.length === 1 ? 'producto cargado' : 'productos cargados'}${hasNextPage ? ' · Hay más resultados' : ''}`}</p> : null}
-      {searchError ? <div className="stock-empty" role="alert"><p>{searchError}</p><button className="button-secondary" type="button" onClick={onRetry}>Reintentar carga</button></div> : null}
+      {redesigned && !counting && !(searching && hasEmptyState) ? <p className="stock-result-count" role="status">{searching ? 'Buscando productos…' : `${items.length} ${items.length === 1 ? 'producto cargado' : 'productos cargados'}${hasNextPage ? ' · Hay más resultados' : ''}`}</p> : null}
+      {searchError ? <InlineFeedback tone="error" className="mt-3"><p>{searchError}</p><button className="button-secondary mt-2" type="button" onClick={onRetry}>Reintentar carga</button></InlineFeedback> : null}
+      {hasEmptyState && searching && !counting && !searchError ? <AdminLoading label="Buscando productos…" variant="list" /> : null}
       {hasEmptyState && !searching && !searchError ? <div className="stock-empty">
         <p className="font-semibold">{debouncedSearch ? 'No encontramos productos' : 'Todavía no hay productos'}</p>
         <p>{debouncedSearch ? 'Probá otro nombre o código.' : 'Los productos de tu catálogo se muestran acá.'}</p>
-        {debouncedSearch ? <button className="button-secondary" type="button" onClick={clearSearch}>Ver todos los productos</button> : null}
+        {redesigned && debouncedSearch ? <button className="button-secondary" type="button" onClick={clearSearch}>Ver todos los productos</button> : null}
       </div> : null}
       {!hasEmptyState ? <div
         ref={inventoryViewport}
-        className="admin-data-scroll relative mt-4 max-h-[70vh] overflow-auto"
-        tabIndex={0}
-        aria-label="Lista desplazable de existencias"
-        onScroll={event => setViewport({ scrollTop: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight || initialViewportHeight })}
+        className={clsx('stock-balances-list', virtualized && 'stock-balances-list--virtual')}
+        tabIndex={virtualized ? 0 : undefined}
+        aria-label={virtualized ? 'Lista desplazable de existencias' : undefined}
+        role={virtualized ? 'region' : undefined}
+        aria-busy={searching}
+        onScroll={virtualized ? event => setViewport({ scrollTop: event.currentTarget.scrollTop, height: event.currentTarget.clientHeight || initialViewportHeight }) : undefined}
       >
         <table className="data-table inventory-balances-table" role="table" aria-label="Existencias de productos" aria-rowcount={items.length + 1}>
-          <thead className="sticky top-0 z-10" role="rowgroup"><tr role="row" aria-rowindex={1}>
+          <thead className={virtualized ? 'sticky top-0 z-10' : undefined} role="rowgroup"><tr role="row" aria-rowindex={1}>
             <th scope="col">Producto</th>
             {redesigned ? null : <th scope="col">Código / SKU</th>}
             {redesigned ? <th scope="col">Disponible</th> : <th scope="col">Existencia</th>}
@@ -126,7 +132,7 @@ export function InventoryBalances({
                 <span className="inventory-balance-label" aria-hidden="true">Total</span>
                 {redesigned ? formattedQuantity(item.onHand, true) : item.initialized ? item.onHand : 'Sin cargar'}
               </td>
-              return <tr key={item.productId} role="row" aria-rowindex={firstRow + index + 2} data-inventory-row style={{ height: rowHeight }}>
+              return <tr key={item.productId} role="row" aria-rowindex={firstRow + index + 2} data-inventory-row style={virtualized ? { height: rowHeight } : undefined}>
                 <td className="inventory-product" role="cell">
                   <span className="stock-product-name" title={item.name}>{item.name}</span>
                   {item.archived ? <span className={redesigned ? 'stock-archived' : 'ml-2 text-xs text-stone-500'}>Archivado</span> : null}

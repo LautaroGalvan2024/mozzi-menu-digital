@@ -1,0 +1,178 @@
+/* Campaign controls for the administration surface. Public campaigns use campaigns.css. */
+.admin-app .campaign-admin-form,
+.campaign-editor-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.campaign-admin-fields {
+  display: grid;
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.campaign-editor-publication,
+.campaign-editor-content .form-card {
+  min-width: 0;
+}
+
+.campaign-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.campaign-admin-row {
+  align-items: center;
+}
+
+.campaign-preview-control {
+  justify-self: start;
+}
+
+.campaign-admin-form .campaign-preview {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  background: var(--admin-accent-soft, #fff3e8);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+}
+
+.campaign-admin-form .campaign-preview h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.campaign-admin-form .campaign-preview > img {
+  max-height: 180px;
+  max-width: 100%;
+  object-fit: contain;
+  margin-block-end: 12px;
+}
+
+.campaign-sticky-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 0;
+  border-block-start: 1px solid var(--admin-border);
+  background: var(--admin-canvas);
+}
+
+.campaign-picker-results {
+  border: 1px solid var(--admin-border);
+  border-radius: 8px;
+}
+
+.campaign-picker-result,
+.campaign-selected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-block-end: 1px solid var(--admin-border);
+}
+
+.campaign-picker-result {
+  cursor: pointer;
+}
+
+.campaign-picker-result:hover {
+  background: var(--admin-canvas);
+}
+
+.campaign-picker-result:last-child,
+.campaign-selected:last-child {
+  border-block-end: 0;
+}
+
+.campaign-picker-result > span,
+.campaign-selected > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.campaign-picker-result small,
+.campaign-selected strong {
+  display: block;
+}
+
+.campaign-picker-result small {
+  color: var(--admin-muted);
+}
+
+.campaign-selected strong {
+  font-size: .875rem;
+}
+
+.campaign-share-content {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+}
+
+@media (min-width: 64rem) {
+  .campaign-admin-fields {
+    grid-template-columns: minmax(0, 1.55fr) minmax(17rem, 1fr);
+  }
+
+  .campaign-picker-results {
+    max-height: 15rem;
+    overflow: auto;
+  }
+}
+
+@media (min-width: 36rem) {
+  .campaign-share-content {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 44rem) {
+  .campaign-admin-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .campaign-row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .campaign-row-actions .button-quiet {
+    min-height: 44px;
+  }
+
+  .campaign-selected {
+    flex-wrap: wrap;
+  }
+
+  .campaign-selected > div {
+    flex-basis: 100%;
+  }
+
+  .campaign-sticky-actions > :last-child {
+    flex: 1;
+  }
+}
+
+@media (max-height: 34rem) {
+  .campaign-sticky-actions {
+    position: static;
+  }
+}

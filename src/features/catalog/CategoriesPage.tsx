@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Save, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { EmptyState, ErrorPanel } from '../../components/Feedback'
+import { AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
+import './catalog-admin.css'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
 import {
   CATEGORY_ICON_KEYS,
@@ -86,33 +88,22 @@ function IconPicker({ draft, disabled, onChange }: {
   onChange: (iconKey: CategoryIconKey | null) => void
 }) {
   return (
-    <fieldset className="space-y-2" disabled={disabled}>
-      <legend className="text-sm font-semibold text-stone-800">Ícono de categoría</legend>
-      <p className="text-xs text-stone-500">
-        Se usa cuando la categoría no tiene imagen. Automático elige uno según el nombre.
-      </p>
-      <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
-        <label className={`flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 transition ${draft.iconKey === null ? 'border-orange-500 bg-orange-50 text-orange-900' : 'border-stone-200 bg-white hover:border-orange-300'}`}>
-          <input checked={draft.iconKey === null} className="accent-orange-600" name="category-icon" onChange={() => onChange(null)} type="radio" />
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-stone-600 shadow-sm">
-            <CategoryIconGraphic className="h-4 w-4" iconKey={null} name={draft.name || 'Categoría'} />
-          </span>
-          <span className="min-w-0 text-sm font-medium">Automático</span>
-        </label>
-        {CATEGORY_ICON_OPTIONS.map(({ key, label }) => (
-          <label
-            className={`flex cursor-pointer items-center gap-2 rounded-xl border p-2.5 transition ${draft.iconKey === key ? 'border-orange-500 bg-orange-50 text-orange-900' : 'border-stone-200 bg-white hover:border-orange-300'}`}
-            key={key}
-          >
-            <input checked={draft.iconKey === key} className="accent-orange-600" name="category-icon" onChange={() => onChange(key)} type="radio" />
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white text-stone-600 shadow-sm">
-              <CategoryIconGraphic className="h-4 w-4" iconKey={key} name={label} />
-            </span>
-            <span className="min-w-0 text-sm font-medium">{label}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
+    <div className="catalog-icon-choice">
+      <span className="catalog-icon-preview" aria-hidden>
+        <CategoryIconGraphic className="h-5 w-5" iconKey={draft.iconKey} name={draft.name || 'Categoría'} />
+      </span>
+      <label className="field">
+        <span>Ícono de categoría</span>
+        <select disabled={disabled} value={draft.iconKey ?? ''} onChange={event => {
+          const value = event.currentTarget.value
+          onChange(isCategoryIconKey(value) ? value : null)
+        }}>
+          <option value="">Automático</option>
+          {CATEGORY_ICON_OPTIONS.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        <small>Se muestra cuando la categoría no tiene foto.</small>
+      </label>
+    </div>
   )
 }
 
@@ -122,6 +113,19 @@ export function CategoriesPage() {
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
+  const editorOpen = Boolean(draft)
+  useEffect(() => {
+    const element = dialog.current
+    if (!editorOpen || !element) return
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (typeof element.showModal === 'function') element.showModal()
+    else element.setAttribute('open', '')
+    return () => {
+      if (element.open && typeof element.close === 'function') element.close()
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+    }
+  }, [editorOpen])
 
   const query = useQuery({
     queryKey: queryKeys.categories(scope.selected?.id),
@@ -138,7 +142,7 @@ export function CategoriesPage() {
     },
   })
 
-  if (query.isLoading) return <LoadingScreen />
+  if (query.isLoading) return <AdminLoading variant="list" label="Cargando categorías…" />
   if (query.error) return <ErrorPanel>{query.error.message}</ErrorPanel>
 
   function patch<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -209,10 +213,10 @@ export function CategoriesPage() {
         eyebrow="Catálogo"
         title="Categorías"
       />
-      <div className="space-y-3">
-        {query.data?.map(row => (
+      {query.data?.length ? <div className="catalog-directory">
+        {query.data.map(row => (
           <button
-            className="surface-card flex w-full items-center gap-4 p-4 text-left hover:border-orange-400"
+            className="catalog-directory-row catalog-category-row"
             disabled={saving}
             key={row.id}
             onClick={() => { setError(null); setDraft(categoryDraft(row)) }}
@@ -220,37 +224,44 @@ export function CategoriesPage() {
           >
             <CategoryVisual row={row} />
             <span className="min-w-0 flex-1">
-              <strong className="block truncate font-display">{row.name}</strong>
-              <small className="text-stone-500">/{row.slug} · orden {row.sort_order}</small>
+              <strong className="block break-words font-semibold">{row.name}</strong>
+              <small className="block break-words text-stone-600">/{row.slug} · orden {row.sort_order}</small>
             </span>
-            <span className={`rounded-full px-2 py-1 text-xs font-bold ${row.active ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'}`}>
+            <span className="catalog-state-badge" data-tone={row.active ? 'success' : 'neutral'}>
               {row.active ? 'Visible' : 'Oculta'}
             </span>
           </button>
         ))}
-      </div>
+      </div> : <EmptyState title="Todavía no hay categorías" description="Creá una categoría para agrupar productos del catálogo." />}
       {draft ? (
-        <div className="modal-backdrop">
-          <section aria-labelledby="category-dialog-title" aria-modal="true" className="modal-card" role="dialog">
-            <div className="flex justify-between gap-4">
-              <h2 className="font-display text-2xl font-bold" id="category-dialog-title">{draft.id ? 'Editar' : 'Nueva'} categoría</h2>
-              <button aria-label="Cerrar" className="icon-button" disabled={saving} onClick={() => setDraft(null)} type="button"><X /></button>
-            </div>
-            <div className="mt-5 space-y-4">
+        <dialog
+          ref={dialog}
+          aria-labelledby="category-dialog-title"
+          className="modal-card catalog-category-dialog"
+          onCancel={event => { event.preventDefault(); if (!saving) setDraft(null) }}
+        >
+          <header className="catalog-dialog-header">
+            <h2 className="form-card-title" id="category-dialog-title">{draft.id ? 'Editar' : 'Nueva'} categoría</h2>
+            <button aria-label="Cerrar" className="icon-button" disabled={saving} onClick={() => setDraft(null)} type="button"><X aria-hidden /></button>
+          </header>
+          <div className="catalog-dialog-content">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="field"><span>Nombre</span><input maxLength={100} onChange={event => patch('name', event.target.value)} value={draft.name} /></label>
-              <label className="field"><span>Identificador del enlace (opcional)</span><input maxLength={100} onChange={event => patch('slug', event.target.value)} value={draft.slug} /></label>
-              <label className="field"><span>Descripción</span><textarea maxLength={300} onChange={event => patch('description', event.target.value)} rows={2} value={draft.description} /></label>
+              <label className="field"><span>Identificador del enlace (opcional)</span><input maxLength={100} onChange={event => patch('slug', event.target.value)} value={draft.slug} /><small>Si queda vacío, se genera a partir del nombre.</small></label>
+              <label className="field sm:col-span-2"><span>Descripción</span><textarea maxLength={300} onChange={event => patch('description', event.target.value)} rows={2} value={draft.description} /></label>
               <IconPicker draft={draft} disabled={saving} onChange={iconKey => patch('iconKey', iconKey)} />
-              <label className="field"><span>Orden</span><input min="0" onChange={event => patch('sortOrder', Number(event.target.value))} type="number" value={draft.sortOrder} /></label>
-              <label className="check-field"><input checked={draft.active} onChange={event => patch('active', event.target.checked)} type="checkbox" />Visible</label>
+              <div className="catalog-category-order">
+                <label className="field"><span>Orden</span><input min="0" onChange={event => patch('sortOrder', Number(event.target.value))} type="number" value={draft.sortOrder} /></label>
+                <label className="check-field"><input checked={draft.active} onChange={event => patch('active', event.target.checked)} type="checkbox" />Visible</label>
+              </div>
             </div>
             {error ? <p className="form-error mt-4" role="alert">{error}</p> : null}
-            <div className="mt-6 flex justify-end gap-2">
-              <button className="button-secondary" disabled={saving} onClick={() => setDraft(null)} type="button">Cancelar</button>
-              <button aria-busy={saving} className="button-primary" disabled={saving} onClick={() => void save()} type="button"><Save className="h-4 w-4" />{saving ? 'Guardando…' : 'Guardar'}</button>
-            </div>
-          </section>
-        </div>
+          </div>
+          <footer className="catalog-dialog-actions">
+            <button className="button-secondary" disabled={saving} onClick={() => setDraft(null)} type="button">Cancelar</button>
+            <button aria-busy={saving} className="button-primary" disabled={saving} onClick={() => void save()} type="button"><Save className="h-4 w-4" aria-hidden />{saving ? 'Guardando…' : 'Guardar'}</button>
+          </footer>
+        </dialog>
       ) : null}
     </>
   )

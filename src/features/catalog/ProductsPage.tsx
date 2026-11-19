@@ -3,7 +3,8 @@ import { ChevronDown, CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizont
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
-import { ErrorPanel,EmptyState,LoadingScreen } from '../../components/Feedback'
+import { ErrorPanel, EmptyState } from '../../components/Feedback'
+import { AdminLoading } from '../../components/AdminFeedback'
 import { AdminDataRegion, AdminDataWorkspace } from '../../components/AdminDataWorkspace'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
@@ -16,6 +17,7 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { ProductFamilies } from './ProductFamilies'
 import { ProductImagesExport } from './ProductImagesExport'
+import './catalog-admin.css'
 
 const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),description:z.string(),base_price_cents:z.union([z.number(),z.string()]),promotional_price_cents:z.union([z.number(),z.string()]).nullable(),image_path:z.string().nullable(),active:z.boolean(),available:z.boolean(),featured:z.boolean(),sort_order:z.number().int(),category_id:z.string().uuid(),categories:z.object({name:z.string()}).nullable()})
 type ToggleField='available'|'active'|'featured'
@@ -43,7 +45,7 @@ export function ProductsPage(){
       return{rows,count:count??rows.length}
     },
   })
-  if(query.isLoading||restaurant.isLoading)return <LoadingScreen/>;if(query.error||restaurant.error)return <ErrorPanel>{query.error?.message??restaurant.error?.message}</ErrorPanel>
+  if(query.isLoading||restaurant.isLoading)return <AdminLoading label="Cargando productos…" variant="list" />;if(query.error||restaurant.error)return <ErrorPanel>{query.error?.message??restaurant.error?.message}</ErrorPanel>
   const products=query.data?.rows??[];const total=query.data?.count??0
 
   async function toggle(id:string,field:ToggleField,value:boolean){
@@ -61,7 +63,7 @@ export function ProductsPage(){
     <PageHeader
       eyebrow="Catálogo"
       title="Productos"
-      description="Administrá los productos, precios y disponibilidad de tu catálogo."
+      description="Precios, disponibilidad y variantes de tu catálogo."
     />
     {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
     <AdminDataRegion className="catalog-data-region">
@@ -84,30 +86,36 @@ export function ProductsPage(){
       </div>
     </div>
     {mutationError?<p className="form-error mb-5" role="alert">{mutationError}</p>:null}
-    {products.length===0?<div className="admin-data-results admin-data-scroll"><EmptyState title="No hay productos" description="Creá el primero o cambiá la búsqueda."/></div>:<div className="admin-table-shell admin-data-results admin-data-scroll catalog-products-list rounded-xl border border-stone-200 bg-white">
-      <div className="catalog-products-header hidden grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] gap-4 border-b border-stone-200 px-5 py-3 text-xs font-medium text-stone-500 lg:grid" aria-hidden><span>Producto</span><span>Estado</span><span className="text-right">Precio</span><span /></div>
+    {products.length===0?<div className="admin-data-results admin-data-scroll"><EmptyState title={normalizedSearch ? 'Sin resultados' : 'Todavía no hay productos'} description={normalizedSearch ? 'Probá con otro nombre o código.' : 'Creá tu primer producto desde el botón de arriba.'}/></div>:<div className="admin-table-shell admin-data-results admin-data-scroll catalog-products-list rounded-xl border border-stone-200 bg-white">
+      <div className="catalog-product-heading" aria-hidden><span>Producto</span><div><span>Estado</span><span>Precio</span></div><span /></div>
       {products.map((row)=>{
         const image=responsiveAssetUrls(row.image_path);const busy=busyProductId===row.id;const hasPromotion=row.promotional_price_cents!==null
-        return <article className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 border-b border-stone-100 p-4 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_8rem_8rem_6rem] lg:px-5" key={row.id}>
-          <Link to={`/admin/catalogo/productos/${row.id}`} className="flex min-w-0 items-center gap-3 rounded-lg focus-visible:outline-offset-4">
+        return <article className="catalog-product-line" key={row.id}>
+          <Link to={`/admin/catalogo/productos/${row.id}`} className="catalog-product-identity flex items-center gap-3 rounded-lg focus-visible:outline-offset-4">
             {image.src?<img src={image.src} srcSet={image.srcSet} sizes="48px" alt="" loading="lazy" decoding="async" className="h-12 w-12 shrink-0 rounded-lg border border-stone-100 object-cover"/>:<span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-stone-100 text-stone-400"><ImageIcon className="h-5 w-5" aria-hidden/></span>}
             <div className="min-w-0">
               <h2 className="break-words text-sm font-semibold leading-5 text-stone-950">{row.name}{row.featured ? <Star className="ml-1.5 inline h-3.5 w-3.5 text-stone-400" aria-label="Destacado" /> : null}</h2>
-              <p className="mt-1 truncate text-xs text-stone-500">{row.categories?.name??'Sin categoría'} <span aria-hidden>·</span> {row.code}</p>
+              <p className="mt-1 break-words text-xs text-stone-600">{row.categories?.name??'Sin categoría'} <span aria-hidden>·</span> {row.code}</p>
             </div>
           </Link>
-          <p className="col-start-1 row-start-2 flex items-center gap-1.5 pl-15 text-xs text-stone-600 lg:col-auto lg:row-auto lg:pl-0"><span className={`h-1.5 w-1.5 rounded-full ${!row.active?'bg-stone-300':row.available?'bg-emerald-600':'bg-amber-600'}`} aria-hidden />{!row.active?'Oculto':row.available?'Disponible':'Agotado'}</p>
-          <div className="col-start-1 row-start-3 pl-15 text-sm font-semibold tabular-nums text-stone-950 sm:col-start-2 sm:row-start-2 sm:pl-0 sm:text-right lg:col-auto lg:row-auto">
-            <p>{formatMoney(row.promotional_price_cents??row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>
-            {hasPromotion?<p className="mt-0.5 text-xs font-normal text-stone-400 line-through">{formatMoney(row.base_price_cents,restaurant.data?.currency_code,restaurant.data?.locale)}</p>:null}
+          <div className="catalog-product-details">
+            <p className="catalog-product-state">
+              <span className="catalog-state-badge" data-tone={!row.active ? 'neutral' : row.available ? 'success' : 'warning'}>
+                {!row.active ? 'Oculto' : row.available ? 'Disponible' : 'No disponible'}
+              </span>
+            </p>
+            <div className="catalog-product-price text-sm font-semibold tabular-nums text-stone-950">
+              <p>{formatMoney(row.promotional_price_cents ?? row.base_price_cents, restaurant.data?.currency_code, restaurant.data?.locale)}</p>
+              {hasPromotion ? <p className="mt-0.5 text-xs font-normal text-stone-500 line-through">{formatMoney(row.base_price_cents, restaurant.data?.currency_code, restaurant.data?.locale)}</p> : null}
+            </div>
           </div>
-          <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 lg:col-auto lg:row-auto">
+          <div className="catalog-product-control flex items-center justify-end gap-1">
             <Link className="hidden rounded-lg px-2 py-2 text-sm font-medium text-stone-600 hover:text-stone-950 sm:block" aria-label={`Editar ${row.name}`} to={`/admin/catalogo/productos/${row.id}`}>Editar</Link>
             <details className="catalog-product-actions relative" name="product-actions" onToggle={event => { const details=event.currentTarget; if(!details.open){delete details.dataset.placement;return} const menu=details.querySelector<HTMLElement>('.catalog-product-actions-menu');const viewport=details.closest<HTMLElement>('.catalog-products-list');if(!menu||!viewport)return;const trigger=details.getBoundingClientRect();const bounds=viewport.getBoundingClientRect();const below=bounds.bottom-trigger.bottom;const above=trigger.top-bounds.top;details.dataset.placement=below<menu.offsetHeight&&above>below?'top':'bottom' }} onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
               <summary className="icon-button list-none [&::-webkit-details-marker]:hidden" aria-label={`Opciones de ${row.name}`}><MoreHorizontal className="h-5 w-5" aria-hidden /></summary>
               <div className="catalog-product-actions-menu absolute right-0 z-20 grid w-60 gap-1 rounded-xl border border-stone-200 bg-white p-1.5 shadow-lg">
                 <Link className="rounded-lg px-3 py-2.5 text-sm hover:bg-stone-50" to={`/admin/catalogo/productos/${row.id}`}>Editar producto</Link>
-                <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.available} aria-label={`${row.available?'Disponible':'Agotado'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'available',!row.available)}>{row.available?<CircleX className="h-4 w-4" aria-hidden/>:<CircleCheck className="h-4 w-4" aria-hidden/>}{row.available?'Marcar agotado':'Marcar disponible'}</button>
+                <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.available} aria-label={`${row.available?'Disponible':'No disponible'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'available',!row.available)}>{row.available?<CircleX className="h-4 w-4" aria-hidden/>:<CircleCheck className="h-4 w-4" aria-hidden/>}{row.available?'Marcar no disponible':'Marcar disponible'}</button>
                 <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.active} aria-label={`${row.active?'Activo':'Oculto'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'active',!row.active)}>{row.active?<EyeOff className="h-4 w-4" aria-hidden/>:<Eye className="h-4 w-4" aria-hidden/>}{row.active?'Ocultar producto':'Mostrar producto'}</button>
                 <button type="button" disabled={Boolean(busyProductId)} aria-pressed={row.featured} aria-label={`${row.featured?'Destacado':'Sin destacar'}: ${row.name}`} className="flex min-h-10 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:opacity-50" onClick={()=>void toggle(row.id,'featured',!row.featured)}><Star className="h-4 w-4" aria-hidden/>{row.featured?'Quitar destacado':'Destacar producto'}</button>
                 {busy ? <p role="status" className="px-3 py-2 text-xs text-stone-500">Guardando…</p> : null}

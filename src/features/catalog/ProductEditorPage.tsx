@@ -5,6 +5,8 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router'
 import { z } from 'zod'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { PageHeader } from '../../components/PageHeader'
+import { SectionNavigation } from '../../components/SectionNavigation'
+import './catalog-admin.css'
 import { processImage } from '../../lib/images/processImage'
 import { responsiveAssetUrls } from '../../lib/images/responsive'
 import { cleanupRestaurantImage } from '../../lib/images/cleanup'
@@ -116,6 +118,16 @@ function toLocal(value: string | null) {
   const offset = date.getTimezoneOffset()
   return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16)
 }
+const productSections = [
+  { id: 'basics', label: 'Datos principales' },
+  { id: 'pricing', label: 'Promociones y precios especiales' },
+  { id: 'extras', label: 'Extras y adicionales' },
+  { id: 'organization', label: 'Código y organización' },
+] as const
+
+type ProductSection = typeof productSections[number]['id']
+type ProductErrorLocation = { section: ProductSection; field?: string }
+
 export function ProductEditorPage() {
   const { productId } = useParams()
   const isNew = productId === undefined || productId === 'nuevo'
@@ -127,17 +139,22 @@ export function ProductEditorPage() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const saveInFlight = useRef(false)
-  const promotionsSection = useRef<HTMLDetailsElement>(null)
-  const [keepPromotionsOpen, setKeepPromotionsOpen] = useState(false)
-  const extrasSection = useRef<HTMLDetailsElement>(null)
-  const organizationSection = useRef<HTMLDetailsElement>(null)
+  const [section, setSection] = useState<ProductSection>('basics')
   const [error, setError] = useState<string | null>(null)
-  function showEditorError(message: string | null) {
+  const [errorLocation, setErrorLocation] = useState<ProductErrorLocation | null>(null)
+  const errorMessage = useRef<HTMLParagraphElement>(null)
+
+  useEffect(() => {
+    if (!error) return
+    const field = errorLocation?.field ? document.getElementById(errorLocation.field) : null
+    if (field && !field.matches(':disabled')) field.focus()
+    else errorMessage.current?.focus()
+  }, [error, errorLocation])
+
+  function showEditorError(message: string | null, location?: ProductErrorLocation) {
     setError(message)
-    if (!message) return
-    if (/precios|precio|vigencia/.test(message) && promotionsSection.current) promotionsSection.current.open = true
-    if (/opciones|grupo/.test(message) && extrasSection.current) extrasSection.current.open = true
-    if (/código|orden/.test(message) && organizationSection.current) organizationSection.current.open = true
+    setErrorLocation(location ?? null)
+    if (location) setSection(location.section)
   }
   const [pendingSave, setPendingSave] = useState<ProductSaveAttempt | null>(null)
   const stock = useQuery({
@@ -223,7 +240,8 @@ export function ProductEditorPage() {
     setImageFile(null)
     setError(null)
     setPendingSave(null)
-    setKeepPromotionsOpen(false)
+    setSection('basics')
+    setErrorLocation(null)
   }, [productId, scope.selected?.id])
   useEffect(() => {
     if (draft || !scope.selected) return
@@ -329,12 +347,10 @@ export function ProductEditorPage() {
   if (!draft) return <LoadingScreen />
   function patch<K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) {
     if (pendingSave || saving) return
-    if (key === 'promotionalPrice' && value === '') setKeepPromotionsOpen(true)
     setDraft((d) => (d ? { ...d, [key]: value } : d))
   }
   function removePromotion() {
     if (pendingSave || saving) return
-    setKeepPromotionsOpen(true)
     setDraft(value => value ? { ...value, promotionalPrice: '', promotionStartsAt: '', promotionEndsAt: '' } : value)
   }
   function patchGroup(id: string, values: Partial<GroupDraft>) {
@@ -439,11 +455,24 @@ export function ProductEditorPage() {
           stockChange = { onHand, expectedVersion: currentDraft.stockBaseline?.version ?? null }
         }
       } catch (failure) {
-        showEditorError(failure instanceof Error ? failure.message : 'Revisá la cantidad de stock.'); setSaving(false); return
+        showEditorError(failure instanceof Error ? failure.message : 'Revisá la cantidad de stock.', { section: 'basics', field: 'product-stock' })
+        setSaving(false)
+        return
       }
     }
-    if (!currentDraft.name.trim() || currentDraft.name.trim().length > 160 || currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code) || currentDraft.description.length > 2000 || !moneyIsValid(base) || (promo !== null && (!moneyIsValid(promo) || promo > base)) || !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000 || (startsAt !== null && Number.isNaN(startsAt.getTime())) || (endsAt !== null && Number.isNaN(endsAt.getTime())) || (startsAt && endsAt && endsAt <= startsAt)) {
-      showEditorError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.')
+    const validation: { invalid: boolean; location: ProductErrorLocation }[] = [
+      { invalid: !currentDraft.name.trim() || currentDraft.name.trim().length > 160, location: { section: 'basics', field: 'product-name' } },
+      { invalid: currentDraft.code.trim().length > 80 || /[\p{Cc}]/u.test(currentDraft.code), location: { section: 'organization', field: 'product-code' } },
+      { invalid: currentDraft.description.length > 2000, location: { section: 'basics', field: 'product-description' } },
+      { invalid: !moneyIsValid(base), location: { section: 'basics', field: 'product-price' } },
+      { invalid: promo !== null && (!moneyIsValid(promo) || promo > base), location: { section: 'pricing', field: 'product-promotion-price' } },
+      { invalid: !Number.isInteger(currentDraft.sortOrder) || Math.abs(currentDraft.sortOrder) > 100000, location: { section: 'organization', field: 'product-order' } },
+      { invalid: startsAt !== null && Number.isNaN(startsAt.getTime()), location: { section: 'pricing', field: 'product-promotion-start' } },
+      { invalid: (endsAt !== null && Number.isNaN(endsAt.getTime())) || Boolean(startsAt && endsAt && endsAt <= startsAt), location: { section: 'pricing', field: 'product-promotion-end' } },
+    ]
+    const invalidEntry = validation.find(entry => entry.invalid)
+    if (invalidEntry) {
+      showEditorError('Revisá el nombre, los precios y la vigencia. Los importes admiten hasta dos decimales. El código es opcional; si lo informás, debe tener hasta 80 caracteres sin saltos de línea.', invalidEntry.location)
       setSaving(false)
       return
     }
@@ -461,19 +490,19 @@ export function ProductEditorPage() {
     const quantityValues = new Set(quantityPrices.map((rule) => rule.quantity))
     const quantityThreshold = currentDraft.quantityPricingMode === 'threshold' ? { minimumQuantity: currentDraft.quantityThresholdMinimum, unitPriceCents: parsePriceCents(currentDraft.quantityThresholdPrice) ?? Number.NaN } : null
     if (quantityThreshold && (!Number.isInteger(quantityThreshold.minimumQuantity) || quantityThreshold.minimumQuantity < 2 || quantityThreshold.minimumQuantity > 100 || !moneyIsValid(quantityThreshold.unitPriceCents))) {
-      showEditorError('Revisá el precio por cantidad: el mínimo debe estar entre 2 y 100 y el precio unitario debe ser válido.')
+      showEditorError('Revisá el precio por cantidad: el mínimo debe estar entre 2 y 100 y el precio unitario debe ser válido.', { section: 'pricing', field: 'product-quantity-mode' })
       setSaving(false)
       return
     }
     if (currentDraft.quantityPricingMode === 'bundles' && (quantityValues.size !== quantityPrices.length || quantityPrices.some((rule) => !Number.isInteger(rule.quantity) || rule.quantity < 2 || rule.quantity > 20 || !moneyIsValid(rule.totalPriceCents)))) {
-      showEditorError('Revisá los precios por cantidad: cada cantidad entre 2 y 20 debe aparecer una sola vez y tener un precio válido.')
+      showEditorError('Revisá los precios por cantidad: cada cantidad entre 2 y 20 debe aparecer una sola vez y tener un precio válido.', { section: 'pricing', field: 'product-quantity-mode' })
       setSaving(false)
       return
     }
     for (const group of groups) {
       const activeOptionCount = group.options.filter((option) => option.active).length
       if (!group.name.trim() || group.name.trim().length > 120 || !Number.isInteger(group.minSelect) || !Number.isInteger(group.maxSelect) || group.minSelect < 0 || group.minSelect > activeOptionCount || group.maxSelect < Math.max(1, group.minSelect) || group.maxSelect > 20 || (group.required && group.minSelect < 1) || !Number.isInteger(group.sortOrder) || Math.abs(group.sortOrder) > 100000 || group.options.some((option) => !option.name.trim() || option.name.trim().length > 120 || !moneyIsValid(option.priceDeltaCents) || !Number.isInteger(option.sortOrder) || Math.abs(option.sortOrder) > 100000)) {
-        showEditorError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.')
+        showEditorError('Revisá nombres, precios y límites de las opciones. El máximo debe estar entre 1 y 20, y el mínimo no puede superar las opciones activas.', { section: 'extras', field: 'product-extra-' + group.id })
         setSaving(false)
         return
       }
@@ -603,85 +632,129 @@ export function ProductEditorPage() {
     await invalidateCatalogQueries(client, scope.selected.id)
     navigate('/admin/catalogo/productos')
   }
+  function invalidField(id: string, hint?: string) {
+    const invalid = errorLocation?.field === id
+    const description = [hint, invalid ? 'product-editor-error' : null].filter(Boolean).join(' ')
+    return { 'aria-invalid': invalid || undefined, 'aria-describedby': description || undefined }
+  }
   return (
     <>
       <PageHeader
         eyebrow="Catálogo"
         title={isNew ? 'Nuevo producto' : 'Editar producto'}
-        description="Nombre, precio y stock: lo esencial para empezar."
+        {...(!isNew && draft.name ? { description: draft.name } : {})}
         actions={<Link className="button-secondary" to="/admin/catalogo/productos"><ArrowLeft className="h-4 w-4" />Volver</Link>}
       />
-      <div className="mx-auto max-w-4xl space-y-4">
+      <div className="catalog-editor">
+        <SectionNavigation
+          label="Secciones del producto"
+          panelPrefix="product-section"
+          sections={productSections}
+          selected={section}
+          onSelect={setSection}
+          {...(errorLocation ? { invalidSections: new Set([errorLocation.section]) } : {})}
+        />
         {pendingSave ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">Hay un guardado pendiente de confirmación. Reintentá el mismo envío antes de cambiar los datos.</p> : null}
-        {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <fieldset disabled={saving || Boolean(pendingSave)} className="m-0 space-y-4 border-0 p-0">
-          <section className="form-card">
-            <h2 className="form-card-title mb-5">Datos principales</h2>
-            <div className="grid gap-5 sm:grid-cols-2">
-              <label className="field"><span>Nombre</span><input maxLength={160} value={draft.name} onChange={e => patch('name', e.target.value)} placeholder="Nombre del producto" /></label>
-              <label className="field"><span>Categoría</span><select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={e => patch('categoryId', e.target.value)}>{categories.data?.map(category => <option value={category.id} key={category.id}>{category.name}</option>)}</select>{product.data?.product.family_id ? <p className="text-xs font-normal text-stone-500">La categoría se cambia desde la ficha de variantes en Productos.</p> : null}</label>
-              <label className="field"><span>Precio base</span><input type="number" min="0" step="0.01" value={draft.basePrice} onChange={e => patch('basePrice', e.target.value)} /></label>
-              <div className="field">
-                <label htmlFor="product-stock">Stock (unidades)</label>
-                <input id="product-stock" type="text" inputMode="numeric" aria-describedby="product-stock-help product-stock-current" value={draft.stockQuantity} disabled={stock.data?.policy.mode === 'paused' || Boolean(stock.data?.policy.cutoverId)} onChange={event => patch('stockQuantity', event.target.value)} placeholder={isNew ? 'Ej.: 20' : 'Sin modificar'} />
-                <p id="product-stock-help" className="text-xs font-normal text-stone-500">Cantidad total. Vacío conserva el stock existente. Sin cantidad cargada, se permiten pedidos sin controlar stock. Con control activo, 0 indica agotado. Los pedidos recibidos sin control siguen sin descuento automático.</p>
-                <p id="product-stock-current" className="text-xs font-normal text-stone-500">{draft.stockBaseline?.initialized ? `Stock actual: ${draft.stockBaseline.onHand} · Reservado: ${draft.stockBaseline.reserved} · Disponible: ${draft.stockBaseline.available}` : 'Todavía no se cargó stock para este producto.'}</p>
-                {stock.data?.policy.cutoverId ? <p className="text-xs font-normal text-amber-800">Hay una actualización de inventario en curso. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'paused' ? <p className="text-xs font-normal text-amber-800">El stock está pausado. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'never_enabled' ? <p className="text-xs font-normal text-stone-500">Podés cargar las cantidades ahora y activar el control desde Stock.</p> : null}
+        {error ? <p id="product-editor-error" className="form-error" role="alert" ref={errorMessage} tabIndex={-1}>{error}</p> : null}
+        <fieldset disabled={saving || Boolean(pendingSave)} className="catalog-editor-fields">
+          <div id="product-section-basics" hidden={section !== 'basics'} className="catalog-editor-basics">
+            <section className="form-card">
+              <h2 className="form-card-title mb-4">Datos principales</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="field">
+                  <span>Nombre</span>
+                  <input id="product-name" {...invalidField('product-name')} maxLength={160} value={draft.name} onChange={event => patch('name', event.target.value)} placeholder="Nombre del producto" />
+                </label>
+                <label className="field">
+                  <span>Categoría</span>
+                  <select disabled={Boolean(product.data?.product.family_id)} value={draft.categoryId} onChange={event => patch('categoryId', event.target.value)}>
+                    {categories.data?.map(category => <option value={category.id} key={category.id}>{category.name}</option>)}
+                  </select>
+                  {product.data?.product.family_id ? <p className="text-xs font-normal text-stone-500">La categoría se cambia desde la ficha de variantes en Productos.</p> : null}
+                </label>
+                <label className="field">
+                  <span>Precio base</span>
+                  <input id="product-price" {...invalidField('product-price')} type="number" min="0" step="0.01" value={draft.basePrice} onChange={event => patch('basePrice', event.target.value)} />
+                </label>
+                <label className="field sm:col-span-2">
+                  <span>Descripción</span>
+                  <textarea id="product-description" {...invalidField('product-description')} rows={2} maxLength={2000} value={draft.description} onChange={event => patch('description', event.target.value)} placeholder="Una descripción breve para tus clientes (opcional)" />
+                </label>
               </div>
-              <label className="field sm:col-span-2"><span>Descripción</span><textarea rows={2} maxLength={2000} value={draft.description} onChange={e => patch('description', e.target.value)} placeholder="Una descripción breve para tus clientes (opcional)" /></label>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-5 border-t border-stone-100 pt-4">
-              <label className="check-field"><input type="checkbox" checked={draft.active} onChange={e => patch('active', e.target.checked)} />Activo</label>
-              <label className="check-field"><input type="checkbox" checked={draft.available} onChange={e => patch('available', e.target.checked)} />Disponible</label>
-            </div>
-          </section>
-        <section className="form-card">
-          <h2 className="form-card-title mb-4">Foto</h2>
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            {imagePreview.src ? (
-              <img className="h-24 w-24 rounded-2xl object-cover" src={imagePreview.src} srcSet={imagePreview.srcSet} sizes="96px" decoding="async" alt="Previsualización del producto" />
-            ) : (
-              <div className="grid h-24 w-24 place-items-center rounded-2xl bg-stone-100">
-                <ImagePlus className="h-6 w-6 text-stone-300" />
+              <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 border-t border-stone-100 pt-3">
+                <label className="check-field"><input type="checkbox" checked={draft.active} onChange={event => patch('active', event.target.checked)} />Visible en el catálogo</label>
+                <label className="check-field"><input type="checkbox" checked={draft.available} onChange={event => patch('available', event.target.checked)} />Disponible para pedir</label>
               </div>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <label className="button-secondary cursor-pointer">
-                <ImagePlus className="h-4 w-4" />
-                Elegir o tomar foto
-                <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => setImageFile(e.target.files?.[0] ?? null)} />
-              </label>
-              {imagePreview.src ? (
-                <button
-                  className="button-quiet"
-                  type="button"
-                  onClick={() => {
-                    setImageFile(null)
-                    patch('imagePath', null)
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Quitar imagen
-                </button>
-              ) : null}
+            </section>
+            <div className="catalog-editor-side">
+              <section className="form-card">
+                <h2 className="form-card-title mb-3">Inventario</h2>
+                <div className="field">
+                  <label htmlFor="product-stock">Stock (unidades)</label>
+                  <input
+                    id="product-stock"
+                    type="text"
+                    inputMode="numeric"
+                    {...invalidField('product-stock', 'product-stock-help product-stock-current')}
+                    value={draft.stockQuantity}
+                    disabled={stock.data?.policy.mode === 'paused' || Boolean(stock.data?.policy.cutoverId)}
+                    onChange={event => patch('stockQuantity', event.target.value)}
+                    placeholder={isNew ? 'Ej.: 20' : 'Sin modificar'}
+                  />
+                  <p id="product-stock-help" className="text-xs font-normal text-stone-500">Cantidad total, incluidas las reservas. Si la dejás vacía, se conserva la cantidad actual. Si todavía no cargaste stock, se aceptan pedidos sin control ni descuento automático. Con control activo, 0 indica agotado.</p>
+                  <p id="product-stock-current" className="text-xs font-normal text-stone-500">{draft.stockBaseline?.initialized ? `Stock actual: ${draft.stockBaseline.onHand} · Reservado: ${draft.stockBaseline.reserved} · Disponible: ${draft.stockBaseline.available}` : 'Todavía no se cargó stock para este producto.'}</p>
+                  {stock.data?.policy.cutoverId ? <p className="text-xs font-normal text-amber-800">Hay una actualización de inventario en curso. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'paused' ? <p className="text-xs font-normal text-amber-800">El stock está pausado. Podés guardar los otros datos del producto.</p> : stock.data?.policy.mode === 'never_enabled' ? <p className="text-xs font-normal text-stone-500">Podés cargar las cantidades ahora y activar el control desde Stock.</p> : null}
+                </div>
+              </section>
+              <section className="form-card catalog-editor-photo">
+                <h2 className="form-card-title mb-3">Foto</h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  {imagePreview.src ? (
+                    <img className="h-20 w-20 rounded-xl object-cover" src={imagePreview.src} srcSet={imagePreview.srcSet} sizes="80px" decoding="async" alt="Previsualización del producto" />
+                  ) : (
+                    <div className="grid h-20 w-20 place-items-center rounded-xl bg-stone-100">
+                      <ImagePlus className="h-6 w-6 text-stone-400" aria-hidden />
+                    </div>
+                  )}
+                  <div className="flex min-w-0 flex-wrap gap-2">
+                    <label className="button-secondary cursor-pointer">
+                      <ImagePlus className="h-4 w-4" aria-hidden />
+                      Elegir o tomar foto
+                      <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event: ChangeEvent<HTMLInputElement>) => setImageFile(event.target.files?.[0] ?? null)} />
+                    </label>
+                    {imagePreview.src ? (
+                      <button
+                        className="button-quiet"
+                        type="button"
+                        onClick={() => {
+                          setImageFile(null)
+                          patch('imagePath', null)
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                        Quitar imagen
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
-        </section>
-          <details ref={promotionsSection} className="admin-disclosure" open={keepPromotionsOpen || Boolean(draft.promotionalPrice || draft.quantityPrices.length || draft.quantityPricingMode === 'threshold') || undefined}>
-            <summary>Promociones y precios especiales</summary>
+          <section id="product-section-pricing" hidden={section !== 'pricing'} className="form-card">
+            <h2 className="form-card-title mb-4">Precios especiales</h2>
             <div className="space-y-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <p className="max-w-xl text-sm text-stone-500">{draft.promotionalPrice.trim() === '' ? 'Sin promoción: se usa el precio base.' : 'Dejá el precio promocional vacío o quitá la promoción para volver al precio base.'}</p>
                 {draft.promotionalPrice !== '' || draft.promotionStartsAt || draft.promotionEndsAt ? <button type="button" className="button-secondary" onClick={removePromotion}><Trash2 className="h-4 w-4" />Quitar promoción</button> : null}
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
-                <label className="field"><span>Precio promocional</span><input type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={e => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" /></label>
-                <label className="field"><span>Promoción desde</span><input type="datetime-local" value={draft.promotionStartsAt} onChange={e => patch('promotionStartsAt', e.target.value)} /></label>
-                <label className="field"><span>Promoción hasta</span><input type="datetime-local" value={draft.promotionEndsAt} onChange={e => patch('promotionEndsAt', e.target.value)} /></label>
+                <label className="field"><span>Precio promocional</span><input id="product-promotion-price" {...invalidField('product-promotion-price')} type="number" min="0" step="0.01" value={draft.promotionalPrice} onChange={e => patch('promotionalPrice', e.target.value)} placeholder="Sin promoción" /></label>
+                <label className="field"><span>Promoción desde</span><input id="product-promotion-start" {...invalidField('product-promotion-start')} type="datetime-local" value={draft.promotionStartsAt} onChange={e => patch('promotionStartsAt', e.target.value)} /></label>
+                <label className="field"><span>Promoción hasta</span><input id="product-promotion-end" {...invalidField('product-promotion-end')} type="datetime-local" value={draft.promotionEndsAt} onChange={e => patch('promotionEndsAt', e.target.value)} /></label>
               </div>
               {draft.promotionalPrice.trim() !== '' && parsePriceCents(draft.promotionalPrice) === 0 ? <p className="text-sm text-amber-800" role="status">Con un precio promocional de 0, el producto se ofrece sin cargo. Para usar el precio base, quitá la promoción.</p> : null}
               <div className="border-t border-stone-100 pt-5">
-          <label className="field mb-5"><span>Modalidad por cantidad</span><select value={draft.quantityPricingMode} onChange={event => patch('quantityPricingMode', event.target.value as 'bundles' | 'threshold')}><option value="bundles">Combos por precio total</option><option value="threshold">Precio unitario desde una cantidad mínima</option></select></label>
+          <label className="field mb-5"><span>Modalidad por cantidad</span><select id="product-quantity-mode" {...invalidField('product-quantity-mode')} value={draft.quantityPricingMode} onChange={event => patch('quantityPricingMode', event.target.value as 'bundles' | 'threshold')}><option value="bundles">Combos por precio total</option><option value="threshold">Precio unitario desde una cantidad mínima</option></select></label>
           {draft.quantityPricingMode === 'threshold' ? <div className="space-y-4">
             <p className="text-sm text-stone-500">Al alcanzar el mínimo, este precio se aplica a todas las unidades de la misma configuración. Al bajar del mínimo, vuelve el precio regular vigente. Se conserva cualquier oferta vigente que sea más barata.</p>
             <div className="grid gap-4 sm:grid-cols-2"><label className="field"><span>Cantidad mínima</span><input type="number" min="2" max="100" value={draft.quantityThresholdMinimum} onChange={event => patch('quantityThresholdMinimum', Number(event.target.value))} /></label><label className="field"><span>Precio unitario desde el mínimo</span><input type="number" min="0" step="0.01" value={draft.quantityThresholdPrice} onChange={event => patch('quantityThresholdPrice', event.target.value)} /></label></div>
@@ -743,9 +816,9 @@ export function ProductEditorPage() {
           </>}
 </div>
             </div>
-          </details>
-          <details ref={extrasSection} className="admin-disclosure" open={Boolean(draft.groups.length) || undefined}>
-            <summary>Extras y adicionales{draft.groups.length ? ` · ${draft.groups.length} grupos` : ''}</summary>
+          </section>
+          <section id="product-section-extras" hidden={section !== 'extras'} className="form-card">
+            <h2 className="form-card-title mb-4">Opciones de compra</h2>
             <div>
           <div className="flex justify-between">
             <div>
@@ -762,7 +835,7 @@ export function ProductEditorPage() {
                 <div className="grid items-end gap-3 md:grid-cols-[1fr_100px_100px_auto_auto]">
                   <label className="field">
                     <span>Nombre del grupo</span>
-                    <input maxLength={120} value={group.name} onChange={(e) => patchGroup(group.id, { name: e.target.value })} />
+                    <input id={'product-extra-' + group.id} {...invalidField('product-extra-' + group.id)} maxLength={120} value={group.name} onChange={(e) => patchGroup(group.id, { name: e.target.value })} />
                   </label>
                   <label className="field">
                     <span>Mínimo</span>
@@ -839,6 +912,7 @@ export function ProductEditorPage() {
                       </label>
                       <button
                         className="icon-button text-red-700"
+                        aria-label={option.name ? `Quitar opción ${option.name}` : 'Quitar opción'}
                         onClick={() =>
                           patchGroup(group.id, {
                             options: group.options.filter((o) => o.id !== option.id),
@@ -858,17 +932,17 @@ export function ProductEditorPage() {
             ))}
           </div>
 </div>
-          </details>
-          <details ref={organizationSection} className="admin-disclosure">
-            <summary>Código y organización</summary>
+          </section>
+          <section id="product-section-organization" hidden={section !== 'organization'} className="form-card">
+            <h2 className="form-card-title mb-4">Identificación y orden</h2>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="field"><label htmlFor="product-code">Código / SKU (opcional)</label><input id="product-code" aria-describedby="product-code-help" maxLength={80} value={draft.code} onChange={e => patch('code', e.target.value)} /><p id="product-code-help" className="text-xs font-normal text-stone-500">{isNew ? 'Si lo dejás vacío, lo generamos automáticamente' : 'Vacío conserva el código actual.'}</p></div>
-              <label className="field"><span>Orden</span><input type="number" min="0" value={draft.sortOrder} onChange={e => patch('sortOrder', Number(e.target.value))} /></label>
+              <div className="field"><label htmlFor="product-code">Código / SKU (opcional)</label><input id="product-code" {...invalidField('product-code', 'product-code-help')} maxLength={80} value={draft.code} onChange={e => patch('code', e.target.value)} /><p id="product-code-help" className="text-xs font-normal text-stone-500">{isNew ? 'Si lo dejás vacío, lo generamos automáticamente' : 'Vacío conserva el código actual.'}</p></div>
+              <label className="field"><span>Orden</span><input id="product-order" {...invalidField('product-order')} type="number" min="0" value={draft.sortOrder} onChange={e => patch('sortOrder', Number(e.target.value))} /></label>
               <label className="check-field sm:col-span-2"><input type="checkbox" checked={draft.featured} onChange={e => patch('featured', e.target.checked)} />Destacado</label>
             </div>
-          </details>
+          </section>
         </fieldset>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-5">
+        <div className="catalog-editor-actions">
           {!isNew ? <button className="button-quiet text-stone-500" disabled={saving || Boolean(pendingSave)} onClick={() => void archive()}><Trash2 className="h-4 w-4" />Dar de baja</button> : <span />}
           <button className="button-primary" disabled={saving} onClick={() => void save()}><Save className="h-4 w-4" />{saving ? 'Guardando…' : pendingSave ? 'Reintentar guardado' : 'Guardar producto'}</button>
         </div>

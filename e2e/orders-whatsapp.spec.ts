@@ -24,8 +24,14 @@ const orders = [paidOrder,
   { ...paidOrder, id: '23000000-0000-4000-8000-000000000002', display_number: 'CM-0002', payment_status: 'pending', customer_name: 'Tomás Rodríguez' },
   { ...paidOrder, id: '23000000-0000-4000-8000-000000000003', display_number: 'CM-0003', customer_name: 'Cliente sin teléfono válido', customer_phone: 'sin teléfono' },
 ]
+const inventoryHistoryEntry = {
+  id: '2a000000-0000-4000-8000-000000000001', kind: 'external_sale', orderId: paidOrder.id, sourceOperationId: null,
+  reason: 'Venta de prueba del mostrador', externalReference: 'Comprobante 123', actorUserId: userId,
+  actorName: 'Administración Casa Móvil', createdAt: paidOrder.created_at, result: {},
+  movements: [{ productId: '28000000-0000-4000-8000-000000000001', deltaOnHand: '-1', deltaReserved: '0', returnedQuantity: '0', onHandAfter: '9', reservedAfter: '2' }],
+}
 
-async function adminFixture(page: Page, options: { inventoryCounting?: boolean; inventoryMode?: 'never_enabled' | 'enforced'; whatsappOrders?: boolean; claims?: string[] } = {}) {
+async function adminFixture(page: Page, options: { inventoryCounting?: boolean; inventoryHistory?: boolean; inventoryMode?: 'never_enabled' | 'enforced'; whatsappOrders?: boolean; claims?: string[] } = {}) {
   const currentOrders = orders.map((order, index) => ({ ...order,
     action_id: `24000000-0000-4000-8000-00000000000${index + 1}`,
     accepted_by: null as string | null, accepted_at: null as string | null,
@@ -93,8 +99,11 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean; 
     }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_overview') body = {
       policy: { mode: options.inventoryCounting ? 'paused' : (options.inventoryMode ?? 'enforced'), version: '1', activatedAt: options.inventoryMode === 'never_enabled' ? null : '2026-10-27T12:00:00Z', pausedAt: null, cutoverId: options.inventoryCounting ? '29000000-0000-4000-8000-000000000001' : null, countStartedAt: options.inventoryCounting ? '2026-10-27T12:00:00Z' : null, businessConfirmed: true, businessPolicy: { otherChannels: 'record_before_handoff' } },
-      operations: [],
+      operations: options.inventoryHistory ? [inventoryHistoryEntry] : [],
     }
+    else if (request.method() === 'GET' && path === '/rest/v1/inventory_operations' && options.inventoryHistory) body = [
+      { id: inventoryHistoryEntry.id, external_reference: inventoryHistoryEntry.externalReference },
+    ]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_items') body = {
       items: ['Funda negra', 'Funda roja', 'Cable USB'].map((name, index) => ({ productId: '28000000-0000-4000-8000-00000000000' + (index + 1), name, code: 'PROD-00' + index, archived: false, initialized: true, onHand: '10', reserved: '2', available: '8', version: '1' })), nextCursor: null,
     }
@@ -136,15 +145,55 @@ test.describe('admin WhatsApp contact', () => {
     await page.goto('/admin/stock')
     await expect(page.getByRole('heading', { name: 'Activar control de stock' })).toBeVisible()
     const balances = page.locator('.admin-inventory-balances')
-    const box = await balances.boundingBox()
-    expect(box!.height).toBeGreaterThanOrEqual(400)
     await balances.scrollIntoViewIfNeeded()
     await expect(page.getByRole('table', { name: 'Existencias de productos' })).toBeVisible()
-    await expect(page.getByText('Funda negra', { exact: true })).toBeVisible()
-    expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
+    await expect(page.getByText('Funda negra', { exact: true })).toBeInViewport()
+    await expect(page.getByRole('link', { name: 'Editar stock de Cable USB' })).toBeInViewport()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath('stock-activation-desktop.png'), fullPage: true })
     expect(unexpected).toEqual([])
   })
+
+  for (const viewport of [
+    { width: 360, height: 640 },
+    { width: 768, height: 740 },
+    { width: 1366, height: 700 },
+  ]) {
+    test('Pedidos y Stock conservan sus controles a ' + viewport.width + ' px', async ({ page }, testInfo) => {
+      test.setTimeout(60_000)
+      const loaded = { timeout: 12_000 }
+      await page.setViewportSize(viewport)
+      const unexpected = await adminFixture(page, { inventoryHistory: true })
+      await page.goto('/admin/pedidos')
+      await expect(page.getByRole('link', { name: 'Ver CM-0001' })).toBeVisible(loaded)
+      const customDates = page.locator('summary').filter({ hasText: 'Fechas personalizadas' })
+      await customDates.focus()
+      await page.keyboard.press('Enter')
+      await expect(page.getByLabel('Desde')).toBeVisible()
+      await expect(page.getByLabel('Hasta')).toBeVisible()
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
+      await page.screenshot({ path: testInfo.outputPath('pedidos-' + viewport.width + '.png'), fullPage: true })
+
+      await page.goto('/admin/pedidos/tomar/' + paidOrder.action_id)
+      await expect(page.getByRole('heading', { name: 'Cliente y entrega' })).toBeVisible(loaded)
+      await expect(page.getByRole('button', { name: 'Aceptar para preparar' })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Abrir detalle completo' })).toHaveAttribute('href', '/admin/pedidos/' + paidOrder.id)
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
+      await page.screenshot({ path: testInfo.outputPath('pedido-whatsapp-' + viewport.width + '.png'), fullPage: true })
+
+      await page.goto('/admin/stock')
+      await expect(page.getByRole('table', { name: 'Existencias de productos' })).toBeVisible(loaded)
+      await page.getByText('Historial de movimientos', { exact: true }).click()
+      const recentMovements = page.getByRole('table', { name: 'Último movimiento' })
+      await expect(recentMovements.getByText('Comprobante 123')).toBeVisible()
+      await recentMovements.getByText('Ver cantidades', { exact: true }).click()
+      await expect(recentMovements.getByText('Funda negra: existencia -1, reserva 0. Saldo: 9.')).toBeVisible()
+      await expect(recentMovements.getByRole('link', { name: 'Ver pedido' })).toHaveAttribute('href', '/admin/pedidos/' + paidOrder.id)
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width)
+      await page.screenshot({ path: testInfo.outputPath('historial-stock-' + viewport.width + '.png'), fullPage: true })
+      expect(unexpected).toEqual([])
+    })
+  }
 
   for (const viewport of [{ name: 'desktop', width: 1440, height: 900 }, { name: 'mobile', width: 390, height: 844 }]) {
     test(`${viewport.name} accepts from the list, detail and WhatsApp entry point with one shared action`, async ({ page }) => {

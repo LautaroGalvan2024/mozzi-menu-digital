@@ -1,0 +1,45 @@
+.admin-dashboard { display: grid; min-width: 0; gap: 15px; }
+.admin-app .admin-dashboard .page-header { margin-bottom: 0; }
+.dashboard-summary {
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius, 12px);
+  background: var(--admin-surface, #fff);
+}
+.admin-dashboard .admin-overview-grid { gap: 0; }
+.admin-dashboard .admin-overview-grid .admin-metric {
+  grid-column: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 16px;
+  box-shadow: none;
+}
+.admin-dashboard .admin-overview-grid .admin-metric:nth-child(even) { border-inline-start: 1px solid var(--admin-border); }
+.admin-dashboard .admin-overview-grid .admin-metric:nth-child(n+3) { border-top: 1px solid var(--admin-border); }
+.admin-dashboard .admin-metric-heading h2 { min-height: 0; }
+.admin-dashboard .admin-metric-value { margin-top: 6px; font-size: clamp(19px, 4.8vw, 28px); line-height: 1.25; }
+.admin-dashboard .admin-metric-detail { margin-top: 4px; }
+.admin-dashboard .admin-metric-note { max-width: none; margin: 0; border-top: 1px solid var(--admin-border); padding: 9px 16px; font-size: 12px; line-height: 1.55; }
+.dashboard-shortcuts { display: grid; grid-template-columns: minmax(0, 1fr); }
+.dashboard-shortcut { display: flex; min-width: 0; min-height: 54px; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--admin-radius, 10px); }
+.dashboard-shortcut + .dashboard-shortcut { border-top: 1px solid var(--admin-border); }
+.dashboard-shortcut :is(p, h2) { overflow-wrap: anywhere; }
+.dashboard-shortcut p { margin-top: 1px; color: var(--admin-muted); font-size: 13px; }
+.dashboard-shortcut-icon { width: 18px; height: 18px; flex-shrink: 0; color: var(--admin-accent-strong); }
+.dashboard-shortcut-arrow { width: 15px; height: 15px; flex-shrink: 0; color: var(--admin-muted); }
+.dashboard-shortcut:hover { background: var(--admin-accent-soft); }
+
+@media (min-width: 640px) {
+  .dashboard-shortcuts:has(.dashboard-shortcut:nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-shortcut + .dashboard-shortcut { border-top: 0; border-inline-start: 1px solid var(--admin-border); }
+}
+
+@media (min-width: 1200px) {
+  .admin-dashboard .admin-overview-grid .admin-metric:nth-child(n+2) { border-top: 0; border-inline-start: 1px solid var(--admin-border); }
+}
+
+@media (max-width: 440px) {
+  .admin-dashboard { gap: 12px; }
+  .admin-dashboard .admin-overview-grid .admin-metric { padding: 12px; }
+}

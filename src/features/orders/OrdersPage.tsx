@@ -4,7 +4,8 @@ import { Download, Eye, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import { z } from 'zod'
-import { EmptyState, ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { EmptyState, ErrorPanel } from '../../components/Feedback'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { FilterBar } from '../../components/FilterBar'
 import { AdminDataRegion, AdminDataWorkspace } from '../../components/AdminDataWorkspace'
 import { PageHeader } from '../../components/PageHeader'
@@ -25,6 +26,7 @@ import { OrderAcceptAction } from './OrderAcceptAction'
 import { acceptanceOrder, useOrderUpdates } from './orderAcceptance'
 import { orderCommercialReport } from './inventoryOrder'
 import { activeOrderDatePreset, orderDatePresetLabels, orderDatePresets, parseOrderListFilters } from './orderFilters'
+import './order-workspace.css'
 
 const PAGE_SIZE = 25
 
@@ -136,7 +138,11 @@ export function OrdersPage() {
   if (restaurant.error || query.error) {
     return <ErrorPanel>{restaurant.error?.message ?? query.error?.message}</ErrorPanel>
   }
-  if (restaurant.isLoading || query.isLoading || !datesReady) return <LoadingScreen />
+  if (restaurant.isLoading || !datesReady) return <AdminLoading label="Cargando pedidos…" />
+  if (query.isLoading) return <>
+    <PageHeader title="Pedidos" description="Consultá, aceptá y coordiná tus pedidos." />
+    <AdminLoading label="Cargando pedidos…" variant="list" />
+  </>
   const rows = dateError ? [] : (query.data?.rows ?? [])
   const businessName = restaurant.data?.trade_name || restaurant.data?.name || scope.selected.name
 
@@ -202,21 +208,29 @@ export function OrdersPage() {
 
   const returnTo = `${location.pathname}${location.search}`
   const detailState = { ordersReturnTo: returnTo }
+  const displayDate = (date: string) => date.split('-').reverse().join('/')
+  const dateLabel = dates.from === dates.to ? displayDate(dates.from) : `${displayDate(dates.from)} — ${displayDate(dates.to)}`
+  const hasActiveFilters = Boolean(search || status || fulfillment || seller || activePreset !== 'today')
 
   return (
     <AdminDataWorkspace className="orders-workspace">
       <PageHeader
-        eyebrow="Tiempo real"
         title="Pedidos"
-        description="Aceptá tus pedidos, reservá las unidades y contactá a cada cliente."
+        description="Consultá, aceptá y coordiná tus pedidos."
+        actions={<button
+          className="button-secondary orders-export"
+          title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
+          disabled={!rows.length || exporting || query.isFetching || search !== debouncedSearch || Boolean(dateError)}
+          onClick={() => void exportCsv()}
+        >
+          <Download className="h-4 w-4" aria-hidden />
+          <span>{exporting ? 'Exportando…' : 'Exportar resultados'}</span>
+        </button>}
       />
-      {exportError ? (
-        <p className="form-error mb-4" role="alert">
-          {exportError}
-        </p>
-      ) : null}
-      <FilterBar className="orders-filter-bar mb-4 grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_10rem_auto]">
-        <label className="field min-w-0">
+      {exportError ? <InlineFeedback tone="error" className="mb-4">{exportError}</InlineFeedback> : null}
+      <FilterBar className="order-filters">
+        <div className="order-filter-fields">
+        <label className="field order-filter-search">
           <span>Buscar</span>
           <span className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
@@ -253,7 +267,7 @@ export function OrdersPage() {
             <option value="pickup">Retiro</option>
           </select>
         </label>
-        {features.sellers && (sellers.data?.length || seller) ? <label className="field min-w-0">
+        {features.sellers && (sellers.data?.length || seller) ? <label className="field order-filter-seller">
           <span>Vendedor</span>
           <select value={seller} onChange={event => updateFilters({ seller: event.target.value || null })}>
             <option value="">Todos</option>
@@ -261,24 +275,13 @@ export function OrdersPage() {
             {sellers.data?.map(person => <option key={person.id} value={person.id}>{person.name}{person.active ? '' : ' (inactivo)'}</option>)}
           </select>
         </label> : null}
-        <div className="flex items-end">
-          <button
-            className="button-secondary w-full whitespace-nowrap md:w-auto"
-            title="El CSV conserva los importes originales y separa los vigentes para no sumar dos veces un reemplazo."
-            disabled={!rows.length || exporting || query.isFetching || search !== debouncedSearch || Boolean(dateError)}
-            onClick={() => void exportCsv()}
-          >
-            <Download className="h-4 w-4" aria-hidden />
-            {exporting ? 'Exportando…' : 'Exportar resultados'}
-          </button>
         </div>
-        <div className="lg:col-span-4">
-          <span className="mb-2 block text-xs font-medium text-stone-600">Período</span>
-          <div className="flex flex-wrap gap-2" aria-label="Período del pedido">
+        <div className="order-filter-dates">
+          <div className="order-date-presets" role="group" aria-label="Período del pedido">
             {orderDatePresetLabels.map((preset) => (
               <button
                 type="button"
-                className="button-secondary min-h-9 px-3 py-1.5"
+                className="button-secondary"
                 aria-pressed={activePreset === preset.value}
                 key={preset.value}
                 onClick={() => {
@@ -289,12 +292,11 @@ export function OrdersPage() {
                 {preset.label}
               </button>
             ))}
-            {activePreset === 'custom' ? <span className="inline-flex min-h-9 items-center rounded-lg bg-stone-100 px-3 text-xs font-semibold text-stone-700">Personalizado</span> : null}
+            {activePreset === 'custom' ? <span className="order-date-current">Personalizado</span> : null}
           </div>
-        </div>
-        <details className="admin-disclosure lg:col-span-4" open={Boolean(dateError) || undefined}>
-          <summary className="flex flex-wrap items-center gap-x-3 gap-y-1"><span>Fechas personalizadas</span><span className="text-xs font-normal text-stone-500">{dates.from === dates.to ? dates.from.split('-').reverse().join('/') : `${dates.from.split('-').reverse().join('/')} — ${dates.to.split('-').reverse().join('/')}`}</span></summary>
-          <div className="mt-4 grid grid-cols-2 gap-3">
+        <details className="admin-disclosure order-date-custom" open={Boolean(dateError) || undefined}>
+          <summary><span>Fechas personalizadas</span><span className="order-date-summary">{dateLabel}</span></summary>
+          <div className="order-date-fields">
         <label className="field min-w-0">
           <span>Desde</span>
           <input
@@ -321,15 +323,16 @@ export function OrdersPage() {
         </label>
           </div>
         </details>
+        </div>
       </FilterBar>
       {search !== debouncedSearch ? <p className="mb-3 text-xs text-stone-500" role="status">Buscando…</p> : query.isFetching ? <p className="mb-3 text-xs text-stone-500" role="status">Actualizando pedidos…</p> : null}
       <AdminDataRegion aria-label="Resultados de pedidos">
       {dateError ? (
-        <p className="form-error mb-5" role="alert">{dateError}</p>
+        <InlineFeedback tone="error" className="mb-5">{dateError}</InlineFeedback>
       ) : rows.length === 0 ? (
         <EmptyState
-          title="No hay pedidos para estos filtros"
-          description="Los pedidos nuevos aparecerán automáticamente."
+          title={hasActiveFilters ? 'No hay pedidos para estos filtros' : 'Todavía no hay pedidos de hoy'}
+          description={hasActiveFilters ? 'Probá otro período o cambiá los filtros.' : 'Los pedidos nuevos aparecerán automáticamente.'}
         />
       ) : (
         <>
@@ -338,25 +341,25 @@ export function OrdersPage() {
             <table className="data-table orders-table">
               <thead>
                 <tr>
-                  <th>Pedido</th>
-                  <th>Cliente</th>
-                  <th>Estado</th>
-                  <th>Modalidad</th>
-                  <th className="text-right">Total</th>
-                  <th>Creado</th>
-                  <th><span className="sr-only">Acciones</span></th>
+                  <th scope="col">Pedido</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col">Modalidad</th>
+                  <th scope="col" className="text-right">Total</th>
+                  <th scope="col">Creado</th>
+                  <th scope="col"><span className="sr-only">Acciones</span></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td className="font-display font-bold text-stone-950">{row.display_number}{row.seller_name ? <small className="block break-words font-normal text-stone-500">{row.seller_name}</small> : null}</td>
+                    <td className="order-row-id font-display font-bold text-stone-950"><span>{row.display_number}</span>{row.seller_name ? <small className="block break-words font-normal text-stone-500">{row.seller_name}</small> : null}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
                     <td><AdminOrderStatus order={row} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
                     <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}{row.estimated_delivery_date ? <small className="block">{formatDeliveryDate(row.estimated_delivery_date)} · estimada</small> : null}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
-                    <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
-                    <td><div className="flex flex-wrap items-center justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} state={detailState} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
+                    <td className="text-stone-500"><time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString('es-AR')}</time></td>
+                    <td><div className="order-row-actions"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} state={detailState} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -365,29 +368,25 @@ export function OrdersPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:hidden" aria-busy={query.isFetching}>
             {rows.map((row) => (
               <article
-                className="surface-card group block p-4 transition duration-150 hover:border-stone-300"
+                className="surface-card order-result-card"
                 key={row.id}
               >
                 <Link to={`/admin/pedidos/${row.id}`} state={detailState} className="block" aria-label={`Ver ${row.display_number}`}>
-                <div className="flex flex-col items-start gap-1">
-                  <strong className="whitespace-nowrap font-display text-lg font-bold text-stone-950">{row.display_number}</strong>
-                  <AdminOrderStatus order={row} />
+                <div className="order-card-head">
+                  <strong className="font-display text-base font-bold text-stone-950">{row.display_number}</strong>
+                  <strong className="text-right tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</strong>
                 </div>
-                <div className="mt-4 min-w-0">
+                <AdminOrderStatus order={row} />
+                <div className="order-card-customer">
                   {row.replaces_order_id?<p className="mb-1 text-xs text-amber-800">Pedido de reemplazo · misma operación comercial</p>:null}
-                  <p className="truncate font-semibold text-stone-900">{row.customer_name}</p>
-                  <p className="mt-0.5 truncate text-xs text-stone-500">{row.customer_phone}</p>
+                  <p className="font-semibold text-stone-900">{row.customer_name}</p>
+                  <p className="text-xs text-stone-600">{row.customer_phone}</p>
                   {row.seller_name ? <p className="mt-1 text-xs text-stone-500">Vendedor: {row.seller_name}</p> : null}
                 </div>
-                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 border-t border-stone-100 pt-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-700">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</p>
-                    {row.estimated_delivery_date ? <p className="text-xs text-stone-600">{formatDeliveryDate(row.estimated_delivery_date)} · estimada</p> : null}
-                    <p className="mt-0.5 truncate text-xs text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</p>
-                  </div>
-                  <strong className="whitespace-nowrap text-right text-sm tabular-nums text-stone-950">
-                    {formatMoney(row.total_cents, row.currency_code)}
-                  </strong>
+                <div className="order-card-fulfillment">
+                  <span className="text-sm font-medium text-stone-700">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</span>
+                  {row.estimated_delivery_date ? <span className="text-xs text-stone-600">{formatDeliveryDate(row.estimated_delivery_date)} · estimada</span> : null}
+                  <time className="text-xs text-stone-600" dateTime={row.created_at}>{new Date(row.created_at).toLocaleString('es-AR')}</time>
                 </div>
                 </Link>
                 <div className="mt-3 flex flex-wrap items-start justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} showLabel /></div>

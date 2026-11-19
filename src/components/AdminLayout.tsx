@@ -42,8 +42,10 @@ export function AdminLayout() {
   const isManager = scope.selected?.role === 'order_manager'
   const { features } = useStageOneFeatures(isManager ? undefined : scope.selected?.id)
   const allowedGroups = secondaryGroups.map(group => ({ ...group, links: group.links.filter(link => !('feature' in link) || features[link.feature]) }))
-  const allLinks = [...mainLinks, ...allowedGroups.flatMap(group => group.links.map(link => ({ to: link.to, label: link.label }))), { to: '/admin/seguridad', label: 'Seguridad' }]
-  const currentSection = [...allLinks].sort((a, b) => b.to.length - a.to.length).find(link => location.pathname === link.to || (link.to !== '/admin' && location.pathname.startsWith(`${link.to}/`)))?.label ?? 'Administración'
+  const visibleMainLinks = mainLinks.filter(link => !('adminOnly' in link) || !isManager)
+  const sectionMatch = (path: string) => location.pathname === path || (path !== '/admin' && location.pathname.startsWith(`${path}/`))
+  const links = [...visibleMainLinks, ...(!isManager ? allowedGroups.flatMap(group => group.links) : []), { to: '/admin/seguridad', label: 'Seguridad' }]
+  const currentSection = links.filter(link => sectionMatch(link.to)).sort((a, b) => b.to.length - a.to.length)[0]?.label ?? 'Administración'
 
   useEffect(() => {
     const resized = () => { if (window.innerWidth >= 1024) setOpen(false) }
@@ -80,13 +82,13 @@ export function AdminLayout() {
         <div className="relative"><select id="restaurant-select" value={scope.selected?.id ?? ''} onChange={event => { scope.selectRestaurant(event.target.value); setOpen(false) }}>{scope.choices.map(choice => <option value={choice.id} key={choice.id}>{choice.name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-0 top-2 h-4 w-4" aria-hidden /></div>
       </div>
       <nav className="admin-navigation" aria-label="Administración">
-        <div className="admin-nav-primary">{mainLinks.filter(link => !('adminOnly' in link) || !isManager).map(({ to, label, icon: Icon, ...link }) => <NavLink key={to} to={to} end={'end' in link ? link.end : false} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}><Icon aria-hidden />{label}</NavLink>)}</div>
+        <div className="admin-nav-primary">{visibleMainLinks.map(({ to, label, icon: Icon, ...link }) => <NavLink key={to} to={to} end={'end' in link ? link.end : false} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}><Icon aria-hidden /><span>{label}</span></NavLink>)}</div>
         {!isManager ? <div className="admin-nav-secondary">{allowedGroups.map(group => {
-          const active = group.links.some(link => location.pathname === link.to)
+          const active = group.links.some(link => sectionMatch(link.to))
           const Icon = group.icon
           return <details className={`admin-nav-group ${active ? 'has-active' : ''}`} key={`${group.label}:${active}`} open={active || undefined}>
             <summary><Icon aria-hidden /><span>{group.label}</span><ChevronDown className="admin-nav-chevron" aria-hidden /></summary>
-            <div>{group.links.map(link => <NavLink key={link.to} to={link.to} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}>{link.label}</NavLink>)}</div>
+            <div>{group.links.map(({ to, label, icon: LinkIcon }) => <NavLink key={to} to={to} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}><LinkIcon aria-hidden /><span>{label}</span></NavLink>)}</div>
           </details>
         })}</div> : null}
         {auth.isSuperAdmin ? <NavLink className="admin-nav-link mt-4" to="/superadmin"><ShieldCheck aria-hidden />Control central</NavLink> : null}
@@ -99,10 +101,8 @@ export function AdminLayout() {
     {open ? <button type="button" className="admin-nav-backdrop" aria-hidden="true" tabIndex={-1} onClick={() => setOpen(false)} /> : null}
     <div className="admin-workspace" inert={open}>
       <header className="admin-topbar">
-        <button ref={menuButton} className="icon-button lg:hidden" type="button" onClick={() => setOpen(true)} aria-label="Abrir navegación" aria-expanded={open} aria-controls="admin-navigation"><Menu className="h-5 w-5" aria-hidden /></button>
-        <nav className="admin-breadcrumb" aria-label="Ubicación en el panel"><span>{scope.selected?.name}</span><span aria-hidden>/</span><strong>{currentSection}</strong></nav>
-        <span className="ml-auto sm:hidden"><MozziBrand compact /></span>
-        <span className="admin-workspace-label"><LayoutDashboard aria-hidden />Panel de gestión</span>
+        <button ref={menuButton} className="admin-menu-trigger lg:hidden" type="button" onClick={() => setOpen(true)} aria-label="Abrir navegación" aria-expanded={open} aria-controls="admin-navigation"><Menu className="h-5 w-5" aria-hidden /><span>Menú</span></button>
+        <nav className="admin-breadcrumb" aria-label="Ubicación en el panel"><span>{scope.selected?.name}</span><span aria-hidden>/</span><strong aria-current="page">{currentSection}</strong></nav>
       </header>
       <main id="admin-content" tabIndex={-1} className="admin-content"><Outlet key={scope.selected?.id} /></main>
     </div>

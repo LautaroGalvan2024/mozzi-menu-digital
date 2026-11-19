@@ -85,8 +85,8 @@ describe('category icon management', () => {
 
     await user.click(categoryButton)
     const dialog = screen.getByRole('dialog', { name: 'Editar categoría' })
-    expect(within(dialog).getByRole('radio', { name: 'Bebidas' })).toBeChecked()
-    await user.click(within(dialog).getByRole('radio', { name: /Infusiones/ }))
+    expect(within(dialog).getByRole('combobox', { name: /Ícono de categoría/ })).toHaveValue('drinks')
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Ícono de categoría/ }), 'infusions')
     await user.click(within(dialog).getByRole('button', { name: 'Guardar' }))
 
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ icon_key: 'infusions' })))
@@ -105,7 +105,7 @@ describe('category icon management', () => {
 
     await user.click(categoryButton)
     const dialog = screen.getByRole('dialog', { name: 'Editar categoría' })
-    await user.click(within(dialog).getByRole('radio', { name: /Automático/ }))
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: /Ícono de categoría/ }), '')
     await user.click(within(dialog).getByRole('button', { name: 'Guardar' }))
 
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ icon_key: null })))

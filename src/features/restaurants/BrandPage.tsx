@@ -1,8 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Image, Trash2, Upload } from 'lucide-react'
 import { useState, type ChangeEvent } from 'react'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { ErrorPanel } from '../../components/Feedback'
+import { AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
+import './settings-workspace.css'
 import { processImage } from '../../lib/images/processImage'
 import { responsiveAssetUrls } from '../../lib/images/responsive'
 import { cleanupRestaurantImage } from '../../lib/images/cleanup'
@@ -16,7 +18,7 @@ import { useRestaurant } from './useRestaurant'
 export function BrandPage() {
   const scope = useRestaurantScope(); const query = useRestaurant(scope.selected?.id); const queryClient = useQueryClient()
   const [busy, setBusy] = useState<'logo'|'cover'|null>(null); const [error,setError]=useState<string|null>(null)
-  if (query.isLoading) return <LoadingScreen />
+  if (query.isLoading) return <AdminLoading label="Cargando logo y portada…" variant="list" />
   if (!query.data) return <ErrorPanel>{query.error?.message ?? 'No se pudo cargar la marca.'}</ErrorPanel>
 
   async function upload(kind: 'logo'|'cover', event: ChangeEvent<HTMLInputElement>) {
@@ -72,8 +74,16 @@ export function BrandPage() {
     }
   }
 
-  const logo = responsiveAssetUrls(query.data.logo_path); const cover = responsiveAssetUrls(query.data.cover_path)
-  return <><PageHeader eyebrow="Marca" title="Logo y portada" description="Personalizá la imagen que tus clientes ven en el menú y la tienda." /><div className="grid gap-6 lg:grid-cols-2"><ImageCard label="Logo" description="Usá una imagen cuadrada y reconocible." image={logo} busy={busy==='logo'} inputId="logo-upload" onChange={(event)=>void upload('logo',event)} onRemove={()=>void remove('logo')} /><ImageCard label="Portada" description="Elegí una foto horizontal que represente tu comercio." image={cover} busy={busy==='cover'} inputId="cover-upload" onChange={(event)=>void upload('cover',event)} onRemove={()=>void remove('cover')} /></div>{error ? <p className="form-error mt-5" role="alert">{error}</p> : null}</>
+  const logo = responsiveAssetUrls(query.data.logo_path)
+  const cover = responsiveAssetUrls(query.data.cover_path)
+  return <>
+    <PageHeader eyebrow="Marca" title="Logo y portada" description="Personalizá la imagen que tus clientes ven en el menú y la tienda." />
+    {error ? <p className="form-error mb-4" role="alert">{error}</p> : null}
+    <div className="grid gap-4 sm:grid-cols-2">
+      <ImageCard label="Logo" description="Usá una imagen cuadrada y reconocible." image={logo} busy={busy === 'logo'} kind="logo" inputId="logo-upload" onChange={event => void upload('logo', event)} onRemove={() => void remove('logo')} />
+      <ImageCard label="Portada" description="Elegí una foto horizontal que represente tu comercio." image={cover} busy={busy === 'cover'} kind="cover" inputId="cover-upload" onChange={event => void upload('cover', event)} onRemove={() => void remove('cover')} />
+    </div>
+  </>
 }
 
 async function removeAsset(path: string, restaurantId: string) {
@@ -81,6 +91,30 @@ async function removeAsset(path: string, restaurantId: string) {
     ? 'El archivo anterior quedó pendiente de limpieza.' : null
 }
 
-function ImageCard({label,description,image,busy,inputId,onChange,onRemove}:{label:string;description:string;image:ReturnType<typeof responsiveAssetUrls>;busy:boolean;inputId:string;onChange:(event:ChangeEvent<HTMLInputElement>)=>void;onRemove:()=>void}) {
-  return <article className="surface-card overflow-hidden"><div className="grid aspect-[16/9] place-items-center bg-stone-100">{image.src ? <img src={image.src} srcSet={image.srcSet} sizes="(min-width: 1024px) 50vw, 100vw" decoding="async" className="h-full w-full object-cover" alt={`${label} actual`} /> : <Image className="h-12 w-12 text-stone-300" aria-hidden />}</div><div className="p-5"><h2 className="font-display text-xl font-bold">{label}</h2><p className="mt-1 text-sm text-stone-500">{description} JPEG, PNG o WebP; máximo original 15 MB.</p><div className="mt-4 flex flex-wrap gap-2"><label className="button-secondary cursor-pointer" htmlFor={inputId}><Upload className="h-4 w-4" aria-hidden />{busy?'Procesando…':'Elegir imagen'}<input id={inputId} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busy} onChange={onChange} /></label>{image.src?<button className="button-danger" type="button" disabled={busy} onClick={onRemove}><Trash2 className="h-4 w-4" aria-hidden />Eliminar</button>:null}</div></div></article>
+function ImageCard({ label, description, image, busy, kind, inputId, onChange, onRemove }: {
+  label: string
+  description: string
+  image: ReturnType<typeof responsiveAssetUrls>
+  busy: boolean
+  kind: 'logo' | 'cover'
+  inputId: string
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void
+  onRemove: () => void
+}) {
+  return <article className="form-card settings-panel" aria-labelledby={`${inputId}-title`} aria-busy={busy}>
+    <h2 id={`${inputId}-title`} className="form-card-title">{label}</h2>
+    <p className="settings-panel-description">{description}</p>
+    <div className="brand-image-preview mt-3" data-kind={kind}>
+      {image.src ? <img src={image.src} srcSet={image.srcSet} sizes="(min-width: 640px) 50vw, 100vw" decoding="async" alt={`${label} actual`} />
+        : <div className="grid place-items-center gap-2 p-3 text-center"><Image className="h-7 w-7 text-stone-400" aria-hidden /><span className="settings-help">{kind === 'logo' ? 'Sin logo cargado' : 'Sin portada cargada'}</span></div>}
+    </div>
+    <p className="settings-help mt-2">JPEG, PNG o WebP. Archivo original de hasta 15 MB.</p>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <label className="button-secondary brand-file-control cursor-pointer" htmlFor={inputId}>
+        <Upload className="h-4 w-4" aria-hidden />{busy ? 'Procesando…' : 'Elegir imagen'}
+        <input id={inputId} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busy} onChange={onChange} />
+      </label>
+      {image.src ? <button className="button-danger" type="button" disabled={busy} onClick={onRemove}><Trash2 className="h-4 w-4" aria-hidden />Eliminar</button> : null}
+    </div>
+  </article>
 }

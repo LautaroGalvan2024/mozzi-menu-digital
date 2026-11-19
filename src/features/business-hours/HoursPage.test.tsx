@@ -85,6 +85,11 @@ describe('initial restaurant hours', () => {
     await user.click(screen.getAllByRole('button', { name: 'Agregar turno' })[0]!)
     expect(screen.getByLabelText('Abre')).toHaveValue('09:00')
     expect(screen.getByLabelText('Cierra')).toHaveValue('13:00')
+    await user.click(screen.getByRole('button', { name: 'Fechas especiales' }))
+    expect(screen.getByText('No hay fechas especiales programadas.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Horario semanal' }))
+    expect(screen.getByLabelText('Abre')).toHaveValue('09:00')
+    expect(mocks.rpc).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Guardar horarios' }))
 
@@ -116,11 +121,14 @@ describe('initial restaurant hours', () => {
     )
 
     expect(await screen.findByRole('heading', { name: 'Horarios' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Fechas especiales' }))
     await user.click(screen.getByRole('button', { name: 'Agregar' }))
     await user.click(screen.getAllByRole('button', { name: 'Agregar' })[0]!)
+    await user.click(screen.getByRole('button', { name: 'Horario semanal' }))
     await user.click(screen.getByRole('button', { name: 'Guardar horarios' }))
 
     expect(screen.getByRole('alert')).toHaveTextContent('no se puede combinar')
+    expect(screen.getByRole('heading', { name: 'Excepciones' })).toBeVisible()
     expect(mocks.rpc).not.toHaveBeenCalled()
   })
 })

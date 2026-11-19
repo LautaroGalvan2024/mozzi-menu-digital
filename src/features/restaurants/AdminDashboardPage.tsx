@@ -2,7 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpRight, PackageOpen, Store } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { ErrorPanel } from '../../components/Feedback'
+import { AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
@@ -12,6 +13,7 @@ import { useRestaurant } from './useRestaurant'
 import { orderMetricsSchema } from '../orders/orderMetrics'
 import { PublicChannelsCard } from './PublicChannelsCard'
 import { AdminMetric } from '../../components/AdminMetric'
+import './admin-dashboard.css'
 
 export function AdminDashboardPage() {
   const scope = useRestaurantScope()
@@ -39,7 +41,7 @@ export function AdminDashboardPage() {
     return () => { void supabase.removeChannel(channel) }
   }, [queryClient, selected])
 
-  if (!selected || query.isLoading || restaurantQuery.isLoading) return <LoadingScreen />
+  if (!selected || query.isLoading || restaurantQuery.isLoading) return <AdminLoading label="Cargando el resumen del día…" />
   if (query.error || restaurantQuery.error || !restaurantQuery.data || !query.data) return <ErrorPanel>{query.error?.message ?? restaurantQuery.error?.message ?? 'No se pudo cargar el comercio.'}</ErrorPanel>
   const restaurant = restaurantQuery.data
   const metrics = query.data
@@ -56,25 +58,25 @@ export function AdminDashboardPage() {
     ['Cancelados', metrics.cancelled], ['Expirados', metrics.expired],
     ['Entregas corregidas', metrics.corrected], ['Devoluciones completas', metrics.returned],
   ] as const
-  return <>
-    <PageHeader eyebrow={selected.name} title="Resumen" description="Una mirada a la actividad de tu comercio hoy." actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos<ArrowUpRight className="h-4 w-4" aria-hidden /></Link>} />
-    <section aria-label="Resumen del día">
+  return <div className="admin-dashboard">
+    <PageHeader title="Resumen" description={`Actividad de hoy en ${selected.name}.`} actions={<Link className="button-primary" to="/admin/pedidos">Ver pedidos<ArrowUpRight className="h-4 w-4" aria-hidden /></Link>} />
+    <section className="dashboard-summary" aria-label="Resumen del día">
       <div className="admin-metric-grid admin-overview-grid">
         {metricsSummary.map((metric, index) => <AdminMetric key={metric.label} {...metric} amount={index > 1} />)}
       </div>
       <p className="admin-metric-note">Según el horario local del comercio. Los importes corresponden a pedidos, no confirman cobros ni reintegros.</p>
     </section>
 
-    <section aria-label="Accesos del comercio" className="my-6 grid gap-3 sm:grid-cols-2">
-      <Link to={isAdmin ? '/admin/catalogo/productos' : '/admin/stock'} className="surface-card group flex items-center gap-4 p-5 transition-colors hover:border-stone-300">
-        <PackageOpen className="h-5 w-5 shrink-0 text-stone-400" aria-hidden /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">{isAdmin ? 'Tu catálogo' : 'Stock disponible'}</h2><p className="mt-1 text-sm text-stone-500">{isAdmin ? 'Productos, precios y cantidades.' : 'Consultá existencias y reservas.'}</p></div><ArrowUpRight className="h-4 w-4 shrink-0 text-stone-400 group-hover:text-orange-700" aria-hidden />
+    <section aria-label="Accesos del comercio" className="surface-card dashboard-shortcuts">
+      <Link to={isAdmin ? '/admin/catalogo/productos' : '/admin/stock'} className="dashboard-shortcut">
+        <PackageOpen className="dashboard-shortcut-icon" aria-hidden /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">{isAdmin ? 'Tu catálogo' : 'Stock disponible'}</h2><p>{isAdmin ? 'Productos, precios y cantidades.' : 'Consultá existencias y reservas.'}</p></div><ArrowUpRight className="dashboard-shortcut-arrow" aria-hidden />
       </Link>
-      {isAdmin ? <Link to="/admin/tienda" className="surface-card group flex items-center gap-4 p-5 transition-colors hover:border-stone-300"><Store className="h-5 w-5 shrink-0 text-stone-400" aria-hidden /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Tu tienda online</h2><p className="mt-1 text-sm text-stone-500">{restaurant.store_enabled ? 'Publicada y lista para compartir.' : 'Configurá cómo recibir compras y publicala.'}</p></div><ArrowUpRight className="h-4 w-4 shrink-0 text-stone-400 group-hover:text-orange-700" aria-hidden /></Link> : null}
+      {isAdmin ? <Link to="/admin/tienda" className="dashboard-shortcut"><Store className="dashboard-shortcut-icon" aria-hidden /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Tu tienda online</h2><p>{restaurant.store_enabled ? 'Publicada y lista para compartir.' : 'Configurá cómo recibir compras y publicala.'}</p></div><ArrowUpRight className="dashboard-shortcut-arrow" aria-hidden /></Link> : null}
     </section>
 
     <PublicChannelsCard canConfigure={isAdmin} slug={selected.slug} menuEnabled={restaurant.public_menu_enabled} storeEnabled={restaurant.store_enabled} />
 
-    <details className="admin-disclosure mt-6">
+    <details className="admin-disclosure">
       <summary>Ver detalle del día</summary>
       <div className="grid gap-7 pt-5 md:grid-cols-2">
         <section><h2 className="text-sm font-semibold text-stone-900">Estado de los pedidos</h2><p className="mt-1 text-xs text-stone-500">Pedidos creados hoy; cada indicador mantiene su criterio.</p><dl className="mt-4 divide-y divide-stone-100 text-sm">{secondaryMetrics.map(([label, value]) => <div key={label} className="flex justify-between gap-4 py-2.5"><dt className="text-stone-600">{label}</dt><dd className="font-medium tabular-nums">{value}</dd></div>)}</dl></section>
@@ -86,5 +88,5 @@ export function AdminDashboardPage() {
         <section><h2 className="text-sm font-semibold text-stone-900">Medios de pago elegidos</h2><p className="mt-1 text-xs text-stone-500">Importes de pedidos vigentes aceptados o entregados; no confirma pagos.</p>{metrics.byPaymentMethod.length ? <dl className="mt-4 divide-y divide-stone-100 text-sm">{metrics.byPaymentMethod.map(method => <div className="flex items-center justify-between gap-4 py-2.5" key={method.name}><dt className="text-stone-600">{method.name}<span className="mt-0.5 block text-xs text-stone-400">{method.count} pedidos</span></dt><dd className="font-medium tabular-nums">{money(method.amountCents)}</dd></div>)}</dl> : <p className="mt-4 text-sm text-stone-500">Todavía no hay pedidos aceptados o entregados.</p>}</section>
       </div>
     </details>
-  </>
+  </div>
 }

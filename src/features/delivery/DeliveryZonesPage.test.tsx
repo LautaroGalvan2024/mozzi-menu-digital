@@ -22,6 +22,7 @@ describe('delivery zone setup', () => {
 
   it('preserves legacy prices and saves with the calendar disabled by default', async () => {
     open()
+    await userEvent.click(screen.getByRole('button', { name: 'Calendario de reparto' }))
     expect(screen.getByLabelText('Mostrar la próxima entrega estimada')).not.toBeChecked()
     await userEvent.click(screen.getByRole('button', { name: 'Guardar zona' }))
     expect(mocks.save).toHaveBeenCalledWith({ restaurantId, zoneId, zone: {
@@ -40,9 +41,12 @@ describe('delivery zone setup', () => {
 
   it('requires a delivery weekday, then saves a copy in one operation', async () => {
     const user = userEvent.setup(); open()
+    await user.click(screen.getByRole('button', { name: 'Calendario de reparto' }))
     await user.click(screen.getByLabelText('Mostrar la próxima entrega estimada'))
+    await user.click(screen.getByRole('button', { name: 'Zona y tarifas' }))
     await user.click(screen.getByRole('button', { name: 'Guardar zona' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Elegí al menos un día')
+    expect(screen.getByLabelText('Martes')).toBeVisible()
     expect(mocks.save).not.toHaveBeenCalled()
     await user.click(screen.getByLabelText('Martes'))
     await user.click(screen.getByLabelText('Viernes'))
@@ -57,6 +61,7 @@ describe('delivery zone setup', () => {
 
   it('adds a closure and enables one channel without asking the shopper for a date', async () => {
     const user = userEvent.setup(); open()
+    await user.click(screen.getByRole('button', { name: 'Calendario de reparto' }))
     await user.click(screen.getByLabelText('Mostrar la próxima entrega estimada'))
     await user.click(screen.getByLabelText('Viernes'))
     await user.click(screen.getByText('Excepciones y dónde mostrarlo'))

@@ -146,6 +146,32 @@ test.describe('administrative identity across secondary screens', () => {
     expect(attempts).toEqual([body, body])
   })
 
+  test('team suspension keeps focus and only changes access after confirmation', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 640 })
+    await readOnlyFixture(page, 'admin')
+    const attempts: unknown[] = []
+    await page.route('https://e2e.invalid/rest/v1/rpc/set_restaurant_member_status', async route => {
+      attempts.push(route.request().postDataJSON())
+      await route.fulfill({ json: true })
+    })
+    await page.goto('/admin/usuarios')
+    const action = page.getByRole('button', { name: 'Suspender', exact: true })
+    await action.click()
+    const dialog = page.getByRole('dialog', { name: '¿Suspender este acceso?' })
+    await expect(dialog.getByRole('button', { name: 'Cancelar' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(action).toBeFocused()
+    expect(attempts).toHaveLength(0)
+    await action.click()
+    await dialog.getByRole('button', { name: 'Suspender acceso' }).click()
+    await expect.poll(() => attempts.length).toBe(1)
+    expect(attempts[0]).toEqual({
+      p_membership_id: '73000000-0000-4000-8000-000000000003',
+      p_status: 'suspended',
+    })
+  })
+
   test('uploads a portrait cover within database bounds and removes every generated variant', async ({ page }) => {
     const fixture = await readOnlyFixture(page, 'admin')
     const uploads = new Map<string, Buffer>()

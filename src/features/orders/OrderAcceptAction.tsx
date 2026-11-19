@@ -1,4 +1,5 @@
 import { PackageCheck } from 'lucide-react'
+import { InlineFeedback } from '../../components/AdminFeedback'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { acceptanceDescription, acceptanceLabel, canAcceptOrder, useOrderAcceptance, type AcceptableOrder } from './orderAcceptance'
 
@@ -17,7 +18,7 @@ export function OrderAcceptAction({ order, showDescription = false, fullWidth = 
         <PackageCheck className="h-4 w-4 shrink-0" aria-hidden />{busy ? 'Aceptando…' : acceptanceLabel(order)}
       </button>
     </> : null}
-    {message ? <p className="mt-3 text-sm text-stone-700" role="status">{message}</p> : null}
-    {error ? <p className="form-error mt-3" role="alert">{error}</p> : null}
+    {message ? <InlineFeedback tone="success" className="mt-2">{message}</InlineFeedback> : null}
+    {error ? <InlineFeedback tone="error" className="mt-2">{error}</InlineFeedback> : null}
   </div>
 }

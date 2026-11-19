@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Copy, Plus } from 'lucide-react'
+import { ArrowUpRight, Copy, Plus, UserRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { EmptyState, ErrorPanel } from '../../components/Feedback'
+import { AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
 import { commercePath, type CommerceChannel } from '../../lib/commerce-channel'
 import { env } from '../../lib/env'
@@ -13,6 +14,7 @@ import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { sellerDirectoryKey, useSellerDirectory, type Seller } from './seller-directory'
+import '../catalog/catalog-admin.css'
 
 const channelOptions = [
   { channel: 'menu', label: 'Menú', key: 'menu_enabled' },
@@ -27,15 +29,15 @@ function sellerLink(slug: string, channel: CommerceChannel, id: string) {
 
 export function SellersPage() {
   const { selected } = useRestaurantScope()
-  return selected ? <SellerDirectory key={selected.id} restaurantId={selected.id} /> : <LoadingScreen />
+  return selected ? <SellerDirectory key={selected.id} restaurantId={selected.id} /> : <AdminLoading />
 }
 
 function SellerDirectory({ restaurantId }: { restaurantId: string }) {
   const restaurant = useRestaurant(restaurantId)
   const sellers = useSellerDirectory(restaurantId)
   const [editor, setEditor] = useState<Seller | 'new' | null>(null)
-  const [notice, setNotice] = useState('')
-  if (restaurant.isLoading || sellers.isLoading) return <LoadingScreen />
+  const [notice, setNotice] = useState<{ message: string; tone: 'success' | 'error' } | null>(null)
+  if (restaurant.isLoading || sellers.isLoading) return <AdminLoading variant="list" label="Cargando vendedores…" />
   if (!restaurant.data || sellers.isError) return <ErrorPanel>No pudimos cargar los vendedores. <button type="button" className="button-quiet" onClick={() => void Promise.all([restaurant.refetch(), sellers.refetch()])}>Reintentar</button></ErrorPanel>
   const business = restaurant.data
   const published = { menu: business.public_menu_enabled, store: business.store_enabled }
@@ -43,38 +45,48 @@ function SellerDirectory({ restaurantId }: { restaurantId: string }) {
   async function copy(seller: Seller, channel: CommerceChannel) {
     try {
       await navigator.clipboard.writeText(sellerLink(business.slug, channel, seller.id))
-      setNotice(`Copiaste el enlace de ${seller.name}.`)
+      setNotice({ message: `Copiaste el enlace de ${seller.name}.`, tone: 'success' })
     } catch {
-      setNotice('No se pudo copiar. Abrí el enlace para copiarlo desde el navegador.')
+      setNotice({ message: 'No se pudo copiar. Abrí el enlace para copiarlo desde el navegador.', tone: 'error' })
     }
   }
 
   return <>
     <PageHeader eyebrow="Equipo comercial" title="Vendedores" description="Creá enlaces para compartir el catálogo y saber quién originó cada pedido."
-      actions={!editor ? <button className="button-primary" type="button" onClick={() => { setNotice(''); setEditor('new') }}><Plus className="h-4 w-4" aria-hidden />Nuevo vendedor</button> : undefined} />
+      actions={!editor ? <button className="button-primary" type="button" onClick={() => { setNotice(null); setEditor('new') }}><Plus className="h-4 w-4" aria-hidden />Nuevo vendedor</button> : undefined} />
     {editor ? <SellerForm key={editor === 'new' ? 'new' : editor.id} restaurantId={restaurantId}
       initial={editor === 'new' ? undefined : editor} published={published} onCancel={() => setEditor(null)}
-      onSaved={(name) => { setEditor(null); setNotice(`${name}: cambios guardados.`) }} /> : null}
-    {notice ? <p className="form-success mb-4" role="status">{notice}</p> : null}
-    <div className="space-y-3">
-      {sellers.data?.length === 0 && !editor ? <p className="surface-card p-5 text-stone-600">Todavía no agregaste vendedores.</p> : null}
-      {sellers.data?.map(seller => {
+      onSaved={(name) => { setEditor(null); setNotice({ message: `${name}: cambios guardados.`, tone: 'success' }) }} /> : null}
+    {notice ? <p className={notice.tone === 'success' ? 'form-success mb-4' : 'form-error mb-4'} role={notice.tone === 'success' ? 'status' : 'alert'}>{notice.message}</p> : null}
+    {sellers.data?.length === 0 && !editor ? (
+      <EmptyState title="Todavía no agregaste vendedores" description="Creá un vendedor para compartir su enlace de Menú o Tienda." />
+    ) : null}
+    {sellers.data?.length ? <div className="catalog-directory">
+      {sellers.data.map(seller => {
         const photo = publicAssetUrl(seller.image_path)
-        return <article className="surface-card flex flex-wrap items-center gap-3 p-4" key={seller.id}>
-          {photo ? <img src={photo} alt="" className="h-10 w-10 rounded-full object-cover" /> : null}
-          <div className="min-w-0 flex-1"><h2 className="break-words font-semibold">{seller.name}</h2>
-            <p className="text-sm text-stone-600">{seller.active ? seller.whatsapp_phone : 'Inactivo'}</p></div>
-          <div className="flex flex-wrap gap-2">
-            {channelOptions.filter(option => seller.active && seller[option.key] && published[option.channel]).map(({ channel, label }) =>
-              <div className="flex items-center gap-1" key={channel}>
+        const availableChannels = channelOptions.filter(option => seller.active && seller[option.key] && published[option.channel])
+        return <article className="catalog-directory-row seller-directory-row" key={seller.id}>
+          <div className="seller-directory-identity">
+            {photo ? <img src={photo} alt="" className="seller-directory-avatar object-cover" /> : <span className="seller-directory-avatar"><UserRound className="h-4 w-4" aria-hidden /></span>}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h2 className="break-words font-semibold">{seller.name}</h2>
+                <span className="catalog-state-badge" data-tone={seller.active ? 'success' : 'neutral'}>{seller.active ? 'Activo' : 'Inactivo'}</span>
+              </div>
+              {seller.active ? <p className="mt-1 break-words text-sm text-stone-600">{seller.whatsapp_phone}</p> : null}
+            </div>
+          </div>
+          <div className="seller-directory-actions">
+            {availableChannels.map(({ channel, label }) =>
+              <div className="seller-channel-actions" key={channel}>
                 <button type="button" className="button-secondary" aria-label={`Copiar enlace de ${label} de ${seller.name}`} onClick={() => void copy(seller, channel)}><Copy className="h-4 w-4" aria-hidden />Copiar {label.toLowerCase()}</button>
-                <a className="button-quiet" href={sellerLink(business.slug, channel, seller.id)} target="_blank" rel="noreferrer" aria-label={`Ver ${label.toLowerCase()} de ${seller.name}`}>Ver</a>
+                <a className="button-quiet" href={sellerLink(business.slug, channel, seller.id)} target="_blank" rel="noreferrer" aria-label={`Ver ${label.toLowerCase()} de ${seller.name}`}>Ver <ArrowUpRight className="h-4 w-4" aria-hidden /></a>
               </div>)}
-            <button type="button" className="button-quiet" aria-label={`Editar ${seller.name}`} disabled={Boolean(editor)} onClick={() => { setNotice(''); setEditor(seller) }}>Editar</button>
+            <button type="button" className="button-quiet" aria-label={`Editar ${seller.name}`} disabled={Boolean(editor)} onClick={() => { setNotice(null); setEditor(seller) }}>Editar</button>
           </div>
         </article>
       })}
-    </div>
+    </div> : null}
   </>
 }
 
@@ -123,14 +135,14 @@ function SellerForm({ restaurantId, initial, published, onSaved, onCancel }: {
     } finally { setSaving(false) }
   }
 
-  return <form className="form-card mb-5" onSubmit={save}>
+  return <form className="form-card seller-editor mb-4" onSubmit={save}>
     <h2 className="form-card-title">{initial ? 'Editar vendedor' : 'Nuevo vendedor'}</h2>
-    <fieldset disabled={saving} className="mt-4 space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <fieldset disabled={saving} className="seller-editor-fields">
+      <div className="seller-editor-contact">
         <label className="field"><span>Nombre</span><input value={name} onChange={event => setName(event.target.value)} maxLength={120} required /></label>
         <label className="field"><span>WhatsApp</span><input type="tel" value={phone} onChange={event => setPhone(event.target.value)} maxLength={40} placeholder="+54 9 11 1234 5678" required /><small>Los pedidos del enlace se envían a este número.</small></label>
       </div>
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="seller-editor-photo">
         <label className="field max-w-full"><span>Foto (opcional)</span><input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => {
           const selection = event.target.files?.[0]
           if (!selection) return
@@ -139,7 +151,7 @@ function SellerForm({ restaurantId, initial, published, onSaved, onCancel }: {
         }} /></label>
         {imagePath || file ? <button className="button-quiet" type="button" onClick={() => { setImagePath(null); setFile(null) }}>Quitar foto</button> : null}
       </div>
-      <fieldset><legend className="mb-2 text-sm font-semibold">Dónde compartir</legend>
+      <fieldset className="seller-editor-channels"><legend className="mb-2 text-sm font-semibold">Dónde compartir</legend>
         <div className="flex flex-wrap gap-4">
           {channelOptions.map(({ channel, label }) => <label key={channel} className="check-field"><input type="checkbox" checked={channels[channel]} onChange={event => setChannels(values => ({ ...values, [channel]: event.target.checked }))} />{label}{published[channel] ? '' : ' (sin publicar)'}</label>)}
         </div>
@@ -147,7 +159,7 @@ function SellerForm({ restaurantId, initial, published, onSaved, onCancel }: {
       {initial ? <label className="check-field"><input type="checkbox" checked={active} onChange={event => setActive(event.target.checked)} />Vendedor activo</label> : null}
     </fieldset>
     {error ? <p className="form-error mt-4" role="alert">{error}</p> : null}
-    <div className="mt-4 flex flex-wrap justify-end gap-2">
+    <div className="seller-editor-actions">
       <button type="button" className="button-secondary" onClick={onCancel} disabled={saving}>Cancelar</button>
       <button type="submit" className="button-primary" disabled={saving} aria-busy={saving}>{saving ? 'Guardando…' : 'Guardar vendedor'}</button>
     </div>

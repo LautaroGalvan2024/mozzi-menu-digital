@@ -2,7 +2,8 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { z } from 'zod'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { ErrorPanel } from '../../components/Feedback'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { AdminDataWorkspace } from '../../components/AdminDataWorkspace'
 import { PageHeader } from '../../components/PageHeader'
 import { invalidateCatalogQueries } from '../../lib/catalog-cache'
@@ -13,7 +14,8 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useStageOneFeatures } from '../restaurants/stage-one-features'
 import { InventoryBalances } from './InventoryBalances'
 import { StockOverview } from './StockOverview'
-import { countedQuantity, countRows, inventoryError, inventoryItemsSchema, inventoryOverviewSchema, operationLabels, readCountDraft, type CountDraft } from './inventory'
+import { StockHistory } from './StockHistory'
+import { countedQuantity, countRows, inventoryError, inventoryItemsSchema, inventoryOverviewSchema, readCountDraft, type CountDraft } from './inventory'
 import './stock-design.css'
 
 const uuid = z.string().uuid()
@@ -259,7 +261,7 @@ function InventoryWorkspace() {
     void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: [{ productId, quantity: movementQuantity, expectedVersion: item.version }], p_reason: movementReason.trim() } })
   }
 
-  if (inventoryLoading) return <LoadingScreen />
+  if (inventoryLoading) return <AdminLoading label="Cargando stock…" />
   if (inventoryErrorState || !inventory) return <ErrorPanel action={<button className="button-secondary" disabled={inventoryFetching} onClick={() => void refetchInventory()}>Reintentar carga</button>}>{inventoryErrorState?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
   const { policy, operations } = inventory
   const initializedItems = items.filter(item => item.initialized)
@@ -269,8 +271,8 @@ function InventoryWorkspace() {
   const modeLabel = countId ? 'Conteo en curso' : policy.mode === 'enforced' ? 'Activo' : policy.mode === 'paused' ? 'Pausado' : 'Sin activar'
   const canRecordMovement = isAdmin && policy.mode === 'enforced' && !countId
   const searching = itemsQuery.isLoading || search.trim().slice(0, 120) !== debouncedSearch
-  return <AdminDataWorkspace className={`admin-inventory-workspace${redesigned ? ' stock-design' : ''}`}>
-    <PageHeader eyebrow={redesigned ? '' : 'Operación'} title="Stock" description="Consultá las cantidades disponibles y actualizá el stock de tus productos." />
+  return <AdminDataWorkspace className={`stock-workspace${redesigned ? ' stock-design' : ''}`}>
+    <PageHeader title="Stock" description="Consultá existencias, reservas y unidades disponibles." />
     {redesigned ? <StockOverview
       items={items}
       loading={searching}
@@ -293,18 +295,18 @@ function InventoryWorkspace() {
         {isAdmin ? <Link className="button-secondary" to="/admin/catalogo/productos">Ir a productos</Link> : null}
       </div>
     </div>}
-    {error ? <p className="form-error mb-4" role="alert">{error}</p> : null}
-    {message ? <p className="form-success mb-4" role="status">{message}</p> : null}
+    {error ? <InlineFeedback tone="error" className="mb-4">{error}</InlineFeedback> : null}
+    {message ? <InlineFeedback tone="success" className="mb-4">{message}</InlineFeedback> : null}
     {pending && isAdmin ? <section className="mb-5 rounded-2xl bg-amber-50 p-4"><p>Hay una operación pendiente de confirmación. Recuperá ese envío antes de registrar otro.</p><button className="button-primary mt-3" disabled={busy} onClick={() => void execute(pending)}>Reintentar operación</button></section> : null}
-    {isAdmin && policy.mode === 'never_enabled' && !countId ? <section className="form-card mb-5 admin-inventory-activation">
+    {isAdmin && policy.mode === 'never_enabled' && !countId ? <section className="form-card mb-4 stock-activation" aria-labelledby="stock-activation-heading">
       <div>
-        <h3 className="font-bold">Activar control de stock</h3>
+        <h2 id="stock-activation-heading" className="font-bold">Activar control de stock</h2>
         <p className="mt-2 text-sm">Cargá la cantidad de los productos que querés controlar, incluyendo 0 si están agotados. El control se aplicará a los pedidos nuevos. No hace falta iniciar un conteo.</p>
         {missingItems.length ? <><p className="mt-3 text-sm font-semibold">{missingItems.length} {missingItems.length === 1 ? 'producto seguirá' : 'productos seguirán'} sin control de stock:</p><ul className="mt-2 flex flex-wrap gap-2">{missingItems.slice(0, 5).map(item => <li key={item.productId}><Link className="text-sm font-semibold text-orange-700 underline" to={`/admin/catalogo/productos/${item.productId}`}>{item.name}</Link></li>)}</ul>{missingItems.length > 5 ? <p className="mt-2 text-sm">Los demás aparecen en la tabla de abajo.</p> : null}</> : null}
         {!allItemsLoaded ? <p className="mt-3 text-sm text-amber-800">Cargá la lista completa de productos antes de activar para revisar cuáles tienen cantidad cargada.</p> : null}
         <p className="mt-3 text-sm text-stone-600">Los pedidos recibidos sin control seguirán a cargo del comercio, sin descuentos automáticos. Registrá también las ventas realizadas fuera de Mozzi de los productos controlados para mantener el saldo al día.</p>
-        <button className="button-primary mt-4" disabled={disabled || !allItemsLoaded || items.length === 0} onClick={() => void execute({ name: 'activate_inventory_from_product_stock', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_expected_policy_version: Number(policy.version), p_other_channels: activationOtherChannels } })}>Activar control de stock</button>
       </div>
+      <button className="button-primary" disabled={disabled || !allItemsLoaded || items.length === 0} onClick={() => void execute({ name: 'activate_inventory_from_product_stock', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_expected_policy_version: Number(policy.version), p_other_channels: activationOtherChannels } })}>Activar control de stock</button>
     </section> : null}
     {countId ? <p className="mb-4 rounded-2xl bg-amber-50 p-4">Ventana iniciada: {new Date(policy.countStartedAt!).toLocaleString('es-AR')}. Registrá cada cantidad mientras contás. Si hubo movimientos físicos durante la ventana, detené el registro y conciliá antes de cerrar.</p> : null}
     <InventoryBalances
@@ -327,13 +329,13 @@ function InventoryWorkspace() {
       onRetry={() => void itemsQuery.refetch()}
     />
     {redesigned ? <h2 className="stock-tools-heading">Herramientas e historial</h2> : null}
-    {isAdmin ? <details className="admin-disclosure mt-5" open={Boolean(countId) || policy.mode === 'paused' || undefined}>
+    {isAdmin ? <details className="admin-disclosure stock-tool" open={Boolean(countId) || policy.mode === 'paused' || undefined}>
       <summary>Herramientas avanzadas de inventario</summary><div className="mt-4">
     {!policy.businessConfirmed && isAdmin ? <section className="form-card mb-5"><h2 className="form-card-title">Reglas para activar el stock</h2><p>Esta versión admite unidades enteras, un saldo por SKU o variante y entregas y devoluciones completas. La app será la fuente principal del stock de los productos con cantidad cargada. Los productos sin cantidad se pueden pedir sin control. Las reservas aceptadas o pagadas se liberan al cancelar, sin vencimiento automático. Los pagos online pendientes reservan durante 30 minutos. El conteo incluye mercadería en tránsito pendiente de recepción o retiro.</p><p className="mt-3">Si necesitás cajas y unidades del mismo saldo, fracciones o entregas/devoluciones parciales, deben incorporarse antes de activar.</p><label className="field mt-4"><span>Ventas fuera de la app</span><select value={otherChannels} disabled={disabled} onChange={event => setOtherChannels(event.target.value as typeof otherChannels)}><option value="none">No hay otros canales</option><option value="record_before_handoff">Se registran aquí al entregar, antes de cerrar la venta</option></select></label><label className="check-field mt-4"><input type="checkbox" checked={businessAccepted} disabled={disabled} onChange={event => setBusinessAccepted(event.target.checked)} />Confirmo que estas reglas describen la operación del comercio.</label><button className="button-primary mt-4" disabled={disabled || !businessAccepted} onClick={() => void execute({ name: 'confirm_inventory_business_policy', args: { p_restaurant_id: restaurantId, p_policy: { unitModel: 'whole_product', sourceOfTruth: 'app', otherChannels, returns: 'full_only', acceptance: 'reserve', delivery: 'physical_handoff', partialDeliveries: 'none', physicalScope: 'until_handoff_including_transit', acceptedReservationsExpire: false } } })}>Guardar reglas</button></section> : null}
     {isAdmin && !countId ? <section className="form-card mb-5"><h2 className="form-card-title">{policy.mode === 'enforced' ? 'Pausar para contar o resolver una contingencia' : 'Conteo físico'}</h2><p>Para contar, detené movimientos físicos en todos los canales, incluidos ingresos y devoluciones. El sistema también pausará pedidos, aceptación y entregas hasta finalizar.</p><label className="field mt-4"><span>Motivo</span><input value={reason} maxLength={500} disabled={disabled} onChange={event => setReason(event.target.value)} /></label><div className="mt-4 flex flex-wrap gap-3">{policy.mode === 'enforced' ? <button className="button-secondary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'change_inventory_policy', args: { p_restaurant_id: restaurantId, p_mode: 'paused', p_reason: reason.trim(), p_expected_policy_version: Number(policy.version) } })}>Pausar operaciones</button> : <button className="button-primary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'begin_inventory_count', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_reason: reason.trim() } })}>Iniciar ventana de conteo</button>}{policy.mode === 'paused' ? <button className="button-secondary" disabled={disabled || reason.trim().length < 3} onClick={() => void execute({ name: 'change_inventory_policy', args: { p_restaurant_id: restaurantId, p_mode: 'enforced', p_reason: reason.trim(), p_expected_policy_version: Number(policy.version) } })}>Reanudar operaciones</button> : null}</div></section> : null}
     {countId && isAdmin ? <section className="form-card mt-5"><h2 className="form-card-title">Revisar y registrar conteo</h2><p>{Object.values(counts).filter(row => row.quantity !== '').length} cantidades cargadas. Contá todos los productos con stock cargado, incluidos los archivados. Cero es una cantidad explícita. Los productos sin stock cargado pueden quedar vacíos y seguirán sin control.</p><label className="field mt-4"><span>Observación del conteo</span><textarea maxLength={2000} value={note} disabled={disabled} onChange={event => setNote(event.target.value)} placeholder="Responsable, alcance contado y comprobación de todos los canales" /></label><label className="check-field mt-4"><input type="checkbox" checked={noMovements} disabled={disabled} onChange={event => setNoMovements(event.target.checked)} />Confirmo que no hubo movimientos físicos entre contar y registrar, en ningún canal.</label>{policy.mode === 'never_enabled' ? <><label className="check-field mt-4"><input type="checkbox" checked={activate} disabled={disabled || !policy.businessConfirmed} onChange={event => setActivate(event.target.checked)} />Activar el stock con este conteo.</label>{!policy.businessConfirmed ? <p className="mt-2 text-sm">Primero confirmá las reglas comerciales.</p> : null}{activate ? <div className="mt-4"><h3 className="font-bold">Pedidos pendientes que se incorporarán</h3><p className="text-sm">Revisá cada pedido. Los recibidos sin control seguirán sin descuentos automáticos; el control se aplicará a pedidos nuevos.</p>{openOrders.error ? <ErrorPanel>{openOrders.error.message}</ErrorPanel> : null}{openOrders.data?.map(order => <label className="check-field mt-2" key={order.id}><input type="checkbox" checked={reviewedOrders.includes(order.id)} disabled={disabled} onChange={event => setReviewedOrders(rows => event.target.checked ? [...rows, order.id] : rows.filter(id => id !== order.id))} /><Link to={`/admin/pedidos/${order.id}`}>{order.display_number}</Link> · {order.status === 'accepted' ? 'Aceptado sin descuento automático' : 'Pendiente de aceptación'}</label>)}</div> : null}</> : <p className="mt-3 text-sm">Finalizar el conteo conserva la pausa. Reanudá cuando la contingencia esté resuelta.</p>}<button className="button-primary mt-4" disabled={disabled || !allItemsLoaded || !noMovements || note.trim().length < 10 || (activate && (openOrders.isLoading || Boolean(openOrders.error) || reviewedOrders.length !== openOrders.data?.length))} onClick={finishCount}>Registrar conteo{activate ? ' y activar stock' : ''}</button></section> : null}
     </div></details> : null}
-    {canRecordMovement ? <details ref={movementDetails} className="admin-disclosure mt-5" open={pending?.name === 'inventory_adjust' || undefined}>
+    {canRecordMovement ? <details ref={movementDetails} className="admin-disclosure stock-tool" open={pending?.name === 'inventory_adjust' || undefined}>
       <summary>Ingresos, ajustes y ventas externas</summary>
       <div className="mt-5"><h2 className="form-card-title mb-4">Registrar movimiento</h2>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -359,6 +361,6 @@ function InventoryWorkspace() {
       {movementKind === 'adjustment' ? <p className="mt-3 text-sm">Este movimiento suma o resta unidades. Para escribir directamente el total, editá el campo Stock (unidades) del producto.</p> : null}
       <button className="button-primary mt-4" disabled={disabled || (movementKind === 'external_sale' ? externalReference.trim().length < 3 || externalRows.some(row => !row.productId || !row.quantity) : movementReason.trim().length < 3 || !productId || !movementQuantity)} onClick={recordMovement}>{movementKind === 'external_sale' ? 'Registrar venta externa' : 'Registrar movimiento'}</button>
     </div></details> : null}
-    <details className="admin-disclosure mt-5"><summary>Historial de movimientos</summary><section className="mt-5"><h2 className="form-card-title">Últimos {operations.length} movimientos</h2><p className="mb-4 text-sm">Se muestran hasta 100 operaciones. Las reservas afectan disponible; las entregas afectan existencia. Una devolución no confirma un reintegro de dinero.</p><div className="relative overflow-x-auto"><table className="data-table"><thead><tr><th>Fecha</th><th>Acción</th><th>Motivo, referencia y cantidades</th><th>Responsable</th><th>Pedido</th></tr></thead><tbody>{operations.map(operation => <tr key={operation.id}><td>{new Date(operation.createdAt).toLocaleString('es-AR')}</td><td>{operationLabels[operation.kind] ?? operation.kind}</td><td>{operation.reason}{operation.kind === 'external_sale' && operation.externalReference ? <p className="mt-1 text-sm">Canal y referencia: <span>{operation.externalReference}</span></p> : null}{operation.movements.length ? <details className="mt-2"><summary className="cursor-pointer">Ver cantidades</summary><ul className="mt-2 space-y-1">{operation.movements.map(movement => <li key={movement.productId}>{items.find(item => item.productId === movement.productId)?.name ?? 'Producto archivado'}: existencia {movement.deltaOnHand}, reserva {movement.deltaReserved}{movement.returnedQuantity !== '0' ? `, recibido en devolución ${movement.returnedQuantity}` : ''}. Saldo: {movement.onHandAfter}.</li>)}</ul></details> : null}</td><td>{operation.actorName || (operation.actorUserId ? 'Operador registrado' : 'Sistema de pagos')}</td><td>{operation.orderId ? <Link to={`/admin/pedidos/${operation.orderId}`}>Ver pedido</Link> : '—'}</td></tr>)}</tbody></table></div></section></details>
+    <StockHistory operations={operations} items={items} />
   </AdminDataWorkspace>
 }

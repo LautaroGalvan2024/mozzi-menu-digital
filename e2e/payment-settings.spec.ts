@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { disabledStageOneFeatures } from './stage-one-fixture'
+import { selectAdminSection } from './section-navigation'
 
 const restaurantId = '31000000-0000-4000-8000-000000000001'
 const userId = '32000000-0000-4000-8000-000000000001'
@@ -53,6 +54,38 @@ async function adminFixture(page: Page, status: Record<string, unknown>) {
 test.describe('Mercado Pago environment settings', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'This suite uses only the isolated e2e.invalid mock environment.')
 
+  test('manual payment dialog keeps the title, form scroll and actions separate on a short phone', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 526 })
+    const requests = await adminFixture(page, { configured: false, connection: null })
+    await page.goto('/admin/medios-de-pago')
+    const add = page.getByRole('button', { name: 'Nuevo medio' })
+    await add.click()
+    const dialog = page.getByRole('dialog', { name: 'Nuevo medio de pago' })
+    await expect(dialog.getByRole('textbox', { name: 'Nombre', exact: true })).toBeFocused()
+    await dialog.getByText('Datos para transferencia e instrucciones', { exact: true }).click()
+    const geometry = await dialog.evaluate(element => {
+      const title = element.querySelector('header')!.getBoundingClientRect()
+      const actions = element.querySelector('footer')!.getBoundingClientRect()
+      const body = element.querySelector<HTMLElement>('.settings-dialog-body')!
+      return {
+        titleVisible: title.top >= 0 && title.bottom <= window.innerHeight,
+        actionsVisible: actions.top >= 0 && actions.bottom <= window.innerHeight,
+        scrolls: body.scrollHeight > body.clientHeight,
+        noHorizontalOverflow: document.documentElement.scrollWidth <= window.innerWidth,
+      }
+    })
+    expect(geometry).toEqual({ titleVisible: true, actionsVisible: true, scrolls: true, noHorizontalOverflow: true })
+    await page.screenshot({ path: testInfo.outputPath('manual-payment-short-mobile.png') })
+    await dialog.getByRole('button', { name: 'Guardar' }).focus()
+    await page.keyboard.press('Tab')
+    await expect(dialog.getByRole('button', { name: 'Cerrar' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+    await expect(add).toBeFocused()
+    expect(requests.paymentRequests).toEqual([{ restaurantId, action: 'status' }])
+    expect(requests.unexpected).toEqual([])
+  })
+
   test('mobile explains an inactive test authorization in production without claiming readiness', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 })
     const requests = await adminFixture(page, {
@@ -60,6 +93,7 @@ test.describe('Mercado Pago environment settings', () => {
       connectionIssue: 'different_environment', connection: { connected: false, providerUserId: '12345', expiresAt: '2030-01-01T00:00:00Z' },
     })
     await page.goto('/admin/medios-de-pago')
+    await selectAdminSection(page, 'Sección de medios de pago', 'Mercado Pago')
     const section = page.getByRole('region', { name: 'Mercado Pago para tu tienda' })
     await expect(section.getByText('Cobros reales', { exact: true })).toBeVisible()
     await expect(section.getByRole('status')).toHaveText('Necesita reconexión')
@@ -81,6 +115,7 @@ test.describe('Mercado Pago environment settings', () => {
       connectionIssue: 'not_connected', connection: { connected: false },
     })
     await page.goto('/admin/medios-de-pago')
+    await selectAdminSection(page, 'Sección de medios de pago', 'Mercado Pago')
     const section = page.getByRole('region', { name: 'Mercado Pago para tu tienda' })
     await expect(section.getByRole('button', { name: 'Conectar mi cuenta para cobros reales' })).toBeEnabled()
     await expect(section.getByRole('status')).toHaveText('Sin conexión')
@@ -100,6 +135,7 @@ test.describe('Mercado Pago environment settings', () => {
       connectionIssue: null, connection: { connected: true, providerUserId: '12345', expiresAt: '2030-01-01T00:00:00Z' },
     })
     await page.goto('/admin/medios-de-pago')
+    await selectAdminSection(page, 'Sección de medios de pago', 'Mercado Pago')
     const section = page.getByRole('region', { name: 'Mercado Pago para tu tienda' })
     await expect(section.getByRole('status')).toHaveText('Cuenta lista para cobros reales')
     await expect(section.getByRole('status')).toHaveClass(/text-emerald-800/)

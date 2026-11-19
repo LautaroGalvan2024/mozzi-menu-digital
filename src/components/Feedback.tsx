@@ -25,7 +25,7 @@ export function ErrorPanel({
 }) {
   const Heading = headingLevel === 1 ? 'h1' : 'h2'
   return (
-    <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950 shadow-sm" role="alert">
+    <div className="feedback-panel rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950 shadow-sm" role="alert">
       <div className="flex gap-3">
         <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
         <div>
@@ -48,7 +48,7 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center shadow-sm sm:p-10">
+    <div className="feedback-empty rounded-2xl border border-dashed border-stone-300 bg-white p-8 text-center shadow-sm sm:p-10">
       <h2 className="font-display text-xl font-semibold text-stone-900">{title}</h2>
       <p className="mx-auto mt-2 max-w-xl text-sm text-stone-600">{description}</p>
       {action ? <div className="mt-5">{action}</div> : null}

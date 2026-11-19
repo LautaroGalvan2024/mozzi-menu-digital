@@ -4,7 +4,8 @@ import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router'
 import { z } from 'zod'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { ErrorPanel } from '../../components/Feedback'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
@@ -16,6 +17,8 @@ import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { OrderAcceptAction } from './OrderAcceptAction'
 import { acceptanceOrder, invalidateOrderQueries, useOrderUpdates } from './orderAcceptance'
 import { clearReverseAttempt, inventoryDetailSchema, inventoryOrderError, inventoryOutcomeLabel, isReversed, loadReverseAttempt, saveReverseAttempt, type ReverseAttempt } from './inventoryOrder'
+
+import './order-workspace.css'
 
 const returnStateSchema = z.object({
   ordersReturnTo: z.string().regex(/^\/admin\/pedidos(?:\?[^#]*)?$/),
@@ -114,7 +117,7 @@ export function OrderDetailPage() {
     },
   })
 
-  if (query.isLoading) return <LoadingScreen />
+  if (query.isLoading) return <AdminLoading label="Cargando pedido…" />
   if (query.error || !query.data) {
     return <ErrorPanel>{query.error?.message ?? 'Pedido inexistente o sin acceso.'}</ErrorPanel>
   }
@@ -202,68 +205,20 @@ export function OrderDetailPage() {
 
   return <>
     <PageHeader
-      eyebrow="Detalle"
       title={order.display_number}
       description={`Creado ${new Date(order.created_at).toLocaleString('es-AR')}`}
       actions={<Link className="button-secondary" to={ordersReturnTo}><ArrowLeft className="h-4 w-4" />Volver</Link>}
     />
-    {error ? <p className="form-error mb-5" role="alert">{error}</p> : null}
-    <section className="admin-toolbar mb-5 flex flex-wrap items-center justify-between gap-4" aria-label="Estado del pedido">
+    {error ? <InlineFeedback tone="error" className="mb-4">{error}</InlineFeedback> : null}
+    <section className="admin-toolbar order-detail-status flex flex-wrap justify-between" aria-label="Estado del pedido">
       <div>{!isPaidAwaitingPreparation(order) ? <StatusPill status={order.status} outcome={order.inventory_outcome} /> : null}<CommerceOrderStatus channel={order.channel} checkoutMode={order.checkout_mode} paymentStatus={order.payment_status} pendingPreparation={isPaidAwaitingPreparation(order)} /></div>
       <OrderAcceptAction key={order.id} order={acceptanceOrder(order)} showDescription disabled={busy} />
     </section>
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-      <div className="space-y-6">
+    <div className="order-detail-content">
+      <aside className="order-detail-context" aria-label="Cliente y seguimiento">
         <section className="form-card">
-          <h2 className="form-card-title">Productos</h2>
-          <div className="mt-5 divide-y divide-stone-200">
-            {items.map((item) => <article className="py-4 first:pt-0" key={item.id}>
-              <div className="flex justify-between gap-3">
-                <div><strong>{item.quantity} × {item.product_name_snapshot}</strong><p className="text-xs text-stone-500">{item.product_code_snapshot}</p></div>
-                <strong>{formatMoney(item.line_total_cents, order.currency_code)}</strong>
-              </div>
-              {Object.keys(item.variant_attributes_snapshot).length ? <p className="mt-1 text-sm text-stone-600" aria-label="Variante elegida">{Object.entries(item.variant_attributes_snapshot).map(([attribute, value]) => `${attribute}: ${value}`).join(' · ')}</p> : null}
-              {options.filter((option) => option.order_item_id === item.id).map((option) => <p key={option.id} className="mt-1 pl-4 text-sm text-stone-600">· {option.group_name_snapshot}: {option.option_name_snapshot}{Number(option.price_delta_cents) ? ` (+${formatMoney(option.price_delta_cents, order.currency_code)})` : ''}</p>)}
-              {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">{item.pricing_breakdown_snapshot.quantityPricingType === 'threshold' && item.pricing_breakdown_snapshot.appliedUnitPriceCents !== undefined
-                ? `Desde ${item.pricing_breakdown_snapshot.minimumQuantity} unidades · ${formatMoney(item.pricing_breakdown_snapshot.appliedUnitPriceCents, order.currency_code)} c/u`
-                : `Promo por cantidad aplicada · base ${formatMoney(item.base_subtotal_cents, order.currency_code)}`}</p> : null}
-              {item.notes ? <p className="mt-2 text-sm italic text-stone-500">“{item.notes}”</p> : null}
-            </article>)}
-          </div>
-          <dl className="mt-5 space-y-2 border-t border-stone-200 pt-4 text-sm">
-            <Total label="Subtotal" value={order.subtotal_cents} currency={order.currency_code} />
-            <Total label="Descuento" value={-Number(order.discount_cents)} currency={order.currency_code} />
-            <Total label="Recargo" value={order.surcharge_cents} currency={order.currency_code} />
-            <Total label="Envío" value={order.delivery_fee_cents} currency={order.currency_code} />
-            <div className="flex justify-between pt-2 text-xl font-bold"><dt>Total</dt><dd>{formatMoney(order.total_cents, order.currency_code)}</dd></div>
-          </dl>
-        </section>
-        {isAdmin && order.status === 'completed' && order.inventory_outcome === 'delivered' ? <details className="admin-disclosure" open={Boolean(pendingReverse) || undefined}>
-          <summary>Devolución o corrección completa</summary><div className="mt-4">
-          <p className="mt-3 text-sm">Se conserva el historial del pedido. Esta operación no registra cobros ni reintegros.</p>
-          {pendingReverse?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">Hay un intento pendiente de confirmación. Reintentá estos mismos datos para recuperar su resultado.</p>:null}
-          <label className="field mt-4"><span>Qué ocurrió</span><select disabled={busy||!!pendingReverse} value={reverseKind} onChange={(event)=>{setReverseKind(event.target.value as typeof reverseKind);setRestock('');setReverseConfirmed(false)}}><option value="return">Se recibió la devolución de todo el pedido</option><option value="correction">La entrega se marcó por error y no ocurrió</option></select></label>
-          <label className="field mt-4"><span>Motivo</span><textarea disabled={busy||!!pendingReverse} value={reverseReason} maxLength={500} onChange={(event)=>setReverseReason(event.target.value)}/></label>
-          <label className="field mt-4"><span>Mercadería que queda vendible</span><select disabled={busy||!!pendingReverse} value={restock} onChange={(event)=>setRestock(event.target.value as typeof restock)}><option value="">Seleccioná el destino</option><option value="yes">Todo vuelve a estar disponible para vender</option>{reverseKind==='return'?<><option value="no">Nada vuelve al stock vendible</option>{deliveredProducts.size > 0 ? <option value="partial">Sólo una parte vuelve al stock vendible</option> : null}</>:null}</select></label>
-          {deliveredProducts.size === 0 ? <p className="mt-2 text-sm text-stone-500">Este pedido se entregó sin descontar stock. La devolución conserva las cantidades actuales.</p> : null}
-          {restock==='partial'?<div className="mt-4 space-y-3"><p className="text-sm">Se recibió el pedido completo. Indicá solamente las unidades vendibles que se reponen.</p>{[...deliveredProducts].map(([productId,product])=><label key={productId} className="field"><span>{product.name} · recibidas {product.quantity}</span><input type="number" min={0} max={product.quantity} step={1} disabled={busy||!!pendingReverse} value={quantities[productId]??''} onChange={(event)=>setQuantities((value)=>({...value,[productId]:event.target.value}))}/></label>)}</div>:null}
-          <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" disabled={busy} checked={reverseConfirmed} onChange={(event)=>setReverseConfirmed(event.target.checked)}/>{reverseKind==='return'?'Confirmo que se recibió la devolución completa y revisé la cantidad vendible.':'Confirmo que no hubo entrega real y toda la mercadería sigue disponible.'}</label>
-          <button className="button-danger mt-4" disabled={busy||!reverseConfirmed} onClick={()=>void reverse()}>{pendingReverse?'Reintentar misma operación':reverseKind==='return'?'Registrar devolución completa':'Corregir entrega marcada por error'}</button>
-        </div></details>:null}
-        {isAdmin && isReversed(order) && !inventory.replacementOrderId ? <section className="form-card">
-          <h2 className="form-card-title">Vincular un pedido de reemplazo</h2>
-          <p className="mt-3 text-sm">Seleccioná un pedido nuevo todavía pendiente. Quedará en la misma operación comercial; una compra nueva e independiente debe conservarse separada.</p>
-          <label className="field mt-4"><span>Buscar por número de pedido</span><input value={replacementSearch} disabled={busy} onChange={(event)=>setReplacementSearch(event.target.value)} placeholder="PED-…"/></label>
-          <label className="field mt-4"><span>Pedido pendiente</span><select value={replacementId} disabled={busy||replacements.isLoading} onChange={(event)=>setReplacementId(event.target.value)}><option value="">Seleccioná un pedido</option>{replacements.data?.map((candidate)=><option key={candidate.id} value={candidate.id}>{candidate.display_number} · {candidate.customer_name}</option>)}</select></label>
-          {replacements.error?<p role="alert" className="form-error mt-3">{replacements.error.message}</p>:<p className="mt-2 text-xs text-stone-500">Hasta 25 pedidos recientes; buscá el número para encontrar otro.</p>}
-          <label className="field mt-4"><span>Motivo del reemplazo</span><textarea maxLength={500} value={replacementReason} disabled={busy} onChange={(event)=>setReplacementReason(event.target.value)}/></label>
-          <button className="button-secondary mt-4" disabled={busy||!replacementId} onClick={()=>void linkReplacement()}>Vincular como reemplazo</button>
-        </section>:null}
-      </div>
-      <aside className="space-y-4">
-        <section className="form-card">
-          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="form-card-title">Cliente y entrega</h2><OrderWhatsAppAction order={order} businessName={scope.selected?.name ?? ''} showLabel /></div>
-          <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+          <div className="order-detail-card-heading"><h2 className="form-card-title">Cliente y entrega</h2><OrderWhatsAppAction order={order} businessName={scope.selected?.name ?? ''} showLabel /></div>
+          <dl className="order-detail-summary text-sm">
             <Info label="Cliente" value={order.customer_name} />
             <Info label="Teléfono" value={order.customer_phone} />
             <Info label="Modalidad" value={order.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'} />
@@ -317,15 +272,62 @@ export function OrderDetailPage() {
         {inventory.inventoryOperations.length?<><h3 className="mt-6 font-semibold">Movimientos de inventario</h3><ol className="mt-4 space-y-4">{inventory.inventoryOperations.map((operation)=><li key={operation.id} className="text-sm"><strong>{{reserve:'Reserva confirmada',payment_hold:'Reserva temporal de pago',payment_release:'Reserva de pago liberada',delivery:'Entrega confirmada',release:'Reserva liberada',correction:'Entrega corregida',return:'Devolución completa'}[operation.kind]??operation.kind}</strong><p className="text-xs text-stone-500">{new Date(operation.createdAt).toLocaleString('es-AR')}{operation.actorUserId?` · Usuario …${operation.actorUserId.slice(-8)}`:''}</p>{operation.reason?<p>{operation.reason}</p>:null}{operation.result.restockQuantities?.map((part)=><p key={part.productId}>{items.find(item => item.product_id === part.productId)?.product_name_snapshot??'Producto'}: {part.quantity} unidades repuestas como vendibles.</p>)}{operation.result.restocked!==undefined?<p>{operation.result.restocked?'Con reposición de unidades vendibles.':'Sin reposición al stock vendible.'}</p>:null}</li>)}</ol></>:null}
         </details>
       </aside>
+      <div className="order-detail-primary">
+        <section className="form-card">
+          <h2 className="form-card-title">Productos</h2>
+          <div className="mt-3 divide-y divide-stone-200">
+            {items.map((item) => <article className="py-3 first:pt-0" key={item.id}>
+              <div className="order-detail-line">
+                <div><strong>{item.quantity} × {item.product_name_snapshot}</strong><p className="text-xs text-stone-500">{item.product_code_snapshot}</p></div>
+                <strong>{formatMoney(item.line_total_cents, order.currency_code)}</strong>
+              </div>
+              {Object.keys(item.variant_attributes_snapshot).length ? <p className="mt-1 text-sm text-stone-600" aria-label="Variante elegida">{Object.entries(item.variant_attributes_snapshot).map(([attribute, value]) => `${attribute}: ${value}`).join(' · ')}</p> : null}
+              {options.filter((option) => option.order_item_id === item.id).map((option) => <p key={option.id} className="mt-1 pl-4 text-sm text-stone-600">· {option.group_name_snapshot}: {option.option_name_snapshot}{Number(option.price_delta_cents) ? ` (+${formatMoney(option.price_delta_cents, order.currency_code)})` : ''}</p>)}
+              {item.pricing_mode_snapshot === 'quantity' ? <p className="mt-1 text-xs font-semibold text-emerald-700">{item.pricing_breakdown_snapshot.quantityPricingType === 'threshold' && item.pricing_breakdown_snapshot.appliedUnitPriceCents !== undefined
+                ? `Desde ${item.pricing_breakdown_snapshot.minimumQuantity} unidades · ${formatMoney(item.pricing_breakdown_snapshot.appliedUnitPriceCents, order.currency_code)} c/u`
+                : `Promo por cantidad aplicada · base ${formatMoney(item.base_subtotal_cents, order.currency_code)}`}</p> : null}
+              {item.notes ? <p className="mt-2 text-sm italic text-stone-500">“{item.notes}”</p> : null}
+            </article>)}
+          </div>
+          <dl className="mt-5 space-y-2 border-t border-stone-200 pt-4 text-sm">
+            <Total label="Subtotal" value={order.subtotal_cents} currency={order.currency_code} />
+            <Total label="Descuento" value={-Number(order.discount_cents)} currency={order.currency_code} />
+            <Total label="Recargo" value={order.surcharge_cents} currency={order.currency_code} />
+            <Total label="Envío" value={order.delivery_fee_cents} currency={order.currency_code} />
+            <div className="order-detail-total pt-2 text-xl font-bold"><dt>Total</dt><dd>{formatMoney(order.total_cents, order.currency_code)}</dd></div>
+          </dl>
+        </section>
+        {isAdmin && order.status === 'completed' && order.inventory_outcome === 'delivered' ? <details className="admin-disclosure" open={Boolean(pendingReverse) || undefined}>
+          <summary>Devolución o corrección completa</summary><div className="mt-4">
+          <p className="mt-3 text-sm">Se conserva el historial del pedido. Esta operación no registra cobros ni reintegros.</p>
+          {pendingReverse?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">Hay un intento pendiente de confirmación. Reintentá estos mismos datos para recuperar su resultado.</p>:null}
+          <label className="field mt-4"><span>Qué ocurrió</span><select disabled={busy||!!pendingReverse} value={reverseKind} onChange={(event)=>{setReverseKind(event.target.value as typeof reverseKind);setRestock('');setReverseConfirmed(false)}}><option value="return">Se recibió la devolución de todo el pedido</option><option value="correction">La entrega se marcó por error y no ocurrió</option></select></label>
+          <label className="field mt-4"><span>Motivo</span><textarea disabled={busy||!!pendingReverse} value={reverseReason} maxLength={500} onChange={(event)=>setReverseReason(event.target.value)}/></label>
+          <label className="field mt-4"><span>Mercadería que queda vendible</span><select disabled={busy||!!pendingReverse} value={restock} onChange={(event)=>setRestock(event.target.value as typeof restock)}><option value="">Seleccioná el destino</option><option value="yes">Todo vuelve a estar disponible para vender</option>{reverseKind==='return'?<><option value="no">Nada vuelve al stock vendible</option>{deliveredProducts.size > 0 ? <option value="partial">Sólo una parte vuelve al stock vendible</option> : null}</>:null}</select></label>
+          {deliveredProducts.size === 0 ? <p className="mt-2 text-sm text-stone-500">Este pedido se entregó sin descontar stock. La devolución conserva las cantidades actuales.</p> : null}
+          {restock==='partial'?<div className="mt-4 space-y-3"><p className="text-sm">Se recibió el pedido completo. Indicá solamente las unidades vendibles que se reponen.</p>{[...deliveredProducts].map(([productId,product])=><label key={productId} className="field"><span>{product.name} · recibidas {product.quantity}</span><input type="number" min={0} max={product.quantity} step={1} disabled={busy||!!pendingReverse} value={quantities[productId]??''} onChange={(event)=>setQuantities((value)=>({...value,[productId]:event.target.value}))}/></label>)}</div>:null}
+          <label className="mt-4 flex items-start gap-3 text-sm"><input type="checkbox" disabled={busy} checked={reverseConfirmed} onChange={(event)=>setReverseConfirmed(event.target.checked)}/>{reverseKind==='return'?'Confirmo que se recibió la devolución completa y revisé la cantidad vendible.':'Confirmo que no hubo entrega real y toda la mercadería sigue disponible.'}</label>
+          <button className="button-danger mt-4" disabled={busy||!reverseConfirmed} onClick={()=>void reverse()}>{pendingReverse?'Reintentar misma operación':reverseKind==='return'?'Registrar devolución completa':'Corregir entrega marcada por error'}</button>
+        </div></details>:null}
+        {isAdmin && isReversed(order) && !inventory.replacementOrderId ? <section className="form-card">
+          <h2 className="form-card-title">Vincular un pedido de reemplazo</h2>
+          <p className="mt-3 text-sm">Seleccioná un pedido nuevo todavía pendiente. Quedará en la misma operación comercial; una compra nueva e independiente debe conservarse separada.</p>
+          <label className="field mt-4"><span>Buscar por número de pedido</span><input value={replacementSearch} disabled={busy} onChange={(event)=>setReplacementSearch(event.target.value)} placeholder="PED-…"/></label>
+          <label className="field mt-4"><span>Pedido pendiente</span><select value={replacementId} disabled={busy||replacements.isLoading} onChange={(event)=>setReplacementId(event.target.value)}><option value="">Seleccioná un pedido</option>{replacements.data?.map((candidate)=><option key={candidate.id} value={candidate.id}>{candidate.display_number} · {candidate.customer_name}</option>)}</select></label>
+          {replacements.error?<p role="alert" className="form-error mt-3">{replacements.error.message}</p>:<p className="mt-2 text-xs text-stone-500">Hasta 25 pedidos recientes; buscá el número para encontrar otro.</p>}
+          <label className="field mt-4"><span>Motivo del reemplazo</span><textarea maxLength={500} value={replacementReason} disabled={busy} onChange={(event)=>setReplacementReason(event.target.value)}/></label>
+          <button className="button-secondary mt-4" disabled={busy||!replacementId} onClick={()=>void linkReplacement()}>Vincular como reemplazo</button>
+        </section>:null}
+      </div>
     </div>
   </>
 }
 
 function Total({ label, value, currency }: { label: string; value: number | string; currency: string }) {
   if (Number(value) === 0) return null
-  return <div className="flex justify-between"><dt>{label}</dt><dd>{formatMoney(value, currency)}</dd></div>
+  return <div className="order-detail-total"><dt>{label}</dt><dd>{formatMoney(value, currency)}</dd></div>
 }
 
 function Info({ label, value }: { label: string; value: string }) {
-  return <div><dt className="text-xs font-medium text-stone-500">{label}</dt><dd className="mt-1 leading-6">{value}</dd></div>
+  return <div><dt className="text-xs font-medium text-stone-500">{label}</dt><dd className="mt-0.5 leading-5">{value}</dd></div>
 }

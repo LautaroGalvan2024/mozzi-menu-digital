@@ -8,7 +8,7 @@ export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?:
         <h1 className="font-display text-3xl font-bold leading-tight tracking-[-.025em] sm:text-[2.25rem]">{title}</h1>
         {description ? <p className="mt-2 max-w-3xl text-sm leading-6 opacity-70 sm:text-[15px]">{description}</p> : null}
       </div>
-      {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+      {actions ? <div className="page-header-actions flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
     </header>
   )
 }

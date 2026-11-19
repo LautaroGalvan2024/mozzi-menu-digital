@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Mail, Plus, Shield, UserCog } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
-import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { AdminConfirmDialog } from '../../components/AdminConfirmDialog'
+import { EmptyState, ErrorPanel } from '../../components/Feedback'
+import { InlineFeedback, AdminLoading } from '../../components/AdminFeedback'
 import { PageHeader } from '../../components/PageHeader'
 import { invalidateRestaurantMemberQueries } from '../../lib/admin-cache'
 import { supabase } from '../../lib/supabase/client'
@@ -16,8 +18,10 @@ export function UsersPage() {
   const [fullName, setFullName] = useState('')
   const [role, setRole] = useState<RestaurantMemberWithProfile['role']>('order_manager')
   const [error, setError] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ tone: 'success' | 'info' | 'warning'; text: string } | null>(null)
   const [inviting, setInviting] = useState(false)
+  const [suspending, setSuspending] = useState<RestaurantMemberWithProfile | null>(null)
+  const inviteName = useRef<HTMLInputElement>(null)
   const restaurantId = scope.selected?.id
   const isSuperAdmin = scope.selected?.role === 'super_admin'
   const canInvite = isSuperAdmin || scope.selected?.role === 'restaurant_admin'
@@ -26,7 +30,11 @@ export function UsersPage() {
     enabled: Boolean(restaurantId),
     queryFn: () => listRestaurantMembers(restaurantId ?? ''),
   })
-  if (query.isLoading) return <LoadingScreen />
+  useEffect(() => {
+    if (show) inviteName.current?.focus()
+  }, [show])
+
+  if (query.isLoading) return <AdminLoading label="Cargando el equipo…" />
   if (query.error) return <ErrorPanel>{query.error.message}</ErrorPanel>
 
   async function send(member?: RestaurantMemberWithProfile) {
@@ -43,10 +51,10 @@ export function UsersPage() {
         setError('No se pudo enviar la invitación. Verificá tu rol y los datos.')
         return
       }
-      if (data?.invitationSent) setMessage('Invitación enviada por correo.')
-      else if (data?.deliveryPending) setMessage('El acceso quedó guardado. Podés reintentar el envío en un minuto.')
-      else if (member || data?.membership?.status === 'invited') setMessage('La invitación sigue pendiente. Si necesitás otro correo, reintentá en un minuto.')
-      else setMessage('El usuario ya existía: se actualizó su acceso, pero no se envió un correo nuevo.')
+      if (data?.invitationSent) setMessage({ tone: 'success', text: 'Invitación enviada por correo.' })
+      else if (data?.deliveryPending) setMessage({ tone: 'warning', text: 'El acceso quedó guardado. Podés reintentar el envío en un minuto.' })
+      else if (member || data?.membership?.status === 'invited') setMessage({ tone: 'warning', text: 'La invitación sigue pendiente. Si necesitás otro correo, reintentá en un minuto.' })
+      else setMessage({ tone: 'info', text: 'Se actualizó el acceso de la cuenta existente. No se envió un correo nuevo.' })
       if (!member) {
         setShow(false)
         setEmail('')
@@ -67,7 +75,6 @@ export function UsersPage() {
 
   async function toggle(id: string, status: 'active' | 'suspended') {
     if (!restaurantId) return
-    if (status === 'suspended' && !window.confirm('¿Suspender este acceso? La persona perderá acceso al comercio.')) return
     setError(null)
     const { error: rpcError } = await supabase.rpc('set_restaurant_member_status', {
       p_membership_id: id, p_status: status,
@@ -80,32 +87,45 @@ export function UsersPage() {
   }
 
   return <>
-    <PageHeader eyebrow="Equipo" title="Usuarios" description="Invitá a tu equipo y elegí qué puede gestionar cada persona."
-      actions={canInvite ? <button className="button-primary" disabled={inviting} onClick={() => setShow(value => !value)}><Plus className="h-4 w-4" />Invitar</button> : undefined} />
-    {show && <form className="form-card mb-6" onSubmit={invite}>
+    <PageHeader title="Usuarios" description="Invitá a tu equipo y revisá quién tiene acceso al comercio."
+      actions={canInvite ? <button type="button" className={show ? 'button-secondary' : 'button-primary'} aria-expanded={show} aria-controls={show ? 'invite-team' : undefined} disabled={inviting} onClick={() => setShow(value => !value)}>{!show ? <Plus className="h-4 w-4" aria-hidden /> : null}{show ? 'Cerrar invitación' : 'Invitar'}</button> : undefined} />
+    {show && <form className="form-card mb-4" id="invite-team" onSubmit={invite}>
       <h2 className="form-card-title">Nueva invitación</h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <label className="field"><span>Nombre</span><input disabled={inviting} required maxLength={120} value={fullName} onChange={e => setFullName(e.target.value)} /></label>
+      <div className="admin-team-fields">
+        <label className="field"><span>Nombre</span><input ref={inviteName} disabled={inviting} required maxLength={120} value={fullName} onChange={e => setFullName(e.target.value)} /></label>
         <label className="field"><span>Correo</span><input disabled={inviting} type="email" required maxLength={254} value={email} onChange={e => setEmail(e.target.value)} /></label>
         <label className="field"><span>Rol</span><select disabled={inviting} value={role} onChange={e => setRole(e.target.value as typeof role)}>
           <option value="order_manager">Gestor de pedidos</option>{isSuperAdmin && <option value="restaurant_admin">Administrador</option>}
         </select></label>
       </div>
-      <button aria-busy={inviting} className="button-primary mt-5" disabled={inviting} type="submit"><Mail className="h-4 w-4" />{inviting ? 'Enviando…' : 'Enviar invitación'}</button>
+      <p className="admin-muted mt-3">El gestor de pedidos tiene acceso a Pedidos y Stock.</p>
+      <button aria-busy={inviting} className="button-primary mt-3" disabled={inviting} type="submit"><Mail className="h-4 w-4" aria-hidden />{inviting ? 'Enviando…' : 'Enviar invitación'}</button>
     </form>}
-    {error && <p role="alert" className="form-error mb-5">{error}</p>}
-    {message && <p role="status" className="form-success mb-5">{message}</p>}
-    <div className="space-y-3">{query.data?.map(member => {
+    {error && <InlineFeedback tone="error" className="mb-4">{error}</InlineFeedback>}
+    {message && <InlineFeedback tone={message.tone} className="mb-4">{message.text}</InlineFeedback>}
+    {query.data?.length ? <ul className="admin-team-list surface-card" aria-label="Personas con acceso">{query.data.map(member => {
       const manageable = isSuperAdmin || (canInvite && member.role === 'order_manager')
-      return <article className="surface-card flex flex-col gap-4 p-4 sm:flex-row sm:items-center" key={member.id}>
-        <span className="grid h-11 w-11 place-items-center rounded-xl bg-stone-100 text-stone-500">{member.role === 'restaurant_admin' ? <Shield className="h-5 w-5" /> : <UserCog className="h-5 w-5" />}</span>
-        <div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{member.profiles?.full_name ?? 'Invitación pendiente'}</h2>
-          <p className="truncate text-sm text-stone-500">{member.profiles?.email ?? `Usuario …${member.user_id.slice(-8)}`}</p></div>
-        <div className="text-sm"><strong className="block">{member.role === 'restaurant_admin' ? 'Administrador' : 'Gestor de pedidos'}</strong>
-          <span className="text-stone-500">{member.status === 'active' ? 'Activo' : member.status === 'invited' ? 'Invitación pendiente' : 'Suspendido'}</span></div>
-        {manageable && member.status === 'invited' && <button disabled={inviting} className="button-secondary" onClick={() => void send(member)}>Reenviar invitación</button>}
-        {manageable && <button className={member.status === 'suspended' ? 'button-secondary' : 'button-danger'} onClick={() => void toggle(member.id, member.status === 'suspended' ? 'active' : 'suspended')}>{member.status === 'suspended' ? 'Reactivar' : 'Suspender'}</button>}
-      </article>
-    })}</div>
+      return <li className="admin-team-row" key={member.id}>
+        <div className="admin-record-person">
+          <span className="admin-record-icon" aria-hidden>{member.role === 'restaurant_admin' ? <Shield size={18} /> : <UserCog size={18} />}</span>
+          <div><h2>{member.profiles?.full_name ?? 'Invitación pendiente'}</h2><p>{member.profiles?.email ?? `Usuario …${member.user_id.slice(-8)}`}</p></div>
+        </div>
+        <div className="admin-team-permission">
+          <span>{member.role === 'restaurant_admin' ? 'Administrador' : 'Gestor de pedidos'}</span>
+          <span className={`admin-member-state admin-member-state--${member.status}`}>{member.status === 'active' ? 'Activo' : member.status === 'invited' ? 'Invitación pendiente' : 'Suspendido'}</span>
+        </div>
+        {manageable ? <div className="admin-record-actions">
+          {member.status === 'invited' && <button type="button" disabled={inviting} className="button-secondary" onClick={() => void send(member)}>Reenviar invitación</button>}
+          <button type="button" className={member.status === 'suspended' ? 'button-secondary' : 'button-danger'} onClick={() => member.status === 'suspended' ? void toggle(member.id, 'active') : setSuspending(member)}>{member.status === 'suspended' ? 'Reactivar' : 'Suspender'}</button>
+        </div> : null}
+      </li>
+    })}</ul> : <EmptyState title="Todavía no hay personas para mostrar" description="Los accesos al comercio aparecen en esta lista." />}
+    {suspending ? <AdminConfirmDialog
+      title="¿Suspender este acceso?"
+      description={`${suspending.profiles?.full_name ?? 'Esta persona'} perderá acceso al comercio.`}
+      confirmLabel="Suspender acceso"
+      onCancel={() => setSuspending(null)}
+      onConfirm={() => { setSuspending(null); void toggle(suspending.id, 'suspended') }}
+    /> : null}
   </>
 }

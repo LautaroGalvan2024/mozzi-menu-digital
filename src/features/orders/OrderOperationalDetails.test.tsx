@@ -271,7 +271,7 @@ describe('operational order details', () => {
   it.each(['pending', 'rejected', 'refunded'])('prevents accepting an online payment in state %s', async paymentStatus => {
     mocks.rpc.mockResolvedValue({ data: { ...claimOrder, checkoutMode: 'online', paymentStatus, inventoryTracked: true }, error: null })
     wrapper(`/admin/tomar/${ACTION_ID}`, '/admin/tomar/:actionId', <ClaimOrderPage />)
-    await screen.findByRole('heading', { name: 'Resumen' })
+    await screen.findByRole('heading', { name: 'Productos del pedido' })
     expect(screen.queryByRole('button', { name: /Aceptar/ })).not.toBeInTheDocument()
   })
 

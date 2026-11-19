@@ -1,0 +1,100 @@
+.admin-app .order-filters {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.order-filter-fields {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.order-filter-search, .order-filter-seller { grid-column: 1 / -1; }
+.order-filter-dates { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 14px; }
+.order-date-presets { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 5px; }
+.admin-app .order-date-presets .button-secondary { min-height: 40px; padding-inline: 10px; }
+.order-date-presets button[aria-pressed="true"] {
+  border-color: var(--admin-accent, #4338ca);
+  background: var(--admin-accent-soft, #eef2ff);
+  color: var(--admin-accent-strong, #312e81);
+}
+.order-date-current { padding: 10px 4px; color: var(--admin-muted); font-size: 12px; }
+.admin-app .order-date-custom > summary { gap: 7px 10px; min-height: 40px; padding: 8px 11px; }
+.order-date-summary { margin-left: auto; color: var(--admin-muted); font-size: 12px; font-weight: 450; }
+.order-date-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.order-date-fields input { min-width: 0; }
+.orders-export span { overflow-wrap: anywhere; }
+
+.admin-app .orders-table td { overflow-wrap: anywhere; }
+.order-row-id > span { white-space: nowrap; }
+.order-row-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 5px; }
+.order-row-actions > :empty { display: none; }
+.order-row-actions .icon-button { flex-shrink: 0; }
+.order-row-actions .button-primary { white-space: nowrap; }
+.order-result-card { min-width: 0; padding: 13px; }
+.order-result-card :is(p, span, strong) { overflow-wrap: anywhere; }
+.order-card-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: baseline; gap: 8px; font-size: 14px; }
+.order-card-customer { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 9px; }
+.order-card-customer > p { min-width: 0; }
+.order-card-fulfillment { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 9px; border-top: 1px solid var(--admin-border); padding-top: 8px; }
+.order-card-fulfillment time { margin-inline-start: auto; }
+
+.admin-app .order-detail-status { align-items: flex-start; gap: 12px; margin-bottom: 14px; padding: 13px 15px; }
+.order-detail-content, .order-detail-primary, .order-detail-context { display: grid; min-width: 0; align-content: start; gap: 14px; }
+.order-detail-content :is(dt, dd, li, article, p) { overflow-wrap: anywhere; }
+.order-detail-content .order-detail-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: 12px; }
+.order-detail-content .order-detail-total { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; }
+.order-detail-content .order-detail-total > dd { font-variant-numeric: tabular-nums; }
+.admin-app .order-detail-content .order-detail-card-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.admin-app .order-detail-content .order-detail-card-heading h2 { margin: 0; }
+.order-detail-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 4px 10px; }
+.order-detail-line > div { flex: 1 1 12rem; min-width: 0; }
+.order-detail-line > strong { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+
+.order-claim { min-height: 100dvh; padding: clamp(18px, 4vh, 38px) clamp(14px, 4vw, 28px); }
+.order-claim-inner { max-width: 62rem; margin-inline: auto; }
+.order-claim-grid { display: grid; min-width: 0; gap: 14px; }
+.order-claim-grid p, .order-claim-grid h2, .order-claim-grid strong { overflow-wrap: anywhere; }
+.order-claim-contact { display: grid; align-content: start; gap: 12px; }
+.order-claim-contact section { min-width: 0; }
+.order-claim-summary-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 14px; }
+.admin-app .order-claim-summary-heading .form-card-title { margin: 0; }
+.order-claim-info { padding-top: 10px; border-top: 1px solid var(--admin-border); font-size: 14px; }
+.order-claim-info p + p { margin-top: 4px; }
+.order-claim-action { margin-top: 14px; }
+.order-claim-action .button-primary { max-width: 20rem; }
+
+@media (min-width: 640px) {
+  .order-filter-fields { grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
+  .order-filter-search { grid-column: auto; }
+}
+
+@media (min-width: 760px) {
+  .order-detail-content { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+  .order-detail-context { grid-column: 2; grid-row: 1; }
+  .order-detail-primary { grid-column: 1; grid-row: 1; }
+  .order-claim-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: start; }
+}
+
+@media (min-width: 1120px) {
+  .order-filter-fields:has(.order-filter-seller) { grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); }
+  .order-filter-seller { grid-column: auto; }
+  .order-row-actions { flex-wrap: nowrap; }
+}
+
+@media (max-width: 639px) {
+  .admin-app .order-filters { gap: 9px; padding: 10px; }
+  .admin-app .order-date-presets .button-secondary,
+  .admin-app .order-date-custom > summary { min-height: 44px; }
+  .order-date-custom { flex-basis: 100%; }
+  .admin-app .order-date-custom > summary { flex-wrap: wrap; justify-content: flex-start; }
+  .order-detail-content .order-detail-summary { gap: 10px; }
+}
+
+@media (max-width: 359px) {
+  .order-date-fields { grid-template-columns: minmax(0, 1fr); }
+  .order-detail-content .order-detail-summary { grid-template-columns: minmax(0, 1fr); }
+}
