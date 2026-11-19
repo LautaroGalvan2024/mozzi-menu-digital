@@ -90,17 +90,17 @@
 .stock-balances-list { position: relative; min-width: 0; margin-top: 10px; border: 1px solid var(--stock-line); border-radius: var(--admin-radius, 10px); }
 .stock-balances-list--virtual { max-height: 66dvh; overflow: auto; padding: 1px; scrollbar-gutter: stable; }
 .admin-app .stock-workspace .inventory-balances-table { width: 100%; table-layout: fixed; }
-.admin-app .stock-design .inventory-balances-table th:first-child { width: 37%; }
-.admin-app .stock-design .inventory-balances-table th:last-child:has(.sr-only) { width: 118px; }
+.admin-app .stock-workspace .inventory-balances-table th:first-child { width: 37%; }
+.admin-app .stock-workspace .inventory-balances-table th:last-child:has(.sr-only) { width: 118px; }
 .admin-app .stock-workspace .inventory-balances-table :is(th, td) { min-width: 0; overflow-wrap: anywhere; }
 .admin-app .stock-workspace .inventory-balances-table td { padding: 8px 12px; }
 .admin-app .stock-workspace .inventory-balances-table .inventory-virtual-spacer td { padding: 0; }
-.stock-design .inventory-product > .stock-product-name { display: block; color: var(--stock-ink); font-size: 14px; font-weight: 650; }
-.stock-design .inventory-product > .inventory-code { display: block; color: var(--stock-muted); font-size: 12px; text-align: left; }
+.stock-workspace .inventory-product > .stock-product-name { display: block; color: var(--stock-ink); font-size: 14px; font-weight: 650; }
+.stock-workspace .inventory-product > .inventory-code { display: block; color: var(--stock-muted); font-size: 12px; text-align: left; }
 .stock-archived { display: inline-block; color: var(--stock-muted); font-size: 11px; }
-.stock-design .inventory-quantity { font-variant-numeric: tabular-nums; }
-.stock-design .stock-available { color: var(--stock-available-ink); font-size: 16px; font-weight: 700; }
-.stock-design .stock-available-depleted { color: var(--stock-depleted-ink); }
+.stock-workspace .inventory-quantity { font-variant-numeric: tabular-nums; }
+.stock-workspace .stock-available { color: var(--stock-available-ink); font-size: 16px; font-weight: 700; }
+.stock-workspace .stock-available-depleted { color: var(--stock-depleted-ink); }
 .stock-quantity-state {
   display: block;
   width: fit-content;
@@ -153,12 +153,12 @@
   .admin-app .stock-workspace .inventory-balances-table tbody tr[data-inventory-row] { align-content: start; gap: 7px 6px; border: 1px solid var(--stock-line); border-radius: 10px; padding: 9px; }
   .admin-app .stock-balances-list:not(.stock-balances-list--virtual) .inventory-balances-table tbody tr[data-inventory-row] + tr[data-inventory-row] { margin-top: 6px; }
   .admin-app .stock-workspace .inventory-balances-table td { padding: 0; }
-  .admin-app .stock-design .inventory-balances-table td.inventory-product { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; align-content: start; column-gap: 8px; }
-  .stock-design .inventory-product > .inventory-code { grid-row: 2; grid-column: 1 / -1; }
-  .stock-design .stock-archived { white-space: nowrap; }
-  .admin-app .stock-design .inventory-balances-table td.stock-available { padding: 3px 4px; border-radius: 6px; background: var(--stock-available-bg); }
-  .admin-app .stock-design .inventory-balances-table td.stock-available-depleted { background: var(--stock-depleted-bg); }
-  .admin-app .stock-design .inventory-balances-table td.stock-available-missing { background: var(--stock-missing-bg); }
+  .admin-app .stock-workspace .inventory-balances-table td.inventory-product { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; align-content: start; column-gap: 8px; }
+  .stock-workspace .inventory-product > .inventory-code { grid-row: 2; grid-column: 1 / -1; }
+  .stock-workspace .stock-archived { white-space: nowrap; }
+  .admin-app .stock-workspace .inventory-balances-table td.stock-available { padding: 3px 4px; border-radius: 6px; background: var(--stock-available-bg); }
+  .admin-app .stock-workspace .inventory-balances-table td.stock-available-depleted { background: var(--stock-depleted-bg); }
+  .admin-app .stock-workspace .inventory-balances-table td.stock-available-missing { background: var(--stock-missing-bg); }
   .admin-app .stock-workspace .inventory-balances-table .inventory-edit-link { min-height: 44px; }
   .admin-app .stock-workspace .inventory-count input { min-height: 44px; }
   .stock-history-table, .stock-history-table tbody { display: block; }

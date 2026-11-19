@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { selectAdminSection } from './section-navigation'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 
 const restaurantId = '41000000-0000-4000-8000-000000000001'
 const userId = '42000000-0000-4000-8000-000000000001'
@@ -9,7 +10,7 @@ const blackId = '45000000-0000-4000-8000-000000000001'
 const redId = '45000000-0000-4000-8000-000000000002'
 const category = { id: categoryId, name: 'Fundas' }
 
-async function adminFixture(page: Page, stockReady = true, role: 'restaurant_admin' | 'order_manager' = 'restaurant_admin', redesignedStock = false) {
+async function adminFixture(page: Page, stockReady = true, role: 'restaurant_admin' | 'order_manager' = 'restaurant_admin', depletedVariant = false) {
   const restaurant = {
     id: restaurantId, name: 'Casa Móvil', trade_name: 'Casa Móvil', slug: 'casa-movil', description: '', status: 'active',
     whatsapp_phone_e164: '+5493492123456', address: 'San Martín 123', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', currency_code: 'ARS', locale: 'es-AR',
@@ -25,7 +26,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     variant_attributes: { Color: index ? 'Rojo' : 'Negro' }, categories: { name: 'Fundas' },
   }))
   const balances = products.map(product => ({ productId: product.id, initialized: true, onHand: '10', reserved: '3', available: '7', version: '7' }))
-  if (redesignedStock) Object.assign(balances[1]!, { onHand: '3', available: '0' })
+  if (depletedVariant) Object.assign(balances[1]!, { onHand: '3', available: '0' })
   const user = { id: userId, aud: 'authenticated', role: 'authenticated', email: 'admin@example.invalid', app_metadata: {}, user_metadata: {}, factors: [], created_at: new Date().toISOString() }
   // Synthetic local session. Every API call is mocked; these tests never modify live inventory.
   const expiresAt = Math.floor(Date.now() / 1000) + 3600
@@ -53,7 +54,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración Casa Móvil', email: user.email, active: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '46000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role, status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role, status: 'active' }] }
-    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = { campaigns: false, sellers: false, delivery_schedule: false, assisted_import: false, stock_design: redesignedStock }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = disabledStageOneFeatures
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_metrics') body = {
       generated: 8, whatsappOpened: 4, accepted: 5, completed: 3, cancelled: 1, expired: 0,
       corrected: 1, returned: 1, acceptedAmountCents: '1250000', completedAmountCents: '1000000',
@@ -159,6 +160,9 @@ test.describe('catalog stock and store setup', () => {
     await expect(nav.getByRole('link', { name: 'Productos', exact: true })).toHaveCount(0)
     await expect(nav.getByRole('link', { name: 'Tienda online', exact: true })).toHaveCount(0)
     await expect(nav.locator('summary')).toHaveCount(0)
+    await nav.getByRole('link', { name: 'Stock', exact: true }).click()
+    await expect(page.getByText('Resumen de los productos cargados')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Nuevo movimiento' })).toHaveCount(0)
     await page.goto('/admin/tienda')
     await expect(page).toHaveURL(/\/admin\/pedidos(?:\?.*)?$/)
     await expect(page.getByRole('heading', { name: 'Pedidos', exact: true })).toBeVisible()
@@ -166,7 +170,7 @@ test.describe('catalog stock and store setup', () => {
   })
 
   for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 900 }]) {
-    test(`${viewport.name} pilot stock keeps search, levels and keyboard movement together`, async ({ page }, testInfo) => {
+    test(`${viewport.name} stock keeps search, levels and keyboard movement together with all pilot flags off`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
       const requests = await adminFixture(page, true, 'restaurant_admin', true)
       await page.goto('/admin/stock')
@@ -178,7 +182,7 @@ test.describe('catalog stock and store setup', () => {
       await expect(depleted.getByText('Agotado', { exact: true })).toBeVisible()
       await expect(product.getByRole('link', { name: 'Editar stock de Funda negra' })).toHaveAttribute('href', `/admin/catalogo/productos/${blackId}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.screenshot({ path: testInfo.outputPath(`pilot-stock-${viewport.name}.png`), fullPage: true })
+      await page.screenshot({ path: testInfo.outputPath(`stock-${viewport.name}.png`), fullPage: true })
 
       await search.fill('FUN-ROJO')
       await expect(product).toHaveCount(0)

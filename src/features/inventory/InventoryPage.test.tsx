@@ -11,9 +11,8 @@ const secondProduct = '20000000-0000-4000-8000-000000000002'
 const count = '30000000-0000-4000-8000-000000000001'
 const externalOperation = '40000000-0000-4000-8000-000000000001'
 const receiptOperation = '40000000-0000-4000-8000-000000000002'
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), mutate: vi.fn(), from: vi.fn(), references: vi.fn(), role: 'restaurant_admin', redesigned: false, inventory: {} as Record<string, unknown> }))
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), mutate: vi.fn(), from: vi.fn(), references: vi.fn(), role: 'restaurant_admin', inventory: {} as Record<string, unknown> }))
 vi.mock('../restaurants/RestaurantScope', () => ({ useRestaurantScope: () => ({ selected: { id: '10000000-0000-4000-8000-000000000001', role: mocks.role } }) }))
-vi.mock('../restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { stock_design: mocks.redesigned } }) }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { rpc: mocks.rpc, from: mocks.from } }))
 function view() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter><InventoryPage /></MemoryRouter></QueryClientProvider>)
@@ -50,7 +49,6 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   afterEach(cleanup)
   beforeEach(() => {
     sessionStorage.clear(); localStorage.clear(); mocks.role = 'restaurant_admin'
-    mocks.redesigned = false
     mocks.inventory = fixture(); mocks.mutate.mockReset().mockResolvedValue({ data: {}, error: null })
     mocks.rpc.mockReset().mockImplementation(async (name, args) => {
       const data = structuredClone(mocks.inventory) as { policy: unknown; operations: unknown; items: unknown; nextCursor: unknown }
@@ -72,7 +70,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(mocks.references).not.toHaveBeenCalled()
   })
   it('shows the redesigned stock summary to managers and preserves their read-only role', async () => {
-    mocks.redesigned = true; mocks.role = 'order_manager'
+    mocks.role = 'order_manager'
     const data = externalSaleFixture()
     data.items[0] = { ...data.items[0]!, onHand: '12000', reserved: '12000', available: '0' }
     mocks.inventory = data
@@ -88,7 +86,6 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(mocks.mutate).not.toHaveBeenCalled()
   })
   it('opens the existing movement form with keyboard focus and sends its usual payload', async () => {
-    mocks.redesigned = true
     const user = userEvent.setup()
     view()
     const newMovement = await screen.findByRole('button', { name: 'Nuevo movimiento' })
@@ -145,7 +142,8 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     const rendered = view()
 
     expect(await screen.findByText('Producto 0')).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Existencias · 5000 productos cargados' })).toBeVisible()
+    expect(screen.getByRole('heading', { name: /^Existencias$/ })).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('5000 productos cargados')
     const mountedRows = rendered.container.querySelectorAll('tr[data-inventory-row]')
     expect(mountedRows.length).toBeGreaterThan(0)
     expect(mountedRows.length).toBeLessThan(100)
@@ -461,7 +459,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     mocks.inventory = { ...data, items: [...data.items.map(item => ({ ...item, initialized: false, onHand: null, reserved: null, available: null, version: null })), ...(hasControlledProduct ? [{ ...data.items[0], productId: secondProduct, name: 'Fideos', code: '0002' }] : [])] }
     const user = userEvent.setup(); view()
     expect(await screen.findByText('1 producto seguirá sin control de stock:')).toBeVisible()
-    expect(screen.getByText('Sin cantidad cargada, se permiten pedidos sin controlar stock.')).toBeVisible()
+    expect(screen.getByText('Los productos sin cantidad cargada se pueden pedir sin control de stock.')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Activar control de stock' })).toBeEnabled()
     expect(screen.getByRole('link', { name: 'Editar stock de Arroz' })).toHaveAttribute('href', `/admin/catalogo/productos/${product}`)
     expect(screen.getByText('Sin cargar')).toBeVisible()

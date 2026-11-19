@@ -11,7 +11,6 @@ import { queryKeys } from '../../lib/queryKeys'
 import { supabase } from '../../lib/supabase/client'
 import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
-import { useStageOneFeatures } from '../restaurants/stage-one-features'
 import { InventoryBalances } from './InventoryBalances'
 import { StockOverview } from './StockOverview'
 import { StockHistory } from './StockHistory'
@@ -57,7 +56,6 @@ function InventoryWorkspace() {
   const scope = useRestaurantScope()
   const restaurantId = scope.selected?.id ?? ''
   const isAdmin = scope.selected?.role !== 'order_manager'
-  const redesigned = useStageOneFeatures(scope.selected?.id).features.stock_design
   const client = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -123,9 +121,7 @@ function InventoryWorkspace() {
   const hasNextItemsPage = itemsQuery.hasNextPage
   const isFetchingNextItemsPage = itemsQuery.isFetchingNextPage
   const items = itemsQuery.data?.pages.flatMap(page => page.items) ?? []
-  const inventory = overviewQuery.data && (redesigned || itemsQuery.data) ? { ...overviewQuery.data, items } : undefined
-  const inventoryErrorState = overviewQuery.error ?? (redesigned ? null : itemsQuery.error)
-  const inventoryLoading = overviewQuery.isLoading || (!redesigned && itemsQuery.isLoading)
+  const inventory = overviewQuery.data ? { ...overviewQuery.data, items } : undefined
   const inventoryFetching = overviewQuery.isFetching || itemsQuery.isFetching
   const refetchInventory = () => Promise.all([overviewQuery.refetch(), itemsQuery.refetch()])
   const countId = inventory?.policy.cutoverId
@@ -261,8 +257,8 @@ function InventoryWorkspace() {
     void execute({ name: 'inventory_adjust', args: { p_restaurant_id: restaurantId, p_operation_id: crypto.randomUUID(), p_kind: movementKind, p_rows: [{ productId, quantity: movementQuantity, expectedVersion: item.version }], p_reason: movementReason.trim() } })
   }
 
-  if (inventoryLoading) return <AdminLoading label="Cargando stock…" />
-  if (inventoryErrorState || !inventory) return <ErrorPanel action={<button className="button-secondary" disabled={inventoryFetching} onClick={() => void refetchInventory()}>Reintentar carga</button>}>{inventoryErrorState?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
+  if (overviewQuery.isLoading) return <AdminLoading label="Cargando stock…" />
+  if (overviewQuery.error || !inventory) return <ErrorPanel action={<button className="button-secondary" disabled={inventoryFetching} onClick={() => void refetchInventory()}>Reintentar carga</button>}>{overviewQuery.error?.message ?? 'No se pudo cargar el inventario.'}</ErrorPanel>
   const { policy, operations } = inventory
   const initializedItems = items.filter(item => item.initialized)
   const missingItems = items.filter(item => !item.initialized)
@@ -271,9 +267,9 @@ function InventoryWorkspace() {
   const modeLabel = countId ? 'Conteo en curso' : policy.mode === 'enforced' ? 'Activo' : policy.mode === 'paused' ? 'Pausado' : 'Sin activar'
   const canRecordMovement = isAdmin && policy.mode === 'enforced' && !countId
   const searching = itemsQuery.isLoading || search.trim().slice(0, 120) !== debouncedSearch
-  return <AdminDataWorkspace className={`stock-workspace${redesigned ? ' stock-design' : ''}`}>
+  return <AdminDataWorkspace className="stock-workspace">
     <PageHeader title="Stock" description="Consultá existencias, reservas y unidades disponibles." />
-    {redesigned ? <StockOverview
+    <StockOverview
       items={items}
       loading={searching}
       failed={Boolean(itemsQuery.error)}
@@ -285,16 +281,7 @@ function InventoryWorkspace() {
       movementDisabled={disabled}
       onRefresh={() => void refetchInventory()}
       onNewMovement={openMovementForm}
-    /> : <div className="admin-command-bar admin-inventory-summary">
-      <div className="admin-command-bar-main">
-        <p className="text-sm text-stone-600">Control de stock: <strong className="font-medium text-stone-900">{modeLabel}</strong>{policy.mode === 'paused' || countId ? ' · Las operaciones afectadas están pausadas; los movimientos y las reservas se conservan.' : null}</p>
-        {isAdmin ? <p className="mt-1 text-xs text-stone-500">Modificá <strong>Stock (unidades)</strong> al crear o editar cada producto o variante.</p> : null}
-      </div>
-      <div className="admin-command-bar-actions">
-        <button className="button-secondary" disabled={busy} onClick={() => void refetchInventory()}>Actualizar</button>
-        {isAdmin ? <Link className="button-secondary" to="/admin/catalogo/productos">Ir a productos</Link> : null}
-      </div>
-    </div>}
+    />
     {error ? <InlineFeedback tone="error" className="mb-4">{error}</InlineFeedback> : null}
     {message ? <InlineFeedback tone="success" className="mb-4">{message}</InlineFeedback> : null}
     {pending && isAdmin ? <section className="mb-5 rounded-2xl bg-amber-50 p-4"><p>Hay una operación pendiente de confirmación. Recuperá ese envío antes de registrar otro.</p><button className="button-primary mt-3" disabled={busy} onClick={() => void execute(pending)}>Reintentar operación</button></section> : null}
@@ -311,7 +298,6 @@ function InventoryWorkspace() {
     {countId ? <p className="mb-4 rounded-2xl bg-amber-50 p-4">Ventana iniciada: {new Date(policy.countStartedAt!).toLocaleString('es-AR')}. Registrá cada cantidad mientras contás. Si hubo movimientos físicos durante la ventana, detené el registro y conciliá antes de cerrar.</p> : null}
     <InventoryBalances
       items={items}
-      redesigned={redesigned}
       isAdmin={isAdmin}
       counting={Boolean(countId)}
       allItemsLoaded={allItemsLoaded}
@@ -324,11 +310,11 @@ function InventoryWorkspace() {
       hasNextPage={hasNextItemsPage}
       loadingNextPage={isFetchingNextItemsPage}
       searching={searching}
-      searchError={redesigned ? itemsQuery.error?.message ?? null : null}
+      searchError={itemsQuery.error?.message ?? null}
       onNextPage={() => void (countId ? loadAllItems() : fetchNextItemsPage())}
       onRetry={() => void itemsQuery.refetch()}
     />
-    {redesigned ? <h2 className="stock-tools-heading">Herramientas e historial</h2> : null}
+    <h2 className="stock-tools-heading">Herramientas e historial</h2>
     {isAdmin ? <details className="admin-disclosure stock-tool" open={Boolean(countId) || policy.mode === 'paused' || undefined}>
       <summary>Herramientas avanzadas de inventario</summary><div className="mt-4">
     {!policy.businessConfirmed && isAdmin ? <section className="form-card mb-5"><h2 className="form-card-title">Reglas para activar el stock</h2><p>Esta versión admite unidades enteras, un saldo por SKU o variante y entregas y devoluciones completas. La app será la fuente principal del stock de los productos con cantidad cargada. Los productos sin cantidad se pueden pedir sin control. Las reservas aceptadas o pagadas se liberan al cancelar, sin vencimiento automático. Los pagos online pendientes reservan durante 30 minutos. El conteo incluye mercadería en tránsito pendiente de recepción o retiro.</p><p className="mt-3">Si necesitás cajas y unidades del mismo saldo, fracciones o entregas/devoluciones parciales, deben incorporarse antes de activar.</p><label className="field mt-4"><span>Ventas fuera de la app</span><select value={otherChannels} disabled={disabled} onChange={event => setOtherChannels(event.target.value as typeof otherChannels)}><option value="none">No hay otros canales</option><option value="record_before_handoff">Se registran aquí al entregar, antes de cerrar la venta</option></select></label><label className="check-field mt-4"><input type="checkbox" checked={businessAccepted} disabled={disabled} onChange={event => setBusinessAccepted(event.target.checked)} />Confirmo que estas reglas describen la operación del comercio.</label><button className="button-primary mt-4" disabled={disabled || !businessAccepted} onClick={() => void execute({ name: 'confirm_inventory_business_policy', args: { p_restaurant_id: restaurantId, p_policy: { unitModel: 'whole_product', sourceOfTruth: 'app', otherChannels, returns: 'full_only', acceptance: 'reserve', delivery: 'physical_handoff', partialDeliveries: 'none', physicalScope: 'until_handoff_including_transit', acceptedReservationsExpire: false } } })}>Guardar reglas</button></section> : null}

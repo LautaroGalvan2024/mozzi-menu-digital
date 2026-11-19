@@ -10,14 +10,12 @@ const minimumVirtualRows = 48
 const initialViewportHeight = 640
 const quantityFormatter = new Intl.NumberFormat('es-AR')
 
-function formattedQuantity(value: string | null, redesigned: boolean) {
-  if (value === null) return '—'
-  return redesigned ? quantityFormatter.format(BigInt(value)) : value
+function formattedQuantity(value: string | null) {
+  return value === null ? '—' : quantityFormatter.format(BigInt(value))
 }
 
 type InventoryBalancesProps = {
   items: InventoryItem[]
-  redesigned: boolean
   isAdmin: boolean
   counting: boolean
   allItemsLoaded: boolean
@@ -36,7 +34,7 @@ type InventoryBalancesProps = {
 }
 
 export function InventoryBalances({
-  items, redesigned, isAdmin, counting, allItemsLoaded, counts, disabled, search, debouncedSearch,
+  items, isAdmin, counting, allItemsLoaded, counts, disabled, search, debouncedSearch,
   onSearchChange, onCountChange, hasNextPage, loadingNextPage, searching, searchError, onNextPage, onRetry,
 }: InventoryBalancesProps) {
   const inventoryViewport = useRef<HTMLDivElement>(null)
@@ -63,43 +61,36 @@ export function InventoryBalances({
     searchInput.current?.focus()
   }
 
-  const redesignedRowHeight = compact ? (isAdmin ? 184 : 140) : 76
-  const rowHeight = redesigned ? redesignedRowHeight : (compact ? 190 : 68)
+  const rowHeight = compact ? (isAdmin ? 184 : 140) : 76
   const virtualized = items.length >= minimumVirtualRows
   const firstRow = virtualized ? Math.max(0, Math.floor(viewport.scrollTop / rowHeight) - overscan) : 0
   const lastRow = virtualized ? Math.min(items.length, firstRow + Math.ceil(viewport.height / rowHeight) + overscan * 2) : items.length
-  const columnCount = (redesigned ? 4 : 5) + (isAdmin ? 1 : 0)
+  const columnCount = isAdmin ? 5 : 4
   const hasEmptyState = items.length === 0
 
   return (
     <AdminDataRegion className="form-card admin-inventory-balances" aria-labelledby="inventory-balances-title">
       <div className="stock-balances-header">
         <div>
-          <h2 className="form-card-title" id="inventory-balances-title">
-            {redesigned ? 'Existencias' : `Existencias · ${items.length} productos cargados`}
-          </h2>
-          {redesigned ? (
-            <p>El stock disponible es el total menos las unidades reservadas.</p>
-          ) : (
-            <><p>Total menos reservado = disponible para vender.</p><p>Sin cantidad cargada, se permiten pedidos sin controlar stock.</p></>
-          )}
+          <h2 className="form-card-title" id="inventory-balances-title">Existencias</h2>
+          <p>El stock disponible es el total menos las unidades reservadas.</p>
         </div>
-        <div className={clsx('w-full sm:max-w-xs', redesigned && 'stock-search')}>
+        <div className="stock-search w-full sm:max-w-xs">
           <label className="field">
             <span>Buscar producto o código</span>
             <input ref={searchInput} value={search} maxLength={120} disabled={counting} onChange={event => onSearchChange(event.target.value)} placeholder="Buscar en inventario" />
           </label>
-          {redesigned && search && !counting ? <button className="stock-clear-search" type="button" onClick={clearSearch}>Limpiar</button> : null}
+          {search && !counting ? <button className="stock-clear-search" type="button" onClick={clearSearch}>Limpiar</button> : null}
         </div>
       </div>
       {counting && !allItemsLoaded ? <p className="mt-3 text-sm text-amber-800" role="status">Cargando el catálogo completo para garantizar un conteo sin productos omitidos…</p> : null}
-      {redesigned && !counting && !(searching && hasEmptyState) ? <p className="stock-result-count" role="status">{searching ? 'Buscando productos…' : `${items.length} ${items.length === 1 ? 'producto cargado' : 'productos cargados'}${hasNextPage ? ' · Hay más resultados' : ''}`}</p> : null}
+      {!counting && !(searching && hasEmptyState) ? <p className="stock-result-count" role="status">{searching ? 'Buscando productos…' : `${items.length} ${items.length === 1 ? 'producto cargado' : 'productos cargados'}${hasNextPage ? ' · Hay más resultados' : ''}`}</p> : null}
       {searchError ? <InlineFeedback tone="error" className="mt-3"><p>{searchError}</p><button className="button-secondary mt-2" type="button" onClick={onRetry}>Reintentar carga</button></InlineFeedback> : null}
       {hasEmptyState && searching && !counting && !searchError ? <AdminLoading label="Buscando productos…" variant="list" /> : null}
       {hasEmptyState && !searching && !searchError ? <div className="stock-empty">
         <p className="font-semibold">{debouncedSearch ? 'No encontramos productos' : 'Todavía no hay productos'}</p>
         <p>{debouncedSearch ? 'Probá otro nombre o código.' : 'Los productos de tu catálogo se muestran acá.'}</p>
-        {redesigned && debouncedSearch ? <button className="button-secondary" type="button" onClick={clearSearch}>Ver todos los productos</button> : null}
+        {debouncedSearch ? <button className="button-secondary" type="button" onClick={clearSearch}>Ver todos los productos</button> : null}
       </div> : null}
       {!hasEmptyState ? <div
         ref={inventoryViewport}
@@ -113,35 +104,28 @@ export function InventoryBalances({
         <table className="data-table inventory-balances-table" role="table" aria-label="Existencias de productos" aria-rowcount={items.length + 1}>
           <thead className={virtualized ? 'sticky top-0 z-10' : undefined} role="rowgroup"><tr role="row" aria-rowindex={1}>
             <th scope="col">Producto</th>
-            {redesigned ? null : <th scope="col">Código / SKU</th>}
-            {redesigned ? <th scope="col">Disponible</th> : <th scope="col">Existencia</th>}
+            <th scope="col">Disponible</th>
             <th scope="col">Reservado</th>
-            {redesigned ? <th scope="col">Existencia</th> : <th scope="col">Disponible</th>}
+            <th scope="col">Existencia</th>
             {isAdmin ? <th scope="col">{counting ? 'Conteo físico' : <span className="sr-only">Editar</span>}</th> : null}
           </tr></thead>
           <tbody role="rowgroup">
             {firstRow > 0 ? <tr className="inventory-virtual-spacer" aria-hidden="true"><td colSpan={columnCount} style={{ height: firstRow * rowHeight }} /></tr> : null}
             {items.slice(firstRow, lastRow).map((item, index) => {
-              const depleted = redesigned && hasNoStock(item)
-              const available = <td className={clsx('inventory-quantity stock-available', depleted && 'stock-available-depleted', !item.initialized && 'stock-available-missing')} role="cell">
-                <span className="inventory-balance-label" aria-hidden="true">Disponible</span>
-                {redesigned && !item.initialized ? <span className="stock-quantity-state">Sin cargar</span> : formattedQuantity(item.available, redesigned)}
-                {depleted ? <span className="stock-quantity-state stock-quantity-out">Agotado</span> : null}
-              </td>
-              const onHand = <td className="inventory-quantity stock-total" role="cell">
-                <span className="inventory-balance-label" aria-hidden="true">Total</span>
-                {redesigned ? formattedQuantity(item.onHand, true) : item.initialized ? item.onHand : 'Sin cargar'}
-              </td>
+              const depleted = hasNoStock(item)
               return <tr key={item.productId} role="row" aria-rowindex={firstRow + index + 2} data-inventory-row style={virtualized ? { height: rowHeight } : undefined}>
                 <td className="inventory-product" role="cell">
                   <span className="stock-product-name" title={item.name}>{item.name}</span>
-                  {item.archived ? <span className={redesigned ? 'stock-archived' : 'ml-2 text-xs text-stone-500'}>Archivado</span> : null}
-                  {redesigned ? <span className="inventory-code" title={item.code}>{item.code}</span> : null}
+                  {item.archived ? <span className="stock-archived">Archivado</span> : null}
+                  <span className="inventory-code" title={item.code}>{item.code}</span>
                 </td>
-                {redesigned ? null : <td className="inventory-code" role="cell">{item.code}</td>}
-                {redesigned ? available : onHand}
-                <td className="inventory-quantity" role="cell"><span className="inventory-balance-label" aria-hidden="true">Reservado</span>{formattedQuantity(item.reserved, redesigned)}</td>
-                {redesigned ? onHand : available}
+                <td className={clsx('inventory-quantity stock-available', depleted && 'stock-available-depleted', !item.initialized && 'stock-available-missing')} role="cell">
+                  <span className="inventory-balance-label" aria-hidden="true">Disponible</span>
+                  {!item.initialized ? <span className="stock-quantity-state">Sin cargar</span> : formattedQuantity(item.available)}
+                  {depleted ? <span className="stock-quantity-state stock-quantity-out">Agotado</span> : null}
+                </td>
+                <td className="inventory-quantity" role="cell"><span className="inventory-balance-label" aria-hidden="true">Reservado</span>{formattedQuantity(item.reserved)}</td>
+                <td className="inventory-quantity stock-total" role="cell"><span className="inventory-balance-label" aria-hidden="true">Total</span>{formattedQuantity(item.onHand)}</td>
                 {isAdmin && !counting ? <td className="inventory-edit" role="cell"><Link className="inventory-edit-link font-semibold text-orange-700 underline" aria-label={`Editar stock de ${item.name}`} to={`/admin/catalogo/productos/${item.productId}`}>Editar stock</Link></td> : null}
                 {isAdmin && counting ? <td className="inventory-count" role="cell"><span className="inventory-balance-label" aria-hidden="true">Conteo físico</span><input className="w-28 rounded-lg border p-2" aria-label={`Conteo de ${item.name}`} inputMode="numeric" value={counts[item.productId]?.quantity ?? ''} disabled={disabled} onChange={event => onCountChange(item.productId, event.target.value)} /></td> : null}
               </tr>
