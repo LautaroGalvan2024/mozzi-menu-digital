@@ -1,55 +1,22 @@
-import { createAdminClient } from "../_shared/clients.ts";
-import { getAppBaseUrl, getRateLimitSecret } from "../_shared/config.ts";
-import { hmacSha256Hex, randomToken, sha256Hex } from "../_shared/crypto.ts";
-import { ApiError, databaseApiError } from "../_shared/errors.ts";
+import { getAppBaseUrl } from "../_shared/config.ts";
+import { randomToken, sha256Hex } from "../_shared/crypto.ts";
+import { databaseApiError } from "../_shared/errors.ts";
 import { jsonResponse, safeLog, serve } from "../_shared/http.ts";
 import { orderConfirmationResponse } from "../_shared/order-confirmation.ts";
-import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
-import { clientIp } from "../_shared/request-meta.ts";
-import { createOrderSchema, parseInput } from "../_shared/schemas.ts";
-import { verifyTurnstileIfEnabled } from "../_shared/turnstile.ts";
+import { prepareOrder } from "../_shared/prepare-order.ts";
 
 const MAX_BODY_BYTES = 192 * 1_024;
-const MIN_FORM_AGE_MS = 1_000;
-const MAX_FORM_AGE_MS = 2 * 60 * 60 * 1_000;
 const CLIENT_EVENT_LIFETIME_MS = 30 * 60 * 1_000;
 
 serve({
   name: "create-order",
   maxBodyBytes: MAX_BODY_BYTES,
   handler: async (request, context) => {
-    const input = parseInput(createOrderSchema, await context.readJson());
-    if (input.checkoutMode === "online") {
-      throw new ApiError(422, "CHECKOUT_MODE_INVALID", "Usá el pago online de la tienda.");
-    }
-    if (input.antiSpam.honeypot?.trim()) {
-      throw new ApiError(400, "REQUEST_REJECTED", "No se pudo procesar la solicitud.");
-    }
-    const formAge = Date.now() - Date.parse(input.antiSpam.formStartedAt);
-    if (!Number.isFinite(formAge) || formAge < MIN_FORM_AGE_MS || formAge > MAX_FORM_AGE_MS) {
-      throw new ApiError(422, "STALE_FORM", "Actualizá el formulario y volvé a intentar.");
-    }
-    await verifyTurnstileIfEnabled(input.antiSpam.turnstileToken);
-
-    const rateSecret = getRateLimitSecret();
-    const [ipHash, phoneHash] = await Promise.all([
-      hmacSha256Hex(rateSecret, `ip:${clientIp(request)}`),
-      hmacSha256Hex(rateSecret, `phone:${input.customer.phone}`),
-    ]);
-
-    // This is intentionally a separate PostgREST transaction. Its counters commit even when
-    // the later catalogue, opening-hours or checkout validation rejects the order.
-    const admin = createAdminClient();
-    const { data: rateLimitData, error: rateLimitError } = await admin.rpc(
-      "check_order_rate_limits",
-      {
-        p_restaurant_slug: input.restaurantSlug,
-        p_ip_hash: ipHash,
-        p_phone_hash: phoneHash,
-      },
+    const { admin, business, ipHash, phoneHash } = await prepareOrder(
+      await context.readJson(),
+      request,
+      "whatsapp",
     );
-    if (rateLimitError) throw databaseApiError(rateLimitError);
-    assertOrderRateLimitAllowed(rateLimitData);
 
     const clientEventToken = randomToken(32);
     const clientEventTokenHash = await sha256Hex(clientEventToken);
@@ -57,12 +24,11 @@ serve({
     const recoveryToken = randomToken(32);
     const recoveryTokenHash = await sha256Hex(recoveryToken);
     const recoveryExpiresAt = new Date(Date.now() + CLIENT_EVENT_LIFETIME_MS).toISOString();
-    const { antiSpam: _antiSpam, ...orderRequest } = input;
 
     // This public function has a deliberately narrow service-only creation RPC. Prices,
     // availability, opening hours, snapshots, idempotency and inserts are checked atomically.
     const { data, error } = await admin.rpc("create_order_transaction", {
-      p_request: { ...orderRequest, tokenExpiresAt, recoveryTokenHash, recoveryExpiresAt },
+      p_request: { ...business, tokenExpiresAt, recoveryTokenHash, recoveryExpiresAt },
       p_ip_hash: ipHash,
       p_phone_hash: phoneHash,
       p_client_event_token_hash: clientEventTokenHash,

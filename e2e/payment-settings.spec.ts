@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 
 const restaurantId = '31000000-0000-4000-8000-000000000001'
 const userId = '32000000-0000-4000-8000-000000000001'
@@ -33,6 +34,7 @@ async function adminFixture(page: Page, status: Record<string, unknown>) {
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración Casa Móvil', email: user.email, active: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '33000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = disabledStageOneFeatures
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
     else if (request.method() === 'GET' && path === '/rest/v1/payment_methods') body = []
     else if (request.method() === 'POST' && path === '/functions/v1/mercadopago-connect' && request.postDataJSON().action === 'status') {

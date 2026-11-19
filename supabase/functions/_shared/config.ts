@@ -1,6 +1,7 @@
 import { ApiError } from "./errors.ts";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const SELF_HOSTED_GATEWAY = "http://api-gw:8000/";
 const KEY_NAME_PATTERN = /^[a-z_][a-z0-9_]{3,63}$/;
 
 function env(name: string): string | undefined {
@@ -50,7 +51,7 @@ export function requireEnv(name: string): string {
   return value;
 }
 
-function assertHttpUrl(value: string, label: string): string {
+function assertHttpUrl(value: string, label: string, allowSelfHostedGateway = false): string {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -60,7 +61,8 @@ function assertHttpUrl(value: string, label: string): string {
 
   if (
     parsed.protocol !== "https:" &&
-    !(parsed.protocol === "http:" && LOCAL_HOSTS.has(parsed.hostname))
+    !(parsed.protocol === "http:" && LOCAL_HOSTS.has(parsed.hostname)) &&
+    !(allowSelfHostedGateway && parsed.href === SELF_HOSTED_GATEWAY)
   ) {
     throw new Error(`${label} must use HTTPS (HTTP is accepted only for loopback development)`);
   }
@@ -74,6 +76,14 @@ function assertHttpUrl(value: string, label: string): string {
 }
 
 export function getSupabaseUrl(): string {
+  // The official Compose stack sets this URL on its private Docker network.
+  return assertHttpUrl(requireEnv("SUPABASE_URL"), "SUPABASE_URL", true);
+}
+
+export function getSupabasePublicUrl(): string {
+  const publicUrl = env("SUPABASE_PUBLIC_URL");
+  if (publicUrl) return assertHttpUrl(publicUrl, "SUPABASE_PUBLIC_URL");
+  // The managed runtime already provides an external SUPABASE_URL.
   return assertHttpUrl(requireEnv("SUPABASE_URL"), "SUPABASE_URL");
 }
 

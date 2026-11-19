@@ -86,8 +86,8 @@ for (const mode of ['reduced-motion', 'saved-scroll', 'hash-target', 'filtered']
   })
 }
 
-async function addRedVariant(page: Page, testInfo?: TestInfo) {
-  await page.goto('/t/casa-movil')
+async function addRedVariant(page: Page, testInfo?: TestInfo, path = '/t/casa-movil') {
+  await page.goto(path)
   await expect(page.getByRole('heading', { name: 'Funda de silicona' })).toHaveCount(1)
   await page.getByRole('link', { name: 'Ver Funda de silicona' }).click()
   if (testInfo) await page.screenshot({ path: testInfo.outputPath('store-detail.png'), fullPage: true })
@@ -106,6 +106,41 @@ async function addRedVariant(page: Page, testInfo?: TestInfo) {
   await page.getByRole('link', { name: 'Continuar' }).click()
   await page.getByLabel('Nombre y apellido').fill('Ana Pérez')
   await page.getByLabel('Teléfono').fill('+5493492123456')
+}
+
+for (const online of [false, true]) {
+  test(`seller referral survives cart navigation and reaches ${online ? 'online payment' : 'WhatsApp checkout'}`, async ({ page }) => {
+    const sellerId = '17000000-0000-4000-8000-000000000001'
+    await fixture(page)
+    await page.route('**/rest/v1/rpc/get_public_seller', async route => {
+      expect(route.request().postDataJSON()).toEqual({ p_restaurant_slug: 'casa-movil', p_channel: 'store', p_seller_id: sellerId })
+      await route.fulfill({ json: { id: sellerId, name: 'Lucía', imagePath: null } })
+    })
+    const order = { ...summary.order, sellerName: 'Lucía' }
+    const created = page.waitForRequest(`**/functions/v1/${online ? 'create-payment' : 'create-order'}`)
+    await page.route('**/functions/v1/create-payment', async route => {
+      await route.fulfill({ json: { ...summary, order } })
+    })
+    await page.route('**/functions/v1/create-order', async route => {
+      await route.fulfill({ json: {
+        order, whatsapp: { phone: '+5491199999999', message: 'Pedido CM-001', url: 'https://wa.me/5491199999999?text=CM-001' },
+        clientEventToken: null, recoveryToken: token, recoveryExpiresAt: until,
+      } })
+    })
+    await page.setViewportSize({ width: online ? 1280 : 390, height: 844 })
+    await addRedVariant(page, undefined, `/t/casa-movil?vendedor=${sellerId}`)
+    await expect(page.getByText('Te atiende Lucía')).toBeVisible()
+    if (online) await page.getByRole('radio', { name: /Pagar online/ }).check()
+    await page.getByRole('button', { name: online ? 'Continuar al pago' : 'Generar pedido' }).click()
+    expect((await created).postDataJSON()).toMatchObject({ sellerId, channel: 'store', checkoutMode: online ? 'online' : 'whatsapp' })
+    if (online) {
+      await expect(page.getByRole('heading', { name: 'Pago pendiente de confirmación' })).toBeVisible()
+      await expect(page.getByText('Lucía', { exact: true })).toBeVisible()
+    } else {
+      await expect(page.getByRole('link', { name: 'Abrir WhatsApp Web' })).toHaveAttribute('href', /phone=5491199999999/)
+      await expect(page.getByText('Vendedor: Lucía')).toBeVisible()
+    }
+  })
 }
 
 test('store landing uses a responsive vertical cover hero and product detail keeps a compact header', async ({ page }, testInfo) => {

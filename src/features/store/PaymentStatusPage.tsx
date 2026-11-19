@@ -7,6 +7,7 @@ import { WhatsAppIcon } from '../../components/WhatsAppIcon'
 import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { paymentSessionSchema, paymentStatusSchema, readPaymentRecovery, savePaymentRecovery, type PaymentStatus } from './payment-recovery'
+import { formatDeliveryDate } from '../delivery/delivery-schedule'
 import './store-purchase.css'
 
 type PaymentPresentation = {
@@ -155,6 +156,8 @@ function PaymentConfirmation({ slug, requestedOrder }: { slug: string; requested
         {result && presentation ? <>
           <dl className="store-payment-order mt-7 rounded-2xl border border-stone-200 bg-stone-50 p-4 sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><dt className="text-sm text-stone-600">Pedido</dt><dd className="break-all text-sm font-semibold text-stone-950">{result.order.displayNumber}</dd></div>
+            {result.order.sellerName ? <div className="flex flex-wrap justify-between gap-2"><dt className="text-sm text-stone-600">Vendedor</dt><dd className="text-sm font-semibold">{result.order.sellerName}</dd></div> : null}
+            {result.order.estimatedDeliveryDate ? <div className="flex flex-wrap justify-between gap-2"><dt className="text-sm text-stone-600">Entrega estimada</dt><dd className="text-sm font-semibold">{formatDeliveryDate(result.order.estimatedDeliveryDate)} · a confirmar</dd></div> : null}
             <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><dt className="text-sm text-stone-600">Total de la compra</dt><dd className="text-2xl font-bold tracking-tight text-stone-950">{formatMoney(result.order.totalCents, result.order.currencyCode)}</dd></div>
             {orderLabels[result.order.status] ? <div className="mt-4 border-t border-stone-200 pt-3"><dt className="text-xs text-stone-500">Estado del pedido</dt><dd className="mt-1 text-sm font-medium text-stone-700">{orderLabels[result.order.status]}</dd></div> : null}
           </dl>

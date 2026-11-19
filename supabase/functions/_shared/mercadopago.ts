@@ -1,6 +1,11 @@
 import { activeRestaurantRole, requireAal2, verifyActor } from "./auth.ts";
 import { createAdminClient } from "./clients.ts";
-import { getAllowedOrigins, getSupabaseUrl, parseAllowedOrigins, requireEnv } from "./config.ts";
+import {
+  getAllowedOrigins,
+  getSupabasePublicUrl,
+  parseAllowedOrigins,
+  requireEnv,
+} from "./config.ts";
 import { randomToken, sha256Hex } from "./crypto.ts";
 import { type SupabaseClient, z } from "./deps.ts";
 import { ApiError, databaseApiError } from "./errors.ts";
@@ -152,7 +157,7 @@ export function mpEncryptionKey(): string {
   return requireEnv("MERCADOPAGO_ENCRYPTION_KEY");
 }
 export function oauthRedirectUri(): string {
-  return `${getSupabaseUrl()}/functions/v1/mercadopago-callback`;
+  return `${getSupabasePublicUrl()}/functions/v1/mercadopago-callback`;
 }
 export function providerLiveMode(): boolean {
   return Deno.env.get("MERCADOPAGO_MODE") !== "test";

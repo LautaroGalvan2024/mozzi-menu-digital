@@ -91,7 +91,10 @@ select is(public.expire_online_reservations(),1,'maintenance releases abandoned 
 select is((select status::text from public.orders where id=(select (response->>'orderId')::uuid from payment_test_results where label='expired')),'expired','abandoned checkout becomes expired');
 select is(public.reconcile_online_payment((select (response->>'attemptId')::uuid from payment_test_results where label='expired'),'payment-3','approved',1000,'ARS',now())->>'paymentStatus','approved','late approval reacquires available units atomically');
 select is((select status::text from public.orders where id=(select (response->>'orderId')::uuid from payment_test_results where label='expired')),'generated','successfully recovered late payment returns to preparation queue');
-select is(public.expire_orders(now()+interval '10 days'),0,'legacy expiry cannot expire an online paid order');
+select public.expire_orders(now()+interval '10 days');
+select is((select jsonb_build_object('status',status,'paymentStatus',payment_status) from public.orders
+  where id=(select (response->>'orderId')::uuid from payment_test_results where label='expired')),
+  '{"status":"generated","paymentStatus":"approved"}'::jsonb,'legacy expiry preserves the paid fixture and its payment status');
 select is(public.cancel_order((select (response->>'orderId')::uuid from payment_test_results where label='expired'),'Customer cancellation')->>'cancelled','true','operator cancels paid order before acceptance');
 select is((select payment_status from public.orders where id=(select (response->>'orderId')::uuid from payment_test_results where label='expired')),'requires_refund','cancelled does not falsely mean refunded');
 select is((select reserved from public.inventory_balances where product_id='28000000-0000-4000-8000-000000000005'),0::bigint,'cancellation releases confirmed reservation once');

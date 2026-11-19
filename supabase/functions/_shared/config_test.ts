@@ -1,5 +1,70 @@
-import { getPublishableKey, getSecretKey } from "./config.ts";
+import {
+  getPublishableKey,
+  getSecretKey,
+  getSupabasePublicUrl,
+  getSupabaseUrl,
+  parseAllowedOrigins,
+} from "./config.ts";
 import { assertEquals, assertRejects } from "./test-assert.ts";
+
+async function withSupabaseUrls(action: () => void | Promise<void>) {
+  const names = ["SUPABASE_URL", "SUPABASE_PUBLIC_URL"];
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  Deno.env.delete("SUPABASE_PUBLIC_URL");
+  try {
+    await action();
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+}
+
+Deno.test("managed Supabase uses its SDK URL for public callbacks by default", async () => {
+  await withSupabaseUrls(() => {
+    Deno.env.set("SUPABASE_URL", "https://project.supabase.co/");
+    assertEquals(getSupabaseUrl(), "https://project.supabase.co");
+    assertEquals(getSupabasePublicUrl(), "https://project.supabase.co");
+  });
+});
+
+Deno.test("self-hosted Supabase distinguishes the Docker SDK URL from its public URL", async () => {
+  await withSupabaseUrls(async () => {
+    const gateway = "http://api-gw:8000";
+    Deno.env.set("SUPABASE_URL", gateway);
+    assertEquals(getSupabaseUrl(), gateway);
+    await assertRejects(() => getSupabasePublicUrl());
+
+    Deno.env.set("SUPABASE_PUBLIC_URL", gateway);
+    await assertRejects(() => getSupabasePublicUrl());
+    await assertRejects(() => parseAllowedOrigins(gateway));
+
+    Deno.env.set("SUPABASE_PUBLIC_URL", "https://api.example.test/");
+    assertEquals(getSupabasePublicUrl(), "https://api.example.test");
+    assertEquals(getSupabaseUrl(), gateway);
+  });
+});
+
+Deno.test("the Docker exception does not allow other insecure SDK or public URLs", async () => {
+  await withSupabaseUrls(async () => {
+    for (
+      const url of [
+        "http://api-gw.example.test:8000",
+        "http://api-gw:8001",
+        "http://api-gw:8000/other",
+        "http://user:pass@api-gw:8000",
+      ]
+    ) {
+      Deno.env.set("SUPABASE_URL", url);
+      await assertRejects(() => getSupabaseUrl());
+    }
+
+    Deno.env.set("SUPABASE_URL", "https://project.supabase.co");
+    Deno.env.set("SUPABASE_PUBLIC_URL", "https://user:pass@api.example.test");
+    await assertRejects(() => getSupabasePublicUrl());
+  });
+});
 
 Deno.test("modern injected Supabase key maps use the configured secret key name", () => {
   const previousPublishable = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");

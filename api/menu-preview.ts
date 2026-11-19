@@ -202,6 +202,7 @@ async function fetchRestaurantPreview(
   fetchImplementation: typeof fetch,
   channel: 'menu' | 'store' = 'menu',
   productId: string | null = null,
+  campaignSlug: string | null = null,
 ): Promise<RestaurantPreview | null> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -217,6 +218,19 @@ async function fetchRestaurantPreview(
       body: JSON.stringify(body),
       signal: controller.signal,
     })
+    if (campaignSlug) {
+      const response = await read('get_public_campaign', { p_restaurant_slug: slug, p_campaign_slug: campaignSlug, p_channel: channel })
+      if (response.status === 404) return null
+      if (!response.ok) throw new Error('PUBLIC_CAMPAIGN_UNAVAILABLE')
+      const payload: unknown = await response.json()
+      const restaurant = parseRestaurantPreview(payload)
+      if (!restaurant || !payload || typeof payload !== 'object' || !('campaign' in payload)) return null
+      const campaign = payload.campaign
+      if (!campaign || typeof campaign !== 'object' || !('title' in campaign) || !('description' in campaign) || !('imagePath' in campaign)) return null
+      if (typeof campaign.title !== 'string' || typeof campaign.description !== 'string' || (campaign.imagePath !== null && typeof campaign.imagePath !== 'string')) return null
+      const imagePath = typeof campaign.imagePath === 'string' ? campaign.imagePath : null
+      return { ...restaurant, product: { name: campaign.title, description: campaign.description, imagePath } }
+    }
     let response = await read('get_public_catalog_preview', { p_restaurant_slug: slug, p_channel: channel, p_product_id: productId })
     let legacy = false
     if (!response.ok) {
@@ -236,7 +250,8 @@ async function fetchRestaurantPreview(
       const product = payload && typeof payload === 'object' && 'product' in payload ? payload.product : null
       if (!product || typeof product !== 'object' || !('name' in product) || !('description' in product) || !('imagePath' in product)) return null
       if (typeof product.name !== 'string' || typeof product.description !== 'string' || (product.imagePath !== null && typeof product.imagePath !== 'string')) return null
-      return { ...restaurant, product: { name: product.name.slice(0, 160), description: product.description.slice(0, 1200), imagePath: product.imagePath } }
+      const imagePath = typeof product.imagePath === 'string' ? product.imagePath : null
+      return { ...restaurant, product: { name: product.name.slice(0, 160), description: product.description.slice(0, 1200), imagePath } }
     }
     const categories = (payload as { categories?: unknown }).categories
     if (!Array.isArray(categories)) return null
@@ -280,8 +295,10 @@ export async function handleMenuPreviewRequest(
   const slug = params.get('slug')?.trim() ?? ''
   const channel = params.get('channel') ?? 'menu'
   const productId = params.get('product')
+  const campaignSlug = params.get('revista')
   if (!['menu', 'store'].includes(channel) || (productId && (channel !== 'store' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)))) return errorResponse(404, isHeadRequest)
   if (!isValidRestaurantSlug(slug)) return errorResponse(404, isHeadRequest)
+  if (campaignSlug !== null && (productId || !isValidRestaurantSlug(campaignSlug))) return errorResponse(404, isHeadRequest)
 
   const environment = dependencies.environment ?? runtimeEnvironment()
   const configuration = getConfiguration(environment)
@@ -294,10 +311,12 @@ export async function handleMenuPreviewRequest(
       dependencies.fetch ?? fetch,
       channel as 'menu' | 'store',
       productId,
+      campaignSlug,
     )
     if (!restaurant || restaurant.slug !== slug) return errorResponse(404, isHeadRequest)
 
-    const canonicalUrl = new URL(`/${channel === 'store' ? 't' : 'r'}/${encodeURIComponent(restaurant.slug)}${productId ? `/producto/${productId}` : ''}`, configuration.appBaseUrl)
+    const trail = campaignSlug ? `/revista/${campaignSlug}` : productId ? `/producto/${productId}` : ''
+    const canonicalUrl = new URL(`/${channel === 'store' ? 't' : 'r'}/${encodeURIComponent(restaurant.slug)}${trail}`, configuration.appBaseUrl)
       .toString()
     const faviconUrl = new URL('/favicon.png', configuration.appBaseUrl).toString()
     const imageUrl =
@@ -315,9 +334,9 @@ export async function handleMenuPreviewRequest(
     return new Response(isHeadRequest ? null : html, {
       status: 200,
       headers: {
-        'cache-control': 'public, max-age=0, s-maxage=300, stale-while-revalidate=60',
+        'cache-control': campaignSlug ? 'no-store' : 'public, max-age=0, s-maxage=300, stale-while-revalidate=60',
         'content-type': 'text/html; charset=utf-8',
-        'vercel-cdn-cache-control': 'public, s-maxage=300, stale-while-revalidate=60',
+        'vercel-cdn-cache-control': campaignSlug ? 'no-store' : 'public, s-maxage=300, stale-while-revalidate=60',
       },
     })
   } catch {

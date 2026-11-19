@@ -10,6 +10,7 @@ import { formatMoney } from '../../lib/money'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { adminOrderSchema, eventSchema, itemOptionSchema, itemSchema } from './orderSchemas'
+import { formatDeliveryDate } from '../delivery/delivery-schedule'
 import { StatusPill } from './OrderStatus'
 import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { OrderAcceptAction } from './OrderAcceptAction'
@@ -266,6 +267,8 @@ export function OrderDetailPage() {
             <Info label="Cliente" value={order.customer_name} />
             <Info label="Teléfono" value={order.customer_phone} />
             <Info label="Modalidad" value={order.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'} />
+            {order.seller_name ? <Info label="Vendedor" value={order.seller_name} /> : null}
+            {order.estimated_delivery_date ? <Info label="Entrega estimada" value={`${formatDeliveryDate(order.estimated_delivery_date)} · a confirmar`} /> : null}
             <Info label="Pago" value={order.payment_method_name_snapshot} /><Info label="Canal" value={order.channel === 'store' ? 'Tienda online' : 'Menú digital'} />{order.checkout_mode === 'online' ? <Info label="Estado del cobro" value={paymentStatusLabel(order.payment_status)} /> : null}
             {deliveryAddress ? <Info label="Dirección" value={deliveryAddress} /> : null}
             {order.delivery_floor ? <Info label="Piso" value={order.delivery_floor} /> : null}

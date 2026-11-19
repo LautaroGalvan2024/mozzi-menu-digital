@@ -240,6 +240,8 @@ export interface GeneratedOrder {
     totalCents: number
     currencyCode: string
     createdAt: string
+    sellerName?: string | undefined
+    estimatedDeliveryDate?: string | undefined
   }
   whatsapp: {
     phone: string
@@ -247,6 +249,7 @@ export interface GeneratedOrder {
     url: string
   }
   clientEventToken: string | null
+  sellerContactUnavailable?: boolean | undefined
   clientEventExpiresAt?: string | undefined
   idempotentReplay: boolean
 }

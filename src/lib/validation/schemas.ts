@@ -236,6 +236,8 @@ export const generatedOrderSchema = z.object({
     totalCents: money,
     currencyCode: z.string().length(3),
     createdAt: z.string(),
+    sellerName: z.string().optional(),
+    estimatedDeliveryDate: z.iso.date().optional(),
   }),
   whatsapp: z.object({
     phone: z.string(),
@@ -246,6 +248,7 @@ export const generatedOrderSchema = z.object({
     }, 'La URL de WhatsApp no es válida.'),
   }),
   clientEventToken: z.string().min(22).max(256).regex(/^[A-Za-z0-9_-]+$/).nullable(),
+  sellerContactUnavailable: z.boolean().optional(),
   clientEventExpiresAt: z.string().optional(),
   recoveryToken: z.string().min(22).max(256).regex(/^[A-Za-z0-9_-]+$/).optional(),
   recoveryExpiresAt: z.string().datetime({ offset: true }).optional(),

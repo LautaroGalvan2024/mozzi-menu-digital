@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(214);
+select plan(247);
 
 with expected(signature, access) as (
   values
@@ -13,6 +13,17 @@ with expected(signature, access) as (
     ('public.expire_online_reservations_report(timestamptz,integer)', 'service'),
     ('public.finish_online_reconciliation(uuid,boolean)', 'service'),
     ('public.get_public_menu(text)', 'public'),
+    ('public.get_stage_one_features(uuid)', 'authenticated'),
+    ('public.get_public_campaigns(text,text)', 'public'),
+    ('public.get_public_campaign(text,text,text)', 'public'),
+    ('public.get_admin_campaigns(uuid)', 'authenticated'),
+    ('public.save_campaign(uuid,uuid,uuid,bigint,jsonb)', 'authenticated'),
+    ('public.get_public_seller(text,text,uuid)', 'public'),
+    ('public.save_seller(uuid,uuid,text,text,text,boolean,boolean,boolean)', 'authenticated'),
+    ('public.get_delivery_estimate(text,uuid,text)', 'public-service'),
+    ('public.get_delivery_schedule_policies(uuid)', 'authenticated'),
+    ('public.save_delivery_schedule_policy(uuid,uuid,jsonb,uuid[],bigint)', 'authenticated'),
+    ('public.save_delivery_zone_settings(uuid,uuid,jsonb,jsonb,uuid[],bigint)', 'authenticated'),
     ('public.get_public_catalog(text,text)', 'public-service'),
     ('public.get_public_catalog_revision(text,text)', 'public-service'),
     ('public.get_public_catalog_meta(text,text)', 'public-service'),
@@ -104,14 +115,17 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  70::bigint,
+  81::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 
+-- Apply the same creator role as the application migrations.
+set local role postgres;
 create function public.pgtap_acl_probe_009()
 returns integer
 language sql
 as $$ select 1 $$;
+reset role;
 
 select is(
   has_function_privilege('anon', 'public.pgtap_acl_probe_009()', 'execute'),

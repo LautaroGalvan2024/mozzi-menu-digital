@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 
 const commerceId = '71000000-0000-4000-8000-000000000001'
 const otherCommerceId = '71000000-0000-4000-8000-000000000002'
@@ -6,7 +7,7 @@ const userId = '72000000-0000-4000-8000-000000000001'
 const staffId = '72000000-0000-4000-8000-000000000002'
 type Account = 'anonymous' | 'admin' | 'multi' | 'super'
 
-async function readOnlyFixture(page: Page, account: Account, assurance: 'aal1' | 'aal2' = account === 'super' ? 'aal2' : 'aal1') {
+async function readOnlyFixture(page: Page, account: Account, assurance: 'aal1' | 'aal2' = account === 'super' ? 'aal2' : 'aal1', pilot = true) {
   const timestamp = '2026-10-27T12:00:00Z'
   const restaurant = {
     id: commerceId, name: 'Casa Móvil', trade_name: 'Casa Móvil', slug: 'casa-movil', description: 'Accesorios para todos tus días.', status: 'active',
@@ -35,6 +36,15 @@ async function readOnlyFixture(page: Page, account: Account, assurance: 'aal1' |
     let body: unknown
     if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') {
       body = { userId, isSuperAdmin: account === 'super', aal: assurance, memberships: account === 'super' ? [] : memberships.slice(0, account === 'multi' ? 2 : 1).map(item => ({ restaurantId: item.restaurant_id, role: item.role, status: item.status })) }
+    } else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') {
+      expect(request.postDataJSON()).toEqual({ p_restaurant_id: commerceId })
+      body = { ...disabledStageOneFeatures, campaigns: pilot, sellers: pilot, delivery_schedule: pilot }
+    } else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_metrics') {
+      body = { generated: 0, whatsappOpened: 0, accepted: 0, completed: 0, cancelled: 0, expired: 0, corrected: 0, returned: 0,
+        acceptedAmountCents: '0', completedAmountCents: '0', byFulfillment: {}, byPaymentMethod: [],
+        validDeliveredCommercialCases: 0, physicalDispatches: 0, receivedReturnUnits: '0', sellableRestockedReturnUnits: '0' }
+    } else if (request.method() === 'POST' && ['/rest/v1/rpc/get_delivery_schedule_policies', '/rest/v1/rpc/get_admin_campaigns'].includes(path)) {
+      body = []
     } else if (request.method() !== 'GET') {
       mutations.push(`${request.method()} ${path}`)
       await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'This visual fixture forbids mutations' }) }); return
@@ -47,6 +57,7 @@ async function readOnlyFixture(page: Page, account: Account, assurance: 'aal1' |
     else if (path === '/rest/v1/categories') body = ['Fundas', 'Cargadores y cables'].map((name, index) => ({ id: `74000000-0000-4000-8000-00000000000${index + 1}`, restaurant_id: commerceId, name, slug: index ? 'cargadores-y-cables' : 'fundas', description: '', image_path: null, sort_order: index, active: true, deleted_at: null }))
     else if (path === '/rest/v1/business_hours') body = [1, 2, 3, 4, 5].map(day => ({ id: `75000000-0000-4000-8000-00000000000${day}`, restaurant_id: commerceId, day_of_week: day, slot_index: 0, opens_at: '09:00:00', closes_at: '18:00:00', spans_next_day: false, active: true }))
     else if (path === '/rest/v1/special_hours') body = []
+    else if (path === '/rest/v1/sellers') body = []
     else if (path === '/rest/v1/delivery_zones') body = ['Centro', 'Barrios cercanos'].map((name, index) => ({ id: `76000000-0000-4000-8000-00000000000${index + 1}`, restaurant_id: commerceId, name, description: index ? 'Consultá disponibilidad para tu dirección.' : 'Dentro de las avenidas principales.', delivery_fee_cents: index ? 250000 : 150000, minimum_order_cents: 0, free_shipping_from_cents: 3000000, active: true, sort_order: index }))
     else {
       unexpected.push(`${request.method()} ${path}`)
@@ -69,12 +80,50 @@ const screens: { key: string; route: string; title: string; account: Account }[]
   { key: 'hours', route: '/admin/horarios', title: 'Horarios', account: 'admin' },
   { key: 'team', route: '/admin/usuarios', title: 'Usuarios', account: 'admin' },
   { key: 'delivery', route: '/admin/zonas-de-envio', title: 'Zonas de envío', account: 'admin' },
+  { key: 'sellers', route: '/admin/vendedores', title: 'Vendedores', account: 'admin' },
+  { key: 'campaigns', route: '/admin/promociones', title: 'Revistas y anuncios', account: 'admin' },
   { key: 'security', route: '/admin/seguridad', title: 'Seguridad', account: 'admin' },
   { key: 'central-security', route: '/superadmin/seguridad', title: 'Seguridad de Super Admin', account: 'super' },
 ]
 
 test.describe('administrative identity across secondary screens', () => {
   test.skip(Boolean(process.env.E2E_BASE_URL) || process.env.E2E_LIVE === '1', 'Uses only synthetic sessions and e2e.invalid read mocks.')
+  test('existing commerce keeps administration but can’t open pilot routes by URL', async ({ page }) => {
+    const { unexpected, mutations } = await readOnlyFixture(page, 'admin', 'aal1', false)
+    for (const pathname of ['/admin/vendedores', '/admin/promociones']) {
+      await page.goto(pathname)
+      await expect(page).toHaveURL('/admin')
+      await expect(page.getByRole('navigation', { name: 'Administración' }).getByRole('link', { name: 'Vendedores' })).toHaveCount(0)
+      await expect(page.getByRole('navigation', { name: 'Administración' }).getByRole('link', { name: 'Promociones y difusión' })).toHaveCount(0)
+    }
+    await page.goto('/admin/zonas-de-envio')
+    await expect(page.getByRole('button', { name: 'Nueva zona' })).toBeVisible()
+    expect(unexpected).toEqual([])
+    expect(mutations).toEqual([])
+  })
+  test('creates a seller link on mobile with the published channels preselected', async ({ page, context }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await readOnlyFixture(page, 'admin')
+    const sellers: Record<string, unknown>[] = []
+    await page.route('https://e2e.invalid/rest/v1/sellers?**', route => route.fulfill({ json: sellers }))
+    await page.route('https://e2e.invalid/rest/v1/rpc/save_seller', route => {
+      const input = route.request().postDataJSON()
+      expect(input).toMatchObject({ p_restaurant_id: commerceId, p_name: 'Lucía', p_whatsapp_phone: '+5491199999999', p_menu_enabled: true, p_store_enabled: true, p_image_path: null })
+      sellers.push({ id: input.p_id, name: input.p_name, whatsapp_phone: input.p_whatsapp_phone, image_path: null, active: true, menu_enabled: true, store_enabled: true })
+      return route.fulfill({ json: input.p_id })
+    })
+    await page.goto('/admin/vendedores')
+    await page.getByRole('button', { name: 'Nuevo vendedor' }).click()
+    await page.getByLabel('Nombre', { exact: true }).fill('Lucía')
+    await page.getByLabel('WhatsApp').fill('+54 9 11 9999 9999')
+    await page.getByLabel('WhatsApp').press('Enter')
+    const copy = page.getByRole('button', { name: 'Copiar enlace de Tienda de Lucía' })
+    await copy.click()
+    await expect(page.getByRole('status')).toHaveText('Copiaste el enlace de Lucía.')
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`http://127.0.0.1:4173/t/casa-movil?vendedor=${sellers[0]!.id}`)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  })
   test('an administrator can retry a pending invitation without changing the membership', async ({ page }) => {
     await readOnlyFixture(page, 'admin')
     const membership = { id: '73000000-0000-4000-8000-000000000003', user_id: staffId, role: 'order_manager', status: 'invited', created_at: '2026-10-27T12:00:00Z' }

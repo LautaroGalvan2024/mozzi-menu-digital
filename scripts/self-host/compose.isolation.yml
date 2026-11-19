@@ -1,0 +1,37 @@
+# Overlay for the official Supabase Docker Compose stack.
+name: mozzi-supabase
+
+services:
+  studio:
+    container_name: !reset null
+  api-gw:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:18000:8000/tcp"
+  auth:
+    container_name: !reset null
+  rest:
+    container_name: !reset null
+  realtime:
+    container_name: realtime-dev.mozzi-supabase-realtime
+    networks:
+      default:
+        aliases:
+          - realtime-dev.supabase-realtime
+  storage:
+    container_name: !reset null
+  imgproxy:
+    container_name: !reset null
+  meta:
+    container_name: !reset null
+  functions:
+    container_name: !reset null
+    env_file:
+      - path: ./.env.mozzi-edge
+        required: false
+  db:
+    container_name: !reset null
+    ports: !reset []
+  supavisor:
+    container_name: !reset null
+    ports: !reset []

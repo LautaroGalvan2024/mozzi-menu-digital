@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SheetData } from 'read-excel-file/browser'
@@ -7,10 +7,12 @@ import { ImportProductsPage } from './ImportProductsPage'
 
 const commerceA = '10000000-0000-4000-8000-000000000001'
 const commerceB = '10000000-0000-4000-8000-000000000002'
-const mocks = vi.hoisted(() => ({ read: vi.fn(), invoke: vi.fn(), rpc: vi.fn(), selectedId: '10000000-0000-4000-8000-000000000001' }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), invoke: vi.fn(), rpc: vi.fn(), loadCatalog: vi.fn(), selectedId: '10000000-0000-4000-8000-000000000001', assistedImport: true }))
 vi.mock('../../lib/import-file', () => ({ readImportFile: mocks.read, MAX_SPREADSHEET_BYTES: 10 * 1024 * 1024 }))
+vi.mock('../../lib/import-review', async importActual => ({ ...await importActual<typeof import('../../lib/import-review')>(), loadImportCatalog: mocks.loadCatalog }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { functions: { invoke: mocks.invoke }, rpc: mocks.rpc } }))
 vi.mock('../restaurants/RestaurantScope', () => ({ useRestaurantScope: () => ({ selected: { id: mocks.selectedId } }) }))
+vi.mock('../restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { assisted_import: mocks.assistedImport } }) }))
 
 const external = (price = '$ 1.250,50'): Record<string, SheetData> => ({ Artículos: [
   ['Clave externa', 'Artículo', 'Rubro', 'Lista local', 'Costo'],
@@ -35,7 +37,9 @@ beforeEach(() => {
   localStorage.clear()
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name: string, callback: () => unknown) => Promise.resolve(callback()) } })
   mocks.selectedId = commerceA
+  mocks.assistedImport = true
   mocks.read.mockReset()
+  mocks.loadCatalog.mockReset().mockResolvedValue([])
   mocks.rpc.mockReset().mockResolvedValue({ data: null, error: null })
   mocks.invoke.mockReset().mockImplementation((_name, request) => Promise.resolve({ data: {
     batchId: request.body.batchId,
@@ -46,6 +50,103 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('flexible import review', () => {
+  it('keeps manual mapping and confirmation usable without catalog preflight for a commerce outside the pilot', async () => {
+    mocks.assistedImport = false
+    mocks.read.mockResolvedValue(canonical())
+    const { container } = setup()
+    upload(container)
+    expect(await screen.findByRole('heading', { name: 'Relacioná tus columnas' })).toBeVisible()
+    expect(screen.getByLabelText('Columna para Nombre')).toBeVisible()
+    expect(screen.queryByLabelText('Resultado previsto de la importación')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Revisar importación' }))
+    expect(await screen.findByRole('heading', { name: 'Vista previa' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Importar catálogo' })).toBeEnabled()
+    expect(mocks.loadCatalog).not.toHaveBeenCalled()
+  })
+
+  it('starts with a concise summary and verified create/update counts for a recognized file', async () => {
+    const user = userEvent.setup()
+    mocks.read.mockResolvedValue({ Productos: [...canonical().Productos!, ['B', 'Yerba', 'Almacén', '900']] })
+    mocks.loadCatalog.mockResolvedValue([{ id: '20000000-0000-4000-8000-000000000001', restaurant_id: commerceA, code: '000123', deleted_at: null }])
+    const { container } = setup()
+    upload(container)
+    await screen.findByRole('heading', { name: 'Resumen del archivo' })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeEnabled())
+    expect(screen.queryByRole('heading', { name: 'Relacioná tus columnas' })).not.toBeInTheDocument()
+    const summary = within(screen.getByLabelText('Resultado previsto de la importación'))
+    expect(summary.getByText('para crear')).toHaveTextContent('1para crear')
+    expect(summary.getByText('para actualizar')).toHaveTextContent('1para actualizar')
+    expect(summary.getByText('filas para revisar')).toHaveTextContent('0filas para revisar')
+    expect(mocks.loadCatalog).toHaveBeenCalledWith(commerceA, expect.any(AbortSignal))
+    expect(mocks.invoke).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Cambiar columnas' }))
+    expect(screen.getByRole('heading', { name: 'Relacioná tus columnas' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Ocultar configuración de columnas' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('keeps counts unknown on lookup failure and retries without submitting the catalog', async () => {
+    const user = userEvent.setup()
+    mocks.read.mockResolvedValue(canonical())
+    mocks.loadCatalog.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([])
+    const { container } = setup()
+    upload(container)
+    await screen.findByText(/No pudimos comprobar los códigos/)
+    const summary = within(screen.getByLabelText('Resultado previsto de la importación'))
+    expect(summary.getByText('para crear')).toHaveTextContent('—para crear')
+    expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Reintentar comprobación' }))
+    await waitFor(() => expect(summary.getByText('para crear')).toHaveTextContent('1para crear'))
+    expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeEnabled()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
+
+  it('keeps optional missing SKUs in the summary and still requires explicit confirmation before creating them', async () => {
+    const user = userEvent.setup()
+    mocks.read.mockResolvedValue({ Productos: [['nombre', 'categoria', 'precio'], ['Nuevo producto', 'General', '100']] })
+    const { container } = setup()
+    upload(container)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Cambiar columnas' })).toHaveAttribute('aria-expanded', 'false')
+    await user.click(screen.getByRole('button', { name: 'Revisar importación' }))
+    await screen.findByRole('heading', { name: 'Vista previa' })
+    expect(screen.getByRole('button', { name: 'Importar catálogo' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: /Entiendo que las filas sin código/ }))
+    expect(screen.getByRole('button', { name: 'Importar catálogo' })).toBeEnabled()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
+
+  it('updates counts and shows only conflicting rows when the import mode changes', async () => {
+    const user = userEvent.setup()
+    mocks.read.mockResolvedValue({ Productos: [...canonical().Productos!, ['B', 'Yerba', 'Almacén', '900']] })
+    mocks.loadCatalog.mockResolvedValue([{ id: '20000000-0000-4000-8000-000000000001', restaurant_id: commerceA, code: '000123', deleted_at: null }])
+    const { container } = setup()
+    upload(container)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeEnabled())
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Cómo importar' }), 'create_only')
+    expect(screen.getByText(/El producto ya existe/)).toBeVisible()
+    expect(screen.getByRole('combobox', { name: 'Filas del archivo' })).toHaveValue('issues')
+    expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeDisabled()
+    expect(within(screen.getByLabelText('Resultado previsto de la importación')).getByText('filas para revisar')).toHaveTextContent('1filas para revisar')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Cómo importar' }), 'skip_existing')
+    expect(within(screen.getByLabelText('Resultado previsto de la importación')).getByText('existentes que se omitirán')).toHaveTextContent('1existentes que se omitirán')
+    expect(screen.getByRole('button', { name: 'Revisar importación' })).toBeEnabled()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
+
+  it('does not expose an old tenant lookup when the commerce changes', async () => {
+    let resolveCatalog!: (value: unknown) => void
+    mocks.read.mockResolvedValue(canonical())
+    mocks.loadCatalog.mockReturnValueOnce(new Promise(resolve => { resolveCatalog = resolve }))
+    const view = setup()
+    upload(view.container)
+    await screen.findByText('Comprobando códigos con el catálogo del comercio…')
+    view.switchCommerce(commerceB)
+    await act(async () => resolveCatalog([{ id: '20000000-0000-4000-8000-000000000001', restaurant_id: commerceA, code: '000123', deleted_at: null }]))
+    expect(screen.queryByLabelText('Resultado previsto de la importación')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Importar catálogo' })).not.toBeInTheDocument()
+    expect(mocks.invoke).not.toHaveBeenCalled()
+  })
+
   it('maps an external price column, preserves SKU and omitted fields, then remembers the next daily upload', async () => {
     const user = userEvent.setup()
     mocks.read.mockResolvedValueOnce(external()).mockResolvedValueOnce(external('$ 1.400,00'))
@@ -134,6 +235,7 @@ describe('flexible import review', () => {
     mocks.read.mockResolvedValue(canonical())
     const { container } = setup()
     upload(container)
+    await user.click(await screen.findByRole('button', { name: 'Cambiar columnas' }))
     await screen.findByRole('heading', { name: 'Relacioná tus columnas' })
     await user.selectOptions(screen.getByLabelText('Dónde están las categorías'), 'fixed')
     await user.type(screen.getByLabelText('Categoría para todos los productos'), 'General')

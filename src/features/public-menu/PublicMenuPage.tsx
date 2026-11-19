@@ -1,6 +1,7 @@
 import { Clock3, MapPin, MessageCircle, Search, ShoppingBag, Store, Utensils } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import { ErrorPanel, LoadingScreen } from '../../components/Feedback'
 import { useCart } from '../cart/CartProvider'
 import { env } from '../../lib/env'
@@ -15,7 +16,10 @@ import type { PublicCatalogGroup } from '../../types/domain'
 import { ProductDialog } from './ProductDialog'
 import { RestaurantHoursDialog } from './RestaurantHoursDialog'
 import { usePublicCatalog } from './usePublicCatalog'
+import { fetchPublicCatalogGroup } from './api'
 import './menu-experience.css'
+
+const ActiveCampaignBanners = lazy(() => import('../campaigns/ActiveCampaignBanners').then(module => ({ default: module.ActiveCampaignBanners })))
 
 function RecentOrderLink({ slug }: { slug: string }) {
   const [reference] = useState(() => readOrderRecovery(slug))
@@ -23,6 +27,7 @@ function RecentOrderLink({ slug }: { slug: string }) {
 }
 
 const INITIAL_VISIBLE_GROUPS = 12
+const PUBLIC_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function catalogGroupPresentation(group: PublicCatalogGroup) {
   const first = group.variants[0]
@@ -40,10 +45,11 @@ export function catalogGroupPresentation(group: PublicCatalogGroup) {
 
 export function PublicMenuPage() {
   const { restaurantSlug } = useParams()
+  const [params, setParams] = useSearchParams()
   const cart = useCart()
   const { activateRestaurant, reconcileProducts } = cart
   const [search, setSearch] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  const [categoryId, setCategoryId] = useState(() => PUBLIC_ID.test(params.get('category') ?? '') ? params.get('category')! : '')
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [showHours, setShowHours] = useState(false)
   const debouncedSearch = useDebouncedValue(search, 300)
@@ -56,8 +62,17 @@ export function PublicMenuPage() {
     const presentation = catalogGroupPresentation(group)
     return presentation ? [{ group, ...presentation }] : []
   }), [visibleGroups])
-  const selectedGroup = catalog.groups.find((group) => group.id === selectedGroupId)
-  const selectedProduct = selectedGroup ? catalogGroupPresentation(selectedGroup)?.product ?? null : null
+  const requestedProductId = params.get('producto') ?? ''
+  const requestedVariantId = params.get('variante') ?? ''
+  const requestedCategoryId = params.get('category') ?? ''
+  useEffect(() => { setCategoryId(PUBLIC_ID.test(requestedCategoryId) ? requestedCategoryId : '') }, [requestedCategoryId])
+  const linkedProduct = useQuery({ queryKey: ['menu-linked-product', restaurantSlug, requestedProductId], queryFn: () => fetchPublicCatalogGroup(restaurantSlug ?? '', requestedProductId, 'menu'), enabled: Boolean(restaurantSlug && PUBLIC_ID.test(requestedProductId)), retry: false, staleTime: 0 })
+  const selectedGroup = catalog.groups.find((group) => group.id === selectedGroupId) ?? (requestedProductId ? linkedProduct.data?.group : undefined)
+  const selectedProduct = selectedGroup ? selectedGroup.variants.find(product => product.id === requestedVariantId) ?? catalogGroupPresentation(selectedGroup)?.product ?? null : null
+  const closeProduct = () => {
+    setSelectedGroupId(null)
+    if (params.has('producto') || params.has('variante')) { const next = new URLSearchParams(params); next.delete('producto'); next.delete('variante'); setParams(next, { replace: true }) }
+  }
 
   useEffect(() => {
     if (restaurantSlug) activateRestaurant(restaurantSlug)
@@ -156,6 +171,8 @@ export function PublicMenuPage() {
         </div>
       </header>
 
+      <div className="page-shell"><Suspense fallback={null}><ActiveCampaignBanners slug={restaurant.slug} channel="menu" /></Suspense>{requestedProductId && linkedProduct.error ? <p className="my-3 text-sm text-amber-900" role="status">Este producto ya no está disponible. Podés elegir otro del menú. <button className="underline" onClick={closeProduct}>Cerrar aviso</button></p> : null}</div>
+
       <div className="menu-browse-bar sticky top-0 z-30">
         <div className="page-shell menu-browse-inner">
           <label className="menu-search relative block">
@@ -251,7 +268,7 @@ export function PublicMenuPage() {
           </Link>
         </div>
       ) : null}
-      {selectedProduct && selectedGroup ? <ProductDialog product={selectedProduct} variants={selectedGroup.variants} restaurant={restaurant} onClose={() => setSelectedGroupId(null)} onAdd={(line) => { cart.addLine(line); setSelectedGroupId(null) }} /> : null}
+      {selectedProduct && selectedGroup ? <ProductDialog key={selectedProduct.id} product={selectedProduct} variants={selectedGroup.variants} restaurant={restaurant} onClose={closeProduct} onAdd={(line) => { cart.addLine(line); closeProduct() }} /> : null}
       {showHours ? (
         <RestaurantHoursDialog
           restaurantName={restaurant.tradeName}

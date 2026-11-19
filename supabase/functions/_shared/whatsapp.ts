@@ -18,6 +18,9 @@ export type CanonicalWhatsappOrder = {
   restaurantTimezone: string;
   restaurantLocale: string;
   whatsappPhone: string;
+  sellerName?: string | null;
+  sellerWhatsappPhone?: string | null;
+  estimatedDeliveryDate?: string | null;
   customerName: string;
   customerPhone: string;
   fulfillmentType: "delivery" | "pickup";
@@ -92,7 +95,7 @@ export function buildWhatsapp(order: CanonicalWhatsappOrder, appBaseUrl: string)
   url: string;
   claimUrl: string;
 } {
-  const normalizedPhone = tryNormalizePhone(order.whatsappPhone);
+  const normalizedPhone = tryNormalizePhone(order.sellerWhatsappPhone ?? order.whatsappPhone);
   if (!normalizedPhone) {
     throw new ApiError(
       500,
@@ -101,11 +104,24 @@ export function buildWhatsapp(order: CanonicalWhatsappOrder, appBaseUrl: string)
     );
   }
   const claimUrl = `${appBaseUrl.replace(/\/$/, "")}/admin/pedidos/tomar/${order.actionId}`;
+  if (order.sellerName && !order.sellerWhatsappPhone) {
+    const message = `Hola, quisiera consultar por el pedido ${
+      sanitizeWhatsappText(order.displayNumber)
+    }.`;
+    return {
+      phone: normalizedPhone,
+      message,
+      url: `https://wa.me/${normalizedPhone.slice(1)}?text=${encodeURIComponent(message)}`,
+      claimUrl,
+    };
+  }
+  const deliveryDate = order.estimatedDeliveryDate?.split("-").reverse().join("/");
   const lines = [
     `*NUEVO PEDIDO ${sanitizeWhatsappText(order.displayNumber)}*`,
     localDate(order.createdAt, order.restaurantTimezone, order.restaurantLocale),
     "",
     `*${sanitizeWhatsappText(order.restaurantName)}*`,
+    ...(order.sellerName ? [`Vendedor: ${sanitizeWhatsappText(order.sellerName)}`] : []),
     "",
     "*Cliente*",
     sanitizeWhatsappText(order.customerName),
@@ -113,6 +129,7 @@ export function buildWhatsapp(order: CanonicalWhatsappOrder, appBaseUrl: string)
     "",
     "*Modalidad*",
     ...addressLines(order),
+    ...(deliveryDate ? [`Entrega estimada: ${deliveryDate} (a confirmar por el comercio)`] : []),
     "",
     "*Pedido*",
   ];
@@ -152,7 +169,7 @@ export function buildWhatsapp(order: CanonicalWhatsappOrder, appBaseUrl: string)
   if (order.customerNotes) {
     lines.push("", "Observaciones:", sanitizeWhatsappText(order.customerNotes));
   }
-  lines.push("", "✅ *TOMAR PEDIDO*", claimUrl);
+  if (!order.sellerName) lines.push("", "✅ *TOMAR PEDIDO*", claimUrl);
 
   const message = lines.join("\n");
   return {

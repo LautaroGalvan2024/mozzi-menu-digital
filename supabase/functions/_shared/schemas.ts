@@ -154,6 +154,7 @@ const fulfillmentSchema = z.object({
 });
 
 export const createOrderSchema = z.object({
+  sellerId: uuid.optional(),
   channel: z.enum(["menu", "store"]).optional(),
   checkoutMode: z.enum(["whatsapp", "online"]).optional(),
   restaurantSlug: z.string().max(100).transform(normalizeSlug).refine(

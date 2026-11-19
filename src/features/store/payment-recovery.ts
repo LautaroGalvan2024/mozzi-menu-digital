@@ -2,7 +2,11 @@ import { z } from 'zod'
 import { commerceStorageKey } from '../../lib/commerce-channel'
 
 export const paymentStatusSchema = z.object({
-  order: z.object({ actionId: z.string().uuid(), displayNumber: z.string(), status: z.string(), totalCents: z.coerce.number().int().nonnegative().safe(), currencyCode: z.string().length(3), createdAt: z.string() }),
+  order: z.object({
+    actionId: z.string().uuid(), displayNumber: z.string(), status: z.string(),
+    totalCents: z.coerce.number().int().nonnegative().safe(), currencyCode: z.string().length(3), createdAt: z.string(),
+    sellerName: z.string().optional(), estimatedDeliveryDate: z.iso.date().optional(),
+  }),
   payment: z.object({
     status: z.string(),
     checkoutUrl: z.string().url().refine(value => {

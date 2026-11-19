@@ -71,6 +71,14 @@ max_frequency = "1m"
 otp_length = 6
 otp_expiry = 3600
 
+[auth.email.template.invite]
+subject = "Te invitaron a Mozzi Comercio"
+content_path = "./supabase/templates/invite-es.html"
+
+[auth.email.template.recovery]
+subject = "Restablecé tu contraseña de Mozzi Comercio"
+content_path = "./supabase/templates/recovery-es.html"
+
 [auth.mfa]
 max_enrolled_factors = 10
 

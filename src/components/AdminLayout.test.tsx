@@ -3,6 +3,8 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AdminLayout } from './AdminLayout'
 
+vi.mock('../features/restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { sellers: false, campaigns: false } }) }))
+
 vi.mock('../features/auth/AuthProvider', () => ({
   useAuth: () => ({
     isSuperAdmin: false,
@@ -50,5 +52,7 @@ describe('restaurant administrator navigation', () => {
       'href',
       '/admin/marca',
     )
+    expect(screen.queryByRole('link', { name: 'Vendedores' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Promociones y difusión' })).not.toBeInTheDocument()
   })
 })

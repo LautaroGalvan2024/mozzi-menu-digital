@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileDown, FileSpreadsheet, RefreshCw, UploadCloud } from 'lucide-react'
 import type { SheetData } from 'read-excel-file/browser'
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
@@ -12,10 +12,12 @@ import type { ImportData } from '../../lib/import-products'
 import { readImportFile, MAX_SPREADSHEET_BYTES } from '../../lib/import-file'
 import { detectImportMapping, normalizeImportMapping, type ImportMapping } from '../../lib/import-mapping'
 import { applyImportProfile, listImportProfiles, matchImportProfile } from '../../lib/import-profiles'
+import { buildImportReview, loadImportCatalog } from '../../lib/import-review'
 import { importResultSchema, latestImportSession, persistImportSession, prepareImportSession, rejectImportSession, withImportSubmission, type ImportMode, type ImportResult, type ImportSession } from '../../lib/import-session'
 import { downloadBlob, importResultWorkbook, importWorkbook } from '../../lib/import-workbook'
 import { supabase } from '../../lib/supabase/client'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
+import { useStageOneFeatures } from '../restaurants/stage-one-features'
 import { ImportMappingPanel } from './ImportMappingPanel'
 
 // These RPC errors are thrown inside the atomic import transaction, before any
@@ -69,15 +71,33 @@ export function ImportProductsPage() {
   const [sourceSheets, setSourceSheets] = useState<Record<string, SheetData> | null>(null)
   const [mapping, setMapping] = useState<ImportMapping | null>(null)
   const [mappingOpen, setMappingOpen] = useState(false)
+  const [editingColumns, setEditingColumns] = useState(false)
   const [matchedProfileName, setMatchedProfileName] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
   const [identityConfirmed, setIdentityConfirmed] = useState(false)
   const [sourceVersion, setSourceVersion] = useState(0)
   const [mappingNotice, setMappingNotice] = useState('')
+  const [catalogRevision, setCatalogRevision] = useState(0)
   const spreadsheetSelection = useRef(0)
   const selectedRestaurantId = scope.selected?.id
+  const { features } = useStageOneFeatures(selectedRestaurantId)
+  const assistedImport = features.assisted_import
   const currentRestaurant = useRef(selectedRestaurantId)
   const normalized = useMemo(() => sourceSheets && mapping ? normalizeImportMapping(sourceSheets, mapping) : null, [sourceSheets, mapping])
+  const catalogQuery = useQuery({
+    queryKey: ['catalog-import-review', selectedRestaurantId, sourceVersion, catalogRevision],
+    queryFn: ({ signal }) => loadImportCatalog(selectedRestaurantId!, signal),
+    enabled: assistedImport && !!selectedRestaurantId && Boolean(sourceSheets || data) && !session?.submitted,
+    retry: false,
+    staleTime: 0,
+  })
+  const reviewData = mappingOpen ? normalized?.data : data
+  const catalogReview = useMemo(() => assistedImport && reviewData && catalogQuery.data
+    ? buildImportReview(reviewData, mode, catalogQuery.data, mappingOpen ? normalized?.rows : undefined)
+    : null, [assistedImport, reviewData, mode, catalogQuery.data, mappingOpen, normalized?.rows])
+  const catalogChecking = catalogQuery.isFetching || (!catalogQuery.data && !catalogQuery.error)
+  const catalogError = catalogQuery.error ? 'No pudimos comprobar los códigos de este comercio. Reintentá para ver cuáles se crearán o actualizarán.' : ''
+  const reviewBlocked = assistedImport && !session?.submitted && (catalogChecking || !!catalogError || !catalogReview || catalogReview.counts.review > 0)
 
   function applySession(next: ImportSession, restored = false) {
     setSession(next)
@@ -105,6 +125,7 @@ export function ImportProductsPage() {
     setSourceSheets(null)
     setMapping(null)
     setMappingOpen(false)
+    setEditingColumns(false)
     setMatchedProfileName(null)
     setReading(false)
     setIdentityConfirmed(false)
@@ -138,6 +159,7 @@ export function ImportProductsPage() {
     setSourceSheets(null)
     setMapping(null)
     setMappingOpen(false)
+    setEditingColumns(false)
     setMatchedProfileName(null)
     setIdentityConfirmed(false)
     setRecovered(false)
@@ -168,7 +190,7 @@ export function ImportProductsPage() {
   }
 
   async function reviewMapping(notice = '') {
-    if (!normalized || normalized.errors.length || !selectedRestaurantId || reading || busy) return
+    if (!normalized || normalized.errors.length || !selectedRestaurantId || reading || busy || reviewBlocked) return
     const selection = spreadsheetSelection.current
     const restaurantId = selectedRestaurantId
     setReading(true)
@@ -196,6 +218,7 @@ export function ImportProductsPage() {
     setServerErrors([])
     setIdentityConfirmed(false)
     setMappingOpen(true)
+    setEditingColumns(true)
   }
 
   async function chooseZip(event: ChangeEvent<HTMLInputElement>) {
@@ -236,7 +259,7 @@ export function ImportProductsPage() {
   }
 
   async function runImport() {
-    if (!data || !scope.selected || data.errors.length || running.current || mappingOpen || reading || zipReading || !!zipError || (zipFile && (!imageArchive || zipIssues.length > 0)) || (!session?.submitted && data.products.some((product) => !product.code && !product.id) && (!identityConfirmed || mode === 'update_only'))) return
+    if (!data || !scope.selected || data.errors.length || running.current || mappingOpen || reading || reviewBlocked || zipReading || !!zipError || (zipFile && (!imageArchive || zipIssues.length > 0)) || (!session?.submitted && data.products.some((product) => !product.code && !product.id) && (!identityConfirmed || mode === 'update_only'))) return
     running.current = true
     setBusy(true)
     setError(null)
@@ -362,6 +385,7 @@ export function ImportProductsPage() {
       const next = await prepareImportSession(restaurantId, data, mode, fileName, true)
       if (currentRestaurant.current !== restaurantId || selection !== spreadsheetSelection.current) return
       applySession(next)
+      setCatalogRevision(revision => revision + 1)
       setIdentityConfirmed(false)
       setImageErrors([])
       setServerErrors([])
@@ -436,9 +460,19 @@ export function ImportProductsPage() {
     {imageArchive ? <p className="mt-4 text-sm" role="status">{imageArchive.files.length} imágenes encontradas en el ZIP{data ? `; ${referencedImages - zipIssues.length} de ${referencedImages} referencias coinciden` : ''}.</p> : null}
     {zipError || zipIssues.length ? <div className="form-error mt-4" role="alert">{zipError ? <p>{zipError} Los productos no se importarán hasta corregir el ZIP.</p> : null}{zipIssues.length ? <ul>{zipIssues.slice(0, 50).map((issue, index) => <li key={index}>{issue}</li>)}</ul> : null}</div> : null}
     {reading ? <p className="mt-5 text-sm" role="status">Leyendo y preparando el archivo…</p> : null}
-    {mappingOpen && sourceSheets && mapping && normalized && selectedRestaurantId ? <ImportMappingPanel key={`${selectedRestaurantId}:${sourceVersion}`} sheets={sourceSheets} mapping={mapping} normalized={normalized} restaurantId={selectedRestaurantId} fileName={fileName} matchedProfileName={matchedProfileName} busy={busy || reading} onChange={setMapping} onContinue={reviewMapping}/> : null}
+    {mappingOpen && sourceSheets && mapping && normalized && selectedRestaurantId ? <ImportMappingPanel key={`${selectedRestaurantId}:${sourceVersion}`} sheets={sourceSheets} mapping={mapping} normalized={normalized} restaurantId={selectedRestaurantId} fileName={fileName} matchedProfileName={matchedProfileName} busy={busy || reading} assistance={assistedImport ? { review: catalogReview, checking: catalogChecking, error: catalogError, retry: () => void catalogQuery.refetch() } : undefined} initialColumnsOpen={editingColumns} onChange={setMapping} onContinue={reviewMapping}/> : null}
     {mappingNotice && !mappingOpen ? <p className="mt-4 text-sm" role="status">{mappingNotice}</p> : null}
-    {data && !mappingOpen?<section className="mt-6 rounded-xl border border-stone-200 bg-white p-5"><h2 className="font-display text-xl font-bold">Vista previa</h2><p className="mt-3 text-sm">Actualizamos por código / SKU o identificador. Los productos que no estén en el archivo y los campos sin relacionar conservan su valor actual.</p>{data.products.some((product)=>!product.code&&!product.id)?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">{data.products.filter((product)=>!product.code&&!product.id).length} filas sin código ni identificador crearán productos nuevos. No se buscan coincidencias por nombre.{mode==='update_only'?' El modo sólo actualizar requiere código o identificador en todas las filas.':''}</p>:null}{!session?.submitted && data.products.some((product) => !product.code && !product.id) && mode !== 'update_only' ? <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={identityConfirmed} disabled={busy} onChange={(event) => setIdentityConfirmed(event.target.checked)}/>Entiendo que las filas sin código crearán productos nuevos. Para futuras actualizaciones usaré los códigos del resultado.</label> : null}{recovered?<p className="mt-3 text-sm" role="status">Recuperamos una importación anterior. Continuar consulta su resultado y reintenta el mismo lote. Si ya terminó, no vuelve a aplicar los precios. Para aplicarlos de nuevo, usá «Iniciar otra importación con estos datos» después de recuperar el resultado.</p>:null}<div className="mt-4 grid gap-3 sm:grid-cols-4"><p className="metric-mini"><strong>{data.products.length}</strong>productos</p><p className="metric-mini"><strong>{data.groups.length}</strong>grupos</p><p className="metric-mini"><strong>{data.options.length}</strong>opciones</p><p className="metric-mini"><strong>{referencedImages}</strong>imágenes</p></div>{data.errors.length?<div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm text-red-900" role="alert"><strong>Corregí estos errores antes de importar:</strong><ul className="mt-2 list-disc pl-5">{data.errors.slice(0,50).map((item,index)=><li key={`${item}-${index}`}>{item}</li>)}</ul></div>:<div className="mt-5 overflow-x-auto"><table className="data-table"><thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Imagen</th></tr></thead><tbody>{data.products.slice(0,20).map((product)=><tr key={product.rowRef}><td>{product.code || (product.id ? 'Se conserva' : 'Automático')}</td><td>{product.name}</td><td>{product.category}</td><td>{(product.basePriceCents/100).toFixed(2)}</td><td>{product.imageFilename??'—'}</td></tr>)}</tbody></table></div>}{referencedImages&&!zipFile?<p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Hay imágenes referenciadas, pero no seleccionaste un ZIP. Podés importar los productos y cargar las imágenes después.</p>:null}{sourceSheets && !session?.submitted ? <button className="button-secondary mr-3 mt-5" disabled={busy || reading} onClick={editMapping}>Volver a relacionar columnas</button> : null}<button className="button-primary mt-5" disabled={busy||reading||zipReading||!!zipError||!!(zipFile && (!imageArchive || zipIssues.length))||data.errors.length>0||(mode==='update_only'&&data.products.some((product)=>!product.code&&!product.id))||(!session?.submitted&&!identityConfirmed&&data.products.some((product)=>!product.code&&!product.id))} onClick={()=>void runImport()}>{busy?'Importando…':session?.submitted?'Recuperar o continuar importación':'Importar catálogo'}</button>{progress?<div className="mt-4" role="status"><div className="flex justify-between text-xs text-stone-500"><span>{progress.label}</span><span>{progress.current}/{progress.total}</span></div><progress className="mt-2 w-full" value={progress.current} max={Math.max(1,progress.total)}/></div>:null}</section>:null}
+    {assistedImport && data && !mappingOpen && !session?.submitted ? <section className="form-card mt-6" aria-label="Resultado previsto de la importación" aria-busy={catalogChecking}>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <p className="metric-mini"><strong>{catalogChecking || catalogError || !catalogReview ? '—' : catalogReview.counts.create}</strong>para crear</p>
+        <p className="metric-mini"><strong>{catalogChecking || catalogError || !catalogReview ? '—' : catalogReview.counts.update}</strong>para actualizar</p>
+        <p className="metric-mini"><strong>{catalogChecking || catalogError || !catalogReview ? '—' : catalogReview.counts.review}</strong>filas para revisar</p>
+        <p className="metric-mini"><strong>{catalogChecking || catalogError || !catalogReview ? '—' : catalogReview.counts.skip}</strong>existentes que se omitirán</p>
+      </div>
+      {catalogChecking ? <p className="mt-3 text-sm" role="status">Comprobando códigos con el catálogo del comercio…</p> : catalogError ? <div className="mt-3 text-sm" role="alert"><p>{catalogError}</p><button type="button" className="button-secondary mt-3" onClick={() => void catalogQuery.refetch()}>Reintentar comprobación</button></div> : <p className="mt-3 text-xs text-stone-500">Conteos según el catálogo consultado. Se vuelven a validar al confirmar la importación.</p>}
+      {!catalogChecking && !catalogError && catalogReview?.counts.review ? <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm" role="alert"><strong>Revisá estas filas antes de importar</strong><ul className="mt-2 list-disc pl-5">{catalogReview.rows.filter(row => row.action === 'review').slice(0, 50).map((row, index) => <li key={`${row.rowRef}:${index}`}>Fila {row.rowRef}: {row.issues.join(' ')}</li>)}</ul></div> : null}
+    </section> : null}
+    {data && !mappingOpen?<section className="mt-6 rounded-xl border border-stone-200 bg-white p-5"><h2 className="font-display text-xl font-bold">Vista previa</h2><p className="mt-3 text-sm">Actualizamos por código / SKU o identificador. Los productos que no estén en el archivo y los campos sin relacionar conservan su valor actual.</p>{data.products.some((product)=>!product.code&&!product.id)?<p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm">{data.products.filter((product)=>!product.code&&!product.id).length} filas sin código ni identificador crearán productos nuevos. No se buscan coincidencias por nombre.{mode==='update_only'?' El modo sólo actualizar requiere código o identificador en todas las filas.':''}</p>:null}{!session?.submitted && data.products.some((product) => !product.code && !product.id) && mode !== 'update_only' ? <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={identityConfirmed} disabled={busy} onChange={(event) => setIdentityConfirmed(event.target.checked)}/>Entiendo que las filas sin código crearán productos nuevos. Para futuras actualizaciones usaré los códigos del resultado.</label> : null}{recovered?<p className="mt-3 text-sm" role="status">Recuperamos una importación anterior. Continuar consulta su resultado y reintenta el mismo lote. Si ya terminó, no vuelve a aplicar los precios. Para aplicarlos de nuevo, usá «Iniciar otra importación con estos datos» después de recuperar el resultado.</p>:null}<div className="mt-4 grid gap-3 sm:grid-cols-4"><p className="metric-mini"><strong>{data.products.length}</strong>productos</p><p className="metric-mini"><strong>{data.groups.length}</strong>grupos</p><p className="metric-mini"><strong>{data.options.length}</strong>opciones</p><p className="metric-mini"><strong>{referencedImages}</strong>imágenes</p></div>{data.errors.length?<div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm text-red-900" role="alert"><strong>Corregí estos errores antes de importar:</strong><ul className="mt-2 list-disc pl-5">{data.errors.slice(0,50).map((item,index)=><li key={`${item}-${index}`}>{item}</li>)}</ul></div>:<div className="mt-5 overflow-x-auto"><table className="data-table"><thead><tr><th>Código</th><th>Nombre</th><th>Categoría</th><th>Precio</th><th>Imagen</th></tr></thead><tbody>{data.products.slice(0,20).map((product)=><tr key={product.rowRef}><td>{product.code || (product.id ? 'Se conserva' : 'Automático')}</td><td>{product.name}</td><td>{product.category}</td><td>{(product.basePriceCents/100).toFixed(2)}</td><td>{product.imageFilename??'—'}</td></tr>)}</tbody></table></div>}{referencedImages&&!zipFile?<p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Hay imágenes referenciadas, pero no seleccionaste un ZIP. Podés importar los productos y cargar las imágenes después.</p>:null}{sourceSheets && !session?.submitted ? <button className="button-secondary mr-3 mt-5" disabled={busy || reading} onClick={editMapping}>Volver a relacionar columnas</button> : null}<button className="button-primary mt-5" disabled={busy||reading||reviewBlocked||zipReading||!!zipError||!!(zipFile && (!imageArchive || zipIssues.length))||data.errors.length>0||(mode==='update_only'&&data.products.some((product)=>!product.code&&!product.id))||(!session?.submitted&&!identityConfirmed&&data.products.some((product)=>!product.code&&!product.id))} onClick={()=>void runImport()}>{busy?'Importando…':session?.submitted?'Recuperar o continuar importación':'Importar catálogo'}</button>{progress?<div className="mt-4" role="status"><div className="flex justify-between text-xs text-stone-500"><span>{progress.label}</span><span>{progress.current}/{progress.total}</span></div><progress className="mt-2 w-full" value={progress.current} max={Math.max(1,progress.total)}/></div>:null}</section>:null}
     {result?<div className="mt-5 flex flex-wrap gap-3"><button className="button-secondary" onClick={()=>void downloadResult()}><FileDown className="h-4 w-4"/>Descargar resultado</button><button className="button-secondary" disabled={busy} onClick={()=>void newImport()}>Iniciar otra importación con estos datos</button><p className="w-full text-sm">Una nueva importación creará nuevos productos para las filas sin código ni identificador. Para actualizar, usá el archivo de resultado.</p></div>:null}{result&&referencedImages?<button className="button-secondary mt-4" disabled={busy||!zipFile} onClick={()=>void retryImages()}>Continuar imágenes pendientes</button>:null}{error?<p className="form-error mt-5" role="alert">{error}</p>:null}
     {serverErrors.length?<div className="mt-5 rounded-2xl bg-red-50 p-4 text-sm text-red-950" role="alert"><strong>Qué necesitás corregir:</strong><ul className="mt-2 list-disc pl-5">{serverErrors.map((item,index)=><li key={`${item.code}-${item.path??index}`}>{item.row?`Fila ${item.row} · `:''}{item.path?`${item.path}: `:''}{item.message} <span className="font-mono text-xs">({item.code})</span></li>)}</ul></div>:null}
     {result?<div className={`mt-5 rounded-2xl p-4 text-sm ${result.errors.length?'bg-amber-50 text-amber-950':'form-success'}`} role="status">{recovered ? 'Resultado recuperado. ' : ''}Importación terminada: {result.summary.created} creados, {result.summary.updated} actualizados y {result.summary.skipped} omitidos.{result.errors.length?` ${result.errors.length} filas requieren revisión.`:''}{result.errors.length?<ul className="mt-2 list-disc pl-5">{result.errors.slice(0,50).map((item,index)=><li key={`${item.code}-${item.row??index}`}>{item.row?`Fila ${item.row}: `:''}{item.message}</li>)}</ul>:null}</div>:null}

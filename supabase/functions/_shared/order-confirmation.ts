@@ -45,6 +45,8 @@ export function orderConfirmationResponse(
   if (!clientEventExpiresAt || !Number.isFinite(Date.parse(clientEventExpiresAt))) {
     throw new ApiError(500, "INVALID_DATABASE_RESPONSE", "No se pudo validar la confirmación.");
   }
+  const { sellerName, sellerWhatsappPhone, estimatedDeliveryDate } = result.canonical;
+  const sellerContactUnavailable = Boolean(sellerName && !sellerWhatsappPhone);
   return {
     order: {
       actionId: result.canonical.actionId,
@@ -53,9 +55,14 @@ export function orderConfirmationResponse(
       totalCents: result.canonical.totalCents,
       currencyCode: result.canonical.currencyCode,
       createdAt: result.canonical.createdAt,
+      ...(sellerName ? { sellerName } : {}),
+      ...(estimatedDeliveryDate ? { estimatedDeliveryDate } : {}),
     },
     whatsapp: buildWhatsapp(result.canonical, appBaseUrl),
-    clientEventToken: metadata.clientEventTokenStored ? tokens.clientEventToken : null,
+    clientEventToken: metadata.clientEventTokenStored && !sellerContactUnavailable
+      ? tokens.clientEventToken
+      : null,
+    ...(sellerContactUnavailable ? { sellerContactUnavailable } : {}),
     clientEventExpiresAt,
     idempotentReplay: result.idempotentReplay,
     ...(recoveryExpiresAt ? { recoveryToken: tokens.recoveryToken!, recoveryExpiresAt } : {}),

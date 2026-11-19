@@ -29,6 +29,21 @@ function publicMenuPayload(paths: { coverPath?: string | null; logoPath?: string
 }
 
 describe('menu preview metadata', () => {
+  it('uses the publication-specific preview and avoids caching campaign details past publication', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ...publicMenuPayload(), campaign: { title: 'Ofertas <especiales>', description: 'Noviembre', imagePath: null },
+    }), { status: 200 }))
+    const response = await handleMenuPreviewRequest(
+      new Request('https://menu.example.com/api/menu-preview?slug=la-rotiseria&channel=store&revista=ofertas-noviembre'),
+      { environment, fetch },
+    )
+    const html = await response.text()
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(String(fetch.mock.calls[0]![0])).toContain('/rpc/get_public_campaign')
+    expect(html).toContain('Ofertas &lt;especiales&gt; · La Rotisería')
+    expect(html).toContain('/t/la-rotiseria/revista/ofertas-noviembre')
+  })
   it('reads the store channel and shares a product canonical without falling back to the menu', async () => {
     const productId = '10000000-0000-4000-8000-000000000001'
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...publicMenuPayload(), product: { name: 'Funda roja', description: 'Para iPhone', imagePath: null } }), { status: 200 }))

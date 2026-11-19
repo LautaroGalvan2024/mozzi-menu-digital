@@ -13,6 +13,7 @@ import { useCart } from '../cart/CartProvider'
 import { queryKeys } from '../../lib/queryKeys'
 import type { PublicCatalogMeta, PublicMenu } from '../../types/domain'
 import { MenuIdentity } from '../public-menu/MenuIdentity'
+import { formatDeliveryDate } from '../delivery/delivery-schedule'
 import '../public-menu/menu-experience.css'
 import '../store/store-purchase.css'
 
@@ -82,7 +83,8 @@ function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceC
   if (recovering && !generated) return <LoadingScreen label="Recuperando la confirmación…" />
   if (!generated) return <main className={`page-shell py-16 ${channel === 'menu' ? 'menu-experience menu-state' : 'store-confirmation'}`} style={brandStyle}><ErrorPanel title="Esta confirmación no está disponible">{recoveryError ?? 'El acceso temporal venció o no está guardado en este dispositivo. Revisá WhatsApp o consultá al comercio antes de generar otro pedido.'}<div className="mt-4 flex flex-wrap gap-3">{reference ? <button className="button-primary" disabled={recovering} onClick={() => void recover()}>Reintentar recuperación</button> : null}<Link className="button-secondary" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div></ErrorPanel></main>
   const orderResult = generated
-  const stillPending = ['generated', 'whatsapp_opened'].includes(orderResult.order.status)
+  const contactUnavailable = orderResult.sellerContactUnavailable
+  const stillPending = !contactUnavailable && ['generated', 'whatsapp_opened'].includes(orderResult.order.status)
   const priceChanged = orderResult.estimatedTotalCents !== undefined && orderResult.estimatedTotalCents !== orderResult.order.totalCents
   const canShare = !priceChanged || priceAccepted
   const webUrl = whatsappWebUrl(orderResult.whatsapp.url, orderResult.whatsapp.message)
@@ -115,11 +117,19 @@ function OrderConfirmation({ slug, channel }: { slug: string; channel: CommerceC
   return <main className={`grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,#ffe2d3,transparent_45%),#f7f4ef] p-4 ${channel === 'menu' ? 'menu-experience menu-confirmation' : 'store-confirmation'}`} style={brandStyle}><section className="w-full max-w-xl rounded-[2rem] bg-white p-6 text-center shadow-2xl shadow-stone-900/10 sm:p-9">
     {cachedRestaurant ? channel === 'menu' ? <MenuIdentity restaurant={cachedRestaurant} /> : <p className="store-confirmation-identity">{cachedRestaurant.tradeName}</p> : null}
     <CheckCircle2 className="mx-auto h-16 w-16 text-emerald-600" aria-hidden /><p className="mt-5 text-xs font-bold uppercase tracking-[.2em] text-orange-700">{initial.success ? 'Pedido generado' : 'Pedido recuperado'}</p><h1 className="mt-2 font-display text-4xl font-bold">{orderResult.order.displayNumber}</h1><p className="mt-3 text-lg font-bold">{formatMoney(orderResult.order.totalCents, orderResult.order.currencyCode)}</p>
+    {orderResult.order.sellerName ? <p className="mt-2 text-sm">Vendedor: <strong>{orderResult.order.sellerName}</strong></p> : null}
+    {orderResult.order.estimatedDeliveryDate ? <p className="mt-2 text-sm">Entrega estimada: <strong>{formatDeliveryDate(orderResult.order.estimatedDeliveryDate)}</strong>. El comercio confirma la fecha.</p> : null}
+    {contactUnavailable ? <div className="mt-5 rounded-xl bg-stone-50 p-4">
+      <p className="text-sm">El vendedor ya no recibe mensajes para este pedido. Consultá al comercio con el número de pedido.</p>
+      <a className="button-primary mt-3" href={orderResult.whatsapp.url} target="_blank" rel="noopener noreferrer">Contactar al comercio</a>
+    </div> : <>
     <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-stone-600">{stillPending ? 'Todavía falta enviarlo por WhatsApp. Luego, el comercio debe aceptarlo para que quede confirmado.' : `Este pedido ya está ${statusLabels[orderResult.order.status]}. Se recuperó el mismo pedido, sin crear otro.`}</p>
     {priceChanged ? <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-left" role="alert"><p>El total cambió desde la estimación de {formatMoney(orderResult.estimatedTotalCents!, orderResult.order.currencyCode)}. El total registrado es {formatMoney(orderResult.order.totalCents, orderResult.order.currencyCode)}.</p><label className="mt-3 flex gap-2 text-sm"><input type="checkbox" checked={priceAccepted} onChange={event => setPriceAccepted(event.target.checked)} />Revisé el detalle y acepto el total actualizado antes de enviarlo.</label><p className="mt-2 text-xs">Si no lo aceptás, consultá al comercio por este número de pedido.</p></div> : null}
     <details className="mt-5 rounded-xl bg-stone-50 p-4 text-left" open={priceChanged}><summary className="cursor-pointer font-semibold">Detalle del pedido</summary><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-6">{orderResult.whatsapp.message}</pre></details>
     <div className="mt-7 grid gap-3">{stillPending ? <div className="grid gap-3 sm:grid-cols-2"><button className="button-primary min-h-14" disabled={opening || !canShare} onClick={() => void openWhatsapp()}>{opening ? 'Abriendo WhatsApp…' : <><ExternalLink className="h-5 w-5" aria-hidden />Abrir WhatsApp</>}</button><a className={`button-secondary min-h-14 ${canShare ? '' : 'pointer-events-none opacity-50'}`} aria-disabled={!canShare} href={canShare ? webUrl : undefined} tabIndex={canShare ? 0 : -1} target="_blank" rel="noopener noreferrer" onClick={() => { if (canShare) void registerWhatsappOpened() }}><ExternalLink className="h-5 w-5" aria-hidden />Abrir WhatsApp Web</a></div> : null}<button className="button-secondary" disabled={!canShare} onClick={() => void copy()}><Clipboard className="h-4 w-4" aria-hidden />{copied ? 'Mensaje copiado' : 'Copiar mensaje'}</button>{copyError ? <p className="form-error" role="alert">No pudimos copiar el mensaje. Abrí WhatsApp para continuar.</p> : null}
-      {openingError ? <p className="form-error" role="alert">No pudimos abrir WhatsApp. Podés reintentar, usar WhatsApp Web o copiar el mensaje.</p> : null}
+      {openingError ? <p className="form-error" role="alert">No pudimos abrir WhatsApp. Podés reintentar, usar WhatsApp Web o copiar el mensaje.</p> : null}</div>
+    </>}
+    <div className="mt-5 grid gap-3">
       <p className="text-xs text-stone-500">{recoverable ? 'Podés recuperar esta confirmación en este dispositivo hasta 30 minutos después de generarla. Los datos del pedido no se guardan en el navegador.' : 'La recuperación temporal no está disponible en este dispositivo. Copiá el mensaje antes de cerrar esta pantalla.'}</p>
       {recoverable ? <button className="text-xs underline" onClick={() => { forgetOrderRecovery(slug, channel); setRecoverable(false) }}>Quitar acceso guardado en este dispositivo</button> : null}
       <Link className="mt-2 text-sm font-semibold text-stone-600 underline" to={commercePath(slug, channel)}>Volver {channel === 'store' ? 'a la tienda' : 'al menú'}</Link></div>

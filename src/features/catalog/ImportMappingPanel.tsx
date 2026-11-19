@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { SheetData } from 'read-excel-file/browser'
 import { IMPORT_FIELDS, detectImportMapping, type ImportField, type ImportMapping, type ImportNormalization } from '../../lib/import-mapping'
 import { applyImportProfile, deleteImportProfile, listImportProfiles, saveImportProfile } from '../../lib/import-profiles'
+import type { ImportReview } from '../../lib/import-review'
 
 interface Props {
   sheets: Record<string, SheetData>
@@ -11,6 +12,8 @@ interface Props {
   fileName: string
   matchedProfileName: string | null
   busy: boolean
+  assistance: { review: ImportReview | null; checking: boolean; error: string; retry: () => void } | undefined
+  initialColumnsOpen: boolean
   onChange: (mapping: ImportMapping) => void
   onContinue: (notice?: string) => Promise<void>
 }
@@ -19,14 +22,17 @@ const primaryFields = new Set(['codigo', 'nombre', 'categoria', 'precio'])
 const columnLetter = (index: number): string => index < 26 ? String.fromCharCode(65 + index) : `${columnLetter(Math.floor(index / 26) - 1)}${columnLetter(index % 26)}`
 const cellText = (value: unknown) => value instanceof Date ? value.toISOString() : String(value ?? '')
 const kindLabels = { product: 'Reconocido', section: 'Categoría', header: 'Encabezado', empty: 'Vacía', ignored: 'Excluida', invalid: 'Revisar' }
+const actionLabels = { create: 'Crear', update: 'Actualizar', skip: 'Omitir existente', review: 'Revisar' }
 
-export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, fileName, matchedProfileName, busy, onChange, onContinue }: Props) {
+export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, fileName, matchedProfileName, busy, assistance, initialColumnsOpen, onChange, onContinue }: Props) {
+  const { review, checking: catalogChecking, error: catalogError, retry: onRetryCatalog } = assistance ?? {}
   const [profiles, setProfiles] = useState(() => listImportProfiles(restaurantId))
   const [profileName, setProfileName] = useState(matchedProfileName ?? fileName.replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)$/, '').slice(0, 80))
   const [remember, setRemember] = useState(true)
   const [profileMessage, setProfileMessage] = useState('')
   const [selectedProfile, setSelectedProfile] = useState('')
-  const [filter, setFilter] = useState<'products' | 'issues' | 'all'>('products')
+  const [filter, setFilter] = useState<'auto' | 'products' | 'issues' | 'all'>('auto')
+  const [columnsOpen, setColumnsOpen] = useState(initialColumnsOpen || normalized.errors.length > 0 || normalized.warnings.some(warning => warning.startsWith('Hay varias columnas posibles')))
   const [page, setPage] = useState(0)
   const source = sheets[mapping.sheetName] ?? []
   const columnCount = source.reduce((maximum, row) => Math.max(maximum, row.length), 0)
@@ -35,9 +41,19 @@ export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, 
     const example = source.slice(mapping.headerRow + 1).find((row) => cellText(row[index]).trim())?.[index]
     return { index, label: `${columnLetter(index)} · ${header || 'Sin título'}`, example: cellText(example).slice(0, 80) }
   })
-  const visibleRows = useMemo(() => normalized.rows.filter((row) => filter === 'all' ? row.kind !== 'empty' : filter === 'issues' ? row.issues.length > 0 || row.kind === 'invalid' : row.kind === 'product' || row.kind === 'invalid'), [normalized.rows, filter])
+  const reviewedRows = useMemo(() => {
+    const reviewByRow = new Map(review?.rows.map(item => [item.sourceRow, item]))
+    return normalized.rows.map(row => {
+      const match = reviewByRow.get(row.sourceRow)
+      return { ...row, action: match?.action, issues: [...new Set([...row.issues, ...(match?.issues ?? [])])] }
+    })
+  }, [normalized.rows, review])
+  const hasIssues = reviewedRows.some(row => row.kind === 'invalid' || row.issues.length > 0)
+  const activeFilter = filter === 'auto' ? assistance && hasIssues ? 'issues' : 'products' : filter
+  const visibleRows = useMemo(() => reviewedRows.filter(row => activeFilter === 'all' ? row.kind !== 'empty' : activeFilter === 'issues' ? row.issues.length > 0 || row.kind === 'invalid' : row.kind === 'product' || row.kind === 'invalid'), [reviewedRows, activeFilter])
   const pageCount = Math.max(1, Math.ceil(visibleRows.length / 20))
   const activePage = Math.min(page, pageCount - 1)
+  const reviewBlocked = Boolean(assistance && (catalogChecking || catalogError || !review || review.counts.review > 0))
 
   function change(next: ImportMapping) {
     setPage(0)
@@ -68,7 +84,8 @@ export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, 
     const column = mapping.columns[field.key]
     const required = 'required' in field && field.required
     const suppliedCategory = field.key === 'categoria' && mapping.categoryMode !== 'column'
-    return <label className="field" key={field.key}>
+    const needsColumn = (required && column === undefined && !suppliedCategory) || normalized.warnings.some(warning => warning.includes(`columnas posibles para ${field.label}.`))
+    return <label className={`field ${needsColumn ? 'rounded-xl bg-amber-50 p-3' : ''}`} key={field.key}>
       <span>{field.label}{required ? ' *' : ''}</span>
       <select aria-label={`Columna para ${field.label}`} disabled={busy || suppliedCategory} value={column ?? ''} onChange={(event) => mapField(field.key, event.target.value)}>
         <option value="">{suppliedCategory ? 'Según configuración de categorías' : 'Sin relacionar'}</option>
@@ -97,10 +114,20 @@ export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, 
 
   return <section className="form-card mt-6" aria-labelledby="mapping-title">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="text-xs font-bold uppercase tracking-wider text-orange-700">1 · Reconocer el archivo</p><h2 id="mapping-title" className="mt-1 font-display text-xl font-bold">Relacioná tus columnas</h2><p className="mt-2 max-w-3xl text-sm text-stone-600">Revisá lo que encontramos. Podés cambiar la hoja, los encabezados y qué dato representa cada columna.</p></div>
+      <div><h2 id="mapping-title" className="font-display text-xl font-bold">{assistance ? 'Resumen del archivo' : 'Relacioná tus columnas'}</h2><p className="mt-2 max-w-3xl text-sm text-stone-600">{assistance ? normalized.errors.length || normalized.warnings.length ? 'Encontramos datos que necesitan revisión. Corregilos o excluí las filas que no querés importar.' : 'Reconocimos las columnas. Revisá el resumen y continuá a la vista previa.' : 'Revisá la hoja, los encabezados y qué dato representa cada columna.'}</p></div>
       <span className="rounded-full bg-stone-100 px-3 py-1 text-sm">{fileName}</span>
     </div>
     {matchedProfileName ? <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm" role="status">Reconocimos el formato guardado «{matchedProfileName}». Revisá los datos de esta carga antes de continuar.</p> : null}
+    {assistance ? <>
+    <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Resultado previsto de la importación" aria-busy={catalogChecking}>
+      {(['create', 'update', 'review', 'skip'] as const).map(action => <p key={action} className={`metric-mini ${action === 'review' && review?.counts.review ? 'bg-amber-50' : ''}`}><strong>{catalogChecking || catalogError || !review ? '—' : review.counts[action]}</strong>{action === 'create' ? 'para crear' : action === 'update' ? 'para actualizar' : action === 'review' ? 'filas para revisar' : 'existentes que se omitirán'}</p>)}
+    </div>
+    <p className="mt-3 text-sm text-stone-600">{normalized.categoryCount} categorías · {normalized.skippedCount} filas fuera de la carga. Comparamos códigos e IDs con el catálogo de este comercio; no buscamos coincidencias por nombre.</p>
+    {catalogChecking ? <p className="mt-3 text-sm" role="status">Comprobando códigos con el catálogo del comercio…</p> : catalogError ? <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm" role="alert"><p>{catalogError}</p><button type="button" className="button-secondary mt-3" onClick={onRetryCatalog}>Reintentar comprobación</button></div> : <p className="mt-2 text-xs text-stone-500">Conteos según el catálogo consultado. Se vuelven a validar al confirmar la importación.</p>}
+    <button type="button" className="button-secondary mt-5" aria-expanded={columnsOpen} aria-controls="import-column-settings" disabled={busy} onClick={() => setColumnsOpen(open => !open)}>{columnsOpen ? 'Ocultar configuración de columnas' : 'Cambiar columnas'}</button>
+    </> : null}
+    <div id="import-column-settings" hidden={Boolean(assistance) && !columnsOpen}>
+    {assistance ? <h3 className="mt-5 font-display text-lg font-bold">Relacioná tus columnas</h3> : null}
     {profiles.length ? <div className="mt-5 flex flex-wrap items-end gap-3"><label className="field min-w-56 flex-1"><span>Formatos guardados en este navegador</span><select disabled={busy} value={selectedProfile} onChange={(event) => {
       const id = event.target.value
       setSelectedProfile(id)
@@ -130,13 +157,14 @@ export function ImportMappingPanel({ sheets, mapping, normalized, restaurantId, 
       {mapping.categoryMode === 'section' ? <label className="field"><span>Columna de los títulos de categoría</span><select disabled={busy} value={mapping.categoryColumn ?? ''} onChange={(event) => setCategoryColumn(event.target.value)}><option value="">Seleccionar columna</option>{columns.map((column) => <option key={column.index} value={column.index}>{column.label}</option>)}</select></label> : mapping.categoryMode === 'fixed' ? <label className="field"><span>Categoría para todos los productos</span><input disabled={busy} maxLength={100} value={mapping.fixedCategory} onChange={(event) => change({ ...mapping, fixedCategory: event.target.value })}/></label> : <p className="self-center text-sm text-stone-600">Cada producto toma la categoría de la columna relacionada arriba.</p>}
     </div>
     <details className="mt-5 rounded-xl border border-stone-200 p-4"><summary className="cursor-pointer text-sm font-semibold">Más campos: descripción, promociones, imágenes y variantes</summary><p className="mt-3 text-sm text-stone-600">Los campos sin relacionar conservan su valor actual. Una descripción o promoción relacionada pero vacía puede borrar el valor guardado.</p><div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{IMPORT_FIELDS.filter((field) => !primaryFields.has(field.key)).map(fieldControl)}</div></details>
-    {normalized.ignoredColumns.length ? <div className="mt-5 rounded-xl bg-amber-50 p-4 text-sm"><strong>Columnas que no se importarán</strong><p className="mt-1">{normalized.ignoredColumns.map((index) => columns[index]?.label ?? columnLetter(index)).join(' · ')}</p><p className="mt-2">Podés relacionarlas arriba. Datos como costo o stock todavía no se cargan desde este importador.</p></div> : null}
-    <div className="mt-6 grid gap-3 sm:grid-cols-3"><p className="metric-mini"><strong>{normalized.data.products.length}</strong>productos reconocidos</p><p className="metric-mini"><strong>{normalized.categoryCount}</strong>categorías</p><p className="metric-mini"><strong>{normalized.errors.length}</strong>errores por resolver</p></div>
+    </div>
+    {normalized.ignoredColumns.length ? <details className="mt-5 rounded-xl border border-stone-200 p-4 text-sm" open={assistance ? undefined : true}><summary className="cursor-pointer font-semibold">Columnas que no se importarán</summary><p className="mt-2">{normalized.ignoredColumns.map((index) => columns[index]?.label ?? columnLetter(index)).join(' · ')}</p><p className="mt-2">{assistance ? 'Podés relacionarlas desde «Cambiar columnas».' : 'Podés relacionarlas arriba.'} Datos como costo o stock todavía no se cargan desde este importador.</p></details> : null}
+    {!assistance ? <div className="mt-6 grid gap-3 sm:grid-cols-3"><p className="metric-mini"><strong>{normalized.data.products.length}</strong>productos reconocidos</p><p className="metric-mini"><strong>{normalized.categoryCount}</strong>categorías</p><p className="metric-mini"><strong>{normalized.errors.length}</strong>errores por resolver</p></div> : null}
     {normalized.warnings.length ? <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm"><ul className="list-disc space-y-1 pl-5">{normalized.warnings.slice(0, 20).map((warning, index) => <li key={index}>{warning}</li>)}</ul></div> : null}
     {normalized.errors.length ? <div className="mt-4 rounded-xl bg-red-50 p-4 text-sm text-red-900" role="alert"><strong>Revisá estos datos antes de continuar</strong><ul className="mt-2 list-disc space-y-1 pl-5">{normalized.errors.slice(0, 30).map((error, index) => <li key={index}>{error}</li>)}</ul>{normalized.errors.length > 30 ? <p className="mt-2">Hay {normalized.errors.length} errores en total. Usá el filtro de filas para revisarlos.</p> : null}</div> : null}
-    <div className="mt-5 flex flex-wrap items-end justify-between gap-3"><label className="field max-w-xs"><span>Filas del archivo</span><select value={filter} onChange={(event) => { setFilter(event.target.value as typeof filter); setPage(0) }}><option value="products">Productos</option><option value="issues">Filas para revisar</option><option value="all">Todas las filas con datos</option></select></label><p className="text-sm text-stone-500">{normalized.skippedCount} filas fuera de la carga · Las exclusiones sólo se aplican a este archivo.</p></div>
-    <div className="mt-3 overflow-x-auto"><table className="data-table"><thead><tr><th>Fila original</th><th>Código</th><th>Nombre / contenido</th><th>Categoría</th><th>Precio</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{visibleRows.slice(activePage * 20, activePage * 20 + 20).map((row) => <tr key={row.sourceRow} className={row.issues.length ? 'bg-red-50/60' : ''}><td>{row.sourceRow}</td><td>{row.values.codigo || '—'}</td><td className="min-w-48 max-w-96 break-words">{row.values.nombre || (source[row.sourceRow - 1] ?? []).map(cellText).filter(Boolean).slice(0, 3).join(' · ')}</td><td>{row.values.categoria || '—'}</td><td className="whitespace-nowrap">{row.values.precio || '—'}</td><td><span>{kindLabels[row.kind]}</span>{row.issues.length ? <ul className="mt-1 min-w-48 text-xs text-red-800">{row.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> : null}</td><td>{['product', 'invalid', 'ignored'].includes(row.kind) ? <button type="button" className="text-sm font-semibold text-orange-700 underline" disabled={busy} onClick={() => change({ ...mapping, skippedRows: mapping.skippedRows.includes(row.sourceRow) ? mapping.skippedRows.filter((number) => number !== row.sourceRow) : [...mapping.skippedRows, row.sourceRow] })}>{mapping.skippedRows.includes(row.sourceRow) ? 'Incluir' : 'Excluir'} fila {row.sourceRow}</button> : '—'}</td></tr>)}</tbody></table>{!visibleRows.length ? <p className="p-4 text-sm text-stone-500">No hay filas para este filtro.</p> : null}</div>
+    <div className="mt-5 flex flex-wrap items-end justify-between gap-3"><label className="field max-w-xs"><span>Filas del archivo</span><select value={activeFilter} onChange={(event) => { setFilter(event.target.value as typeof filter); setPage(0) }}><option value="products">Productos</option><option value="issues">Filas para revisar</option><option value="all">Todas las filas con datos</option></select></label><p className="text-sm text-stone-500">Las exclusiones sólo se aplican a este archivo.</p></div>
+    <div className="mt-3 overflow-x-auto"><table className="data-table"><thead><tr><th>Fila original</th><th>Código</th><th>Nombre / contenido</th><th>Categoría</th><th>Precio</th><th>Estado</th><th>Acción</th></tr></thead><tbody>{visibleRows.slice(activePage * 20, activePage * 20 + 20).map((row) => <tr key={row.sourceRow} className={row.issues.length ? 'bg-red-50/60' : ''}><td>{row.sourceRow}</td><td>{row.values.codigo || '—'}</td><td className="min-w-48 max-w-96 break-words">{row.values.nombre || (source[row.sourceRow - 1] ?? []).map(cellText).filter(Boolean).slice(0, 3).join(' · ')}</td><td>{row.values.categoria || '—'}</td><td className="whitespace-nowrap">{row.values.precio || '—'}</td><td><span>{row.action && !catalogChecking && !catalogError ? actionLabels[row.action] : kindLabels[row.kind]}</span>{row.issues.length ? <ul className="mt-1 min-w-48 text-xs text-red-800">{row.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> : null}</td><td>{['product', 'invalid', 'ignored'].includes(row.kind) ? <button type="button" className="text-sm font-semibold text-orange-700 underline" disabled={busy} onClick={() => change({ ...mapping, skippedRows: mapping.skippedRows.includes(row.sourceRow) ? mapping.skippedRows.filter((number) => number !== row.sourceRow) : [...mapping.skippedRows, row.sourceRow] })}>{mapping.skippedRows.includes(row.sourceRow) ? 'Incluir' : 'Excluir'} fila {row.sourceRow}</button> : '—'}</td></tr>)}</tbody></table>{!visibleRows.length ? <p className="p-4 text-sm text-stone-500">No hay filas para este filtro.</p> : null}</div>
     {pageCount > 1 ? <div className="mt-3 flex items-center justify-end gap-3 text-sm"><button className="button-secondary" disabled={activePage === 0} onClick={() => setPage(activePage - 1)}>Anterior</button><span>{activePage + 1} / {pageCount}</span><button className="button-secondary" disabled={activePage + 1 >= pageCount} onClick={() => setPage(activePage + 1)}>Siguiente</button></div> : null}
-    <div className="mt-6 border-t border-stone-200 pt-5"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remember} disabled={busy} onChange={(event) => setRemember(event.target.checked)}/>Recordar este formato para próximas cargas en este navegador</label>{remember ? <label className="field mt-3 max-w-md"><span>Nombre del formato</span><input maxLength={80} disabled={busy} value={profileName} onChange={(event) => setProfileName(event.target.value)}/></label> : null}{profileMessage ? <p className="mt-3 text-sm" role="status">{profileMessage}</p> : null}<button className="button-primary mt-4" disabled={busy || normalized.errors.length > 0 || !normalized.data.products.length} onClick={() => void continueWithMapping()}>{busy ? 'Preparando…' : 'Revisar importación'}</button><p className="mt-2 text-sm text-stone-500">En el siguiente paso confirmás la carga. Todavía no se modifica el catálogo.</p></div>
+    <div className="mt-6 border-t border-stone-200 pt-5"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={remember} disabled={busy} onChange={(event) => setRemember(event.target.checked)}/>Recordar este formato para próximas cargas en este navegador</label>{remember ? <label className="field mt-3 max-w-md"><span>Nombre del formato</span><input maxLength={80} disabled={busy} value={profileName} onChange={(event) => setProfileName(event.target.value)}/></label> : null}{profileMessage ? <p className="mt-3 text-sm" role="status">{profileMessage}</p> : null}<button className="button-primary mt-4" disabled={busy || reviewBlocked || normalized.errors.length > 0 || !normalized.data.products.length} onClick={() => void continueWithMapping()}>{busy ? 'Preparando…' : 'Revisar importación'}</button><p className="mt-2 text-sm text-stone-500">En el siguiente paso confirmás la carga. Todavía no se modifica el catálogo.</p></div>
   </section>
 }

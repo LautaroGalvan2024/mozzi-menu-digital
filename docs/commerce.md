@@ -8,6 +8,16 @@ En Productos, las fichas agrupan SKU existentes o nuevos por atributos como mode
 
 La importación acepta columnas opcionales `familia_codigo`, `familia_nombre` y hasta tres pares `atributo_1`/`valor_1`, `atributo_2`/`valor_2`, `atributo_3`/`valor_3`. Ejemplo: `Modelo`/`iPhone 15` y `Color`/`Negro`. Los archivos anteriores no desagrupan SKU; `skip_existing` conserva sus relaciones. El lote confirma productos y agrupaciones en una transacción. El snapshot del pedido conserva los atributos vendidos aunque luego se edite la ficha.
 
+## Revistas, vendedores y reparto por zona
+
+- En **Promociones y difusión**, elegí productos existentes y revisá la revista antes de publicarla. El enlace web muestra los precios vigentes; el PDF guarda los precios y la fecha de descarga. Los banners se pueden programar por canal y llevan al producto, categoría o revista elegidos.
+- En **Vendedores**, cargá el nombre y el número de WhatsApp, elegí menú o tienda y copiá el enlace. Mozzi registra la atribución en Pedidos. Al desactivar a un vendedor, los pedidos históricos conservan su nombre. Si cambió el número, recuperar una confirmación ofrece el contacto general del comercio.
+- En **Zonas de envío**, activá los días de reparto por canal, elegí la hora de corte y revisá el ejemplo antes de guardar. Podés copiar el calendario a otras zonas y excluir fechas puntuales. La confirmación conserva la fecha estimada original, a confirmar por el comercio. El corte de reparto es independiente del horario de atención y de los vencimientos del pedido y del pago.
+- En **Importar productos**, la revisión muestra cuántos se crearían, actualizarían u omitirían, y qué filas requieren atención. **Cambiar columnas** permite ajustar la selección antes de confirmar.
+- En **Stock**, el resumen muestra existencias, reservas y productos agotados. Buscá por nombre o código y abrí el movimiento desde la fila del producto cuando la política de stock lo permita.
+
+La Etapa 1 se activa por módulo en `private.stage_one_features`. Cada control empieza apagado. Para liberar una versión, probá las migraciones, las Edge Functions y el frontend en una copia aislada. En producción, actualizá primero el servidor y verificá el recorrido de WhatsApp antes de activar los módulos para el piloto. Los controles se pueden apagar conservando la configuración y los pedidos ya creados.
+
 ## Promociones por cantidad
 
 En **Promociones y precios especiales → Modalidad por cantidad**, cada SKU permite elegir combos por precio total o un precio unitario desde un mínimo de 2 a 100 unidades. Por ejemplo, con precio regular de $4.500 y mínimo 3 a $4.000 c/u, 2 unidades cuestan $9.000 y 4 cuestan $16.000. Al bajar del mínimo vuelve el precio regular vigente. Si existe una oferta temporal más barata, se conserva ese menor precio. Los adicionales se cobran por unidad.

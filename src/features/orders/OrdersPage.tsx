@@ -16,6 +16,9 @@ import { dateInTimeZone, dateRangeForLocalDates } from '../../lib/timezone'
 import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
+import { useStageOneFeatures } from '../restaurants/stage-one-features'
+import { useSellerDirectory } from '../sellers/seller-directory'
+import { formatDeliveryDate } from '../delivery/delivery-schedule'
 import { adminOrderSchema, statusLabel, type AdminOrderRow } from './orderSchemas'
 import { OrderWhatsAppAction } from './OrderWhatsAppAction'
 import { OrderAcceptAction } from './OrderAcceptAction'
@@ -39,6 +42,8 @@ export function OrdersPage() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const restaurantId = scope.selected?.id
+  const { features } = useStageOneFeatures(restaurantId)
+  const sellers = useSellerDirectory(features.sellers ? restaurantId : undefined)
   const restaurantTimeZone = restaurant.data?.timezone
   useOrderUpdates(restaurantId)
 
@@ -57,6 +62,7 @@ export function OrdersPage() {
   const debouncedSearch = useDebouncedValue(search, 300)
   const status = parsed?.filters.status ?? ''
   const fulfillment = parsed?.filters.fulfillment ?? ''
+  const seller = features.sellers ? parsed?.filters.seller ?? '' : ''
   const page = parsed?.filters.page ?? 0
   const dates = { from: parsed?.filters.from ?? '', to: parsed?.filters.to ?? '' }
   const presets = useMemo(
@@ -93,6 +99,7 @@ export function OrdersPage() {
       page,
       status,
       fulfillment,
+      seller,
       debouncedSearch,
       dates.from,
       dates.to,
@@ -116,6 +123,7 @@ export function OrdersPage() {
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1)
       if (status) request = request.eq('status', status)
       if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
+      if (seller) request = seller === 'direct' ? request.is('seller_id', null) : request.eq('seller_id', seller)
       const filter = orderSearchFilter(debouncedSearch)
       if (filter) request = request.ilike(filter.field, `%${filter.value}%`)
       const { data, error, count } = await request.abortSignal(signal)
@@ -152,6 +160,7 @@ export function OrdersPage() {
           .range(offset, offset + batchSize - 1)
         if (status) request = request.eq('status', status)
         if (fulfillment) request = request.eq('fulfillment_type', fulfillment)
+        if (seller) request = seller === 'direct' ? request.is('seller_id', null) : request.eq('seller_id', seller)
         const filter = orderSearchFilter(debouncedSearch)
         if (filter) request = request.ilike(filter.field, `%${filter.value}%`)
         const { data, error: loadError } = await request
@@ -160,7 +169,11 @@ export function OrdersPage() {
         exported.push(...batch)
         if (batch.length < batchSize) break
       }
-      const report = exported.map(orderCommercialReport)
+      const report = exported.map(order => ({
+        ...orderCommercialReport(order),
+        ...(features.sellers ? { vendedor: order.seller_name ?? '' } : {}),
+        ...(features.delivery_schedule ? { entrega_estimada: order.estimated_delivery_date ?? '' } : {}),
+      }))
       const columns = Object.keys(report[0] ?? {})
       const safe = (value: unknown) => {
         const text = String(value ?? '')
@@ -240,6 +253,14 @@ export function OrdersPage() {
             <option value="pickup">Retiro</option>
           </select>
         </label>
+        {features.sellers && (sellers.data?.length || seller) ? <label className="field min-w-0">
+          <span>Vendedor</span>
+          <select value={seller} onChange={event => updateFilters({ seller: event.target.value || null })}>
+            <option value="">Todos</option>
+            <option value="direct">Venta directa</option>
+            {sellers.data?.map(person => <option key={person.id} value={person.id}>{person.name}{person.active ? '' : ' (inactivo)'}</option>)}
+          </select>
+        </label> : null}
         <div className="flex items-end">
           <button
             className="button-secondary w-full whitespace-nowrap md:w-auto"
@@ -329,10 +350,10 @@ export function OrdersPage() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
-                    <td className="whitespace-nowrap font-display font-bold text-stone-950">{row.display_number}</td>
+                    <td className="font-display font-bold text-stone-950">{row.display_number}{row.seller_name ? <small className="block break-words font-normal text-stone-500">{row.seller_name}</small> : null}</td>
                     <td><strong className="block text-stone-900">{row.customer_name}</strong><small className="text-stone-500">{row.customer_phone}</small></td>
                     <td><AdminOrderStatus order={row} />{row.replaces_order_id?<small className="mt-1 block text-stone-500">Pedido de reemplazo</small>:null}</td>
-                    <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</td>
+                    <td className="text-stone-600">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}{row.estimated_delivery_date ? <small className="block">{formatDeliveryDate(row.estimated_delivery_date)} · estimada</small> : null}</td>
                     <td className="whitespace-nowrap text-right font-bold tabular-nums text-stone-950">{formatMoney(row.total_cents, row.currency_code)}</td>
                     <td className="whitespace-nowrap text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</td>
                     <td><div className="flex flex-wrap items-center justify-end gap-2"><OrderAcceptAction order={acceptanceOrder(row)} /><OrderWhatsAppAction order={row} businessName={businessName} /><Link className="icon-button" to={`/admin/pedidos/${row.id}`} state={detailState} aria-label={`Ver ${row.display_number}`}><Eye className="h-4 w-4" aria-hidden /></Link></div></td>
@@ -356,10 +377,12 @@ export function OrdersPage() {
                   {row.replaces_order_id?<p className="mb-1 text-xs text-amber-800">Pedido de reemplazo · misma operación comercial</p>:null}
                   <p className="truncate font-semibold text-stone-900">{row.customer_name}</p>
                   <p className="mt-0.5 truncate text-xs text-stone-500">{row.customer_phone}</p>
+                  {row.seller_name ? <p className="mt-1 text-xs text-stone-500">Vendedor: {row.seller_name}</p> : null}
                 </div>
                 <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 border-t border-stone-100 pt-3">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-stone-700">{row.fulfillment_type === 'delivery' ? 'Envío' : 'Retiro'}</p>
+                    {row.estimated_delivery_date ? <p className="text-xs text-stone-600">{formatDeliveryDate(row.estimated_delivery_date)} · estimada</p> : null}
                     <p className="mt-0.5 truncate text-xs text-stone-500">{new Date(row.created_at).toLocaleString('es-AR')}</p>
                   </div>
                   <strong className="whitespace-nowrap text-right text-sm tabular-nums text-stone-950">

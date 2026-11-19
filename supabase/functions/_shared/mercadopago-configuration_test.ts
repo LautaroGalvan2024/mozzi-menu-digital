@@ -30,9 +30,13 @@ async function withConfiguration(action: () => Promise<void> | void) {
     APP_ALLOWED_ORIGINS:
       "https://mozzi.example.test,https://mozzi-menu-digital.vercel.app,https://www.mozzi-comercio.online",
     SUPABASE_URL: "https://supabase.example.test",
+    SUPABASE_PUBLIC_URL: undefined,
   };
   const previous = new Map(Object.keys(values).map((name) => [name, Deno.env.get(name)]));
-  for (const [name, value] of Object.entries(values)) Deno.env.set(name, value);
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) Deno.env.delete(name);
+    else Deno.env.set(name, value);
+  }
   try {
     await action();
   } finally {
@@ -184,6 +188,23 @@ Deno.test("payment connection keeps each validated administration origin", async
         `${returnOrigin}/admin/medios-de-pago?mp=cancelled`,
       );
     }
+  });
+});
+
+Deno.test("self-hosted payment connections send Mercado Pago the public callback URL", async () => {
+  await withConfiguration(async () => {
+    Deno.env.set("SUPABASE_URL", "http://api-gw:8000");
+    const { client, calls } = fakeAdmin();
+    await assertRejects(() => beginPaymentConnection(client, actor));
+    assertEquals(calls, []);
+
+    Deno.env.set("SUPABASE_PUBLIC_URL", "https://api.example.test");
+    const { authorizationUrl } = await beginPaymentConnection(client, actor);
+    assertEquals(
+      new URL(authorizationUrl).searchParams.get("redirect_uri"),
+      "https://api.example.test/functions/v1/mercadopago-callback",
+    );
+    assertEquals(calls.length, 1);
   });
 });
 

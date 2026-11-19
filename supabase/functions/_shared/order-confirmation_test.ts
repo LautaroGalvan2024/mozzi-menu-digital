@@ -114,3 +114,45 @@ Deno.test("invalid recovery expiry is rejected without emitting an unusable cred
     (error) => error instanceof ApiError && error.code === "INVALID_DATABASE_RESPONSE",
   );
 });
+
+Deno.test("seller checkout uses the validated destination and keeps the estimated date", () => {
+  const response = orderConfirmationResponse(
+    {
+      ...canonical,
+      order: {
+        ...canonical.order,
+        fulfillmentType: "delivery",
+        deliveryAddress: "Calle de prueba 123",
+        sellerName: "Lucía",
+        sellerWhatsappPhone: "+5493333333333",
+        estimatedDeliveryDate: "2026-10-28",
+      },
+    },
+    "https://menu.example.test",
+    { clientEventToken: null, recoveryToken: randomToken(32) },
+  );
+  assertEquals(response.order.sellerName, "Lucía");
+  assertEquals(response.order.estimatedDeliveryDate, "2026-10-28");
+  assertEquals(new URL(response.whatsapp.url).pathname, "/5493333333333");
+  assert(response.whatsapp.message.includes("Entrega estimada: 28/10/2026"));
+  assert(!response.whatsapp.message.includes("TOMAR PEDIDO"));
+});
+
+Deno.test("an unavailable seller recovers a neutral contact message without customer details", () => {
+  const response = orderConfirmationResponse(
+    {
+      ...canonical,
+      clientEventTokenStored: true,
+      order: { ...canonical.order, sellerName: "Lucía", sellerWhatsappPhone: null },
+    },
+    "https://menu.example.test",
+    {
+      clientEventToken: randomToken(32),
+      recoveryToken: randomToken(32),
+    },
+  );
+  assertEquals(response.sellerContactUnavailable, true);
+  assertEquals(response.clientEventToken, null);
+  assertEquals(new URL(response.whatsapp.url).pathname, "/5491111111111");
+  assertEquals(response.whatsapp.message, "Hola, quisiera consultar por el pedido SYN-000001.");
+});

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 
 const restaurantId = '21000000-0000-4000-8000-000000000001'
 const userId = '22000000-0000-4000-8000-000000000001'
@@ -52,6 +53,7 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean; 
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración Casa Móvil', email: user.email, active: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '26000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = disabledStageOneFeatures
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
     else if (request.method() === 'GET' && path === '/rest/v1/orders') {
       const id = new URL(request.url()).searchParams.get('id')?.replace(/^eq\./, '')
@@ -63,6 +65,7 @@ async function adminFixture(page: Page, options: { inventoryCounting?: boolean; 
       pricing_breakdown_snapshot: { mode: 'unit', unitPriceCents: 1050000, baseSubtotalCents: 1050000, components: [] }, variant_attributes_snapshot: { Modelo: 'iPhone 15', Color: 'Negro' },
     }]
     else if (request.method() === 'GET' && ['/rest/v1/order_events', '/rest/v1/order_item_options'].includes(path)) body = []
+    else if (request.method() === 'GET' && path === '/rest/v1/sellers') body = []
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_by_action') {
       const order = currentOrders.find(order => order.action_id === request.postDataJSON().p_action_id)!
       body = {

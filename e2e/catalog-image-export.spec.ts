@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 import { readFile } from 'node:fs/promises'
 import JSZip from 'jszip'
 
@@ -29,7 +30,8 @@ async function fixture(page: Page) {
   const unexpected: string[] = []
   const exportPages: string[] = []
   await page.route('https://e2e.invalid/**', async route => {
-    const url = new URL(route.request().url())
+    const request = route.request()
+    const url = new URL(request.url())
     const path = url.pathname
     let body: unknown
     let total: number | undefined
@@ -38,6 +40,7 @@ async function fixture(page: Page) {
     else if (path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración', email: user.email, active: true }
     else if (path === '/rest/v1/restaurant_members') body = [{ id: '85000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = disabledStageOneFeatures
     else if (path === '/rest/v1/restaurants') body = restaurant
     else if (['/rest/v1/orders', '/rest/v1/categories', '/rest/v1/product_families'].includes(path)) body = []
     else if (path === '/rest/v1/products') {
@@ -52,7 +55,7 @@ async function fixture(page: Page) {
         body = url.searchParams.has('or') ? rows.slice(0, 1) : rows.slice(0, 50)
         total = url.searchParams.has('or') ? 1 : rows.length
       }
-    } else { unexpected.push(`${route.request().method()} ${path}`); body = [] }
+    } else { unexpected.push(`${request.method()} ${path}`); body = [] }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body), headers: total === undefined ? {} : { 'content-range': `0-${Math.min(total, 50) - 1}/${total}`, 'access-control-expose-headers': 'content-range' } })
   })
   return { unexpected, exportPages }

@@ -2,6 +2,7 @@ import { QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { Outlet, useLocation, useParams } from 'react-router'
 import { CartProvider } from '../features/cart/CartProvider'
+import { SellerReferralBanner, SellerReferralProvider } from '../features/sellers/seller-referral'
 import type { CommerceChannel } from '../lib/commerce-channel'
 import { env } from '../lib/env'
 import { createAppQueryClient } from './query-client'
@@ -40,7 +41,10 @@ export function CommerceProviders() {
     <QueryClientProvider client={commerceQueryClient}>
       <CartProvider>
         <PublicCatalogPreloader />
-        <Outlet />
+        <SellerReferralProvider>
+          <SellerReferralBanner />
+          <Outlet />
+        </SellerReferralProvider>
       </CartProvider>
     </QueryClientProvider>
   )

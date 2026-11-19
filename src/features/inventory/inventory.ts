@@ -5,6 +5,10 @@ export const inventoryItemSchema = z.object({
   productId: z.string().uuid(), code: z.string(), name: z.string(), archived: z.boolean().default(false), initialized: z.boolean(),
   onHand: quantity.nullable(), reserved: quantity.nullable(), available: quantity.nullable(), version: quantity.nullable(),
 })
+export type InventoryItem = z.infer<typeof inventoryItemSchema>
+export function hasNoStock(item: InventoryItem) {
+  return item.initialized && item.available !== null && BigInt(item.available) === 0n
+}
 export const inventoryPolicySchema = z.object({
     mode: z.enum(['never_enabled', 'enforced', 'paused']), version: quantity,
     activatedAt: z.string().nullable(), pausedAt: z.string().nullable(),

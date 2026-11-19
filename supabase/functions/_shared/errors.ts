@@ -17,6 +17,11 @@ type SafeDatabaseError = {
 };
 
 const DATABASE_ERROR_MAP: Readonly<Record<string, SafeDatabaseError>> = {
+  SELLER_NOT_AVAILABLE: {
+    status: 422,
+    code: "SELLER_NOT_AVAILABLE",
+    message: "Ese vendedor ya no está disponible. Podés continuar con el comercio.",
+  },
   CHECKOUT_CHANNEL_INVALID: {
     status: 422,
     code: "CHECKOUT_CHANNEL_INVALID",

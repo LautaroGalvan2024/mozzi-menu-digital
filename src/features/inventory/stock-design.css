@@ -1,0 +1,159 @@
+.stock-design {
+  --stock-line: #e3e8ed;
+  --stock-ink: #202932;
+  --stock-muted: #56616c;
+  --stock-available-bg: #e9f5ed;
+  --stock-available-ink: #25583f;
+  --stock-depleted-bg: #fff0e7;
+  --stock-depleted-ink: #8b3b19;
+  --stock-missing-bg: #eff1f5;
+  --stock-missing-ink: #44516a;
+}
+
+.admin-data-workspace.stock-design { height: auto; overflow: visible; }
+.stock-design > .page-header { margin-bottom: 16px; padding-bottom: 12px; }
+.stock-overview { margin-bottom: 22px; }
+.stock-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--stock-line);
+  border-radius: 12px;
+  background: #fff;
+}
+.stock-status-context, .stock-status-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.stock-status-context { flex: 1 1 200px; }
+.stock-status-context p, .stock-helper { color: var(--stock-muted); font-size: 12px; line-height: 1.5; }
+.stock-status-context p { flex-basis: 100%; }
+.stock-status-label { color: var(--stock-ink); font-size: 14px; font-weight: 640; }
+.stock-mode {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--stock-missing-bg);
+  color: var(--stock-missing-ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+.stock-mode[data-mode='active'] { background: var(--stock-available-bg); color: var(--stock-available-ink); }
+.stock-mode[data-mode='paused'] { background: var(--stock-depleted-bg); color: var(--stock-depleted-ink); }
+.stock-status-actions > * { gap: 7px; }
+.stock-summary { margin-top: 18px; }
+.stock-summary-caption { margin-bottom: 8px; color: var(--stock-ink); font-size: 13px; font-weight: 650; }
+.stock-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stock-metric {
+  --stock-metric-bg: var(--stock-missing-bg);
+  --stock-metric-ink: var(--stock-missing-ink);
+  display: grid;
+  grid-template-areas: 'icon value' 'label label';
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  border: 1px solid var(--stock-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px;
+}
+.stock-metric[data-tone='available'] { --stock-metric-bg: var(--stock-available-bg); --stock-metric-ink: var(--stock-available-ink); }
+.stock-metric[data-tone='depleted'] { --stock-metric-bg: var(--stock-depleted-bg); --stock-metric-ink: var(--stock-depleted-ink); }
+.stock-metric-icon {
+  box-sizing: content-box;
+  grid-area: icon;
+  padding: 7px;
+  border-radius: 9px;
+  background: var(--stock-metric-bg);
+  color: var(--stock-metric-ink);
+}
+.stock-metric dt { grid-area: label; color: var(--stock-muted); font-size: 12px; }
+.stock-metric dd { grid-area: value; min-width: 0; color: var(--stock-ink); font-size: clamp(20px, 4vw, 27px); font-weight: 680; font-variant-numeric: tabular-nums; }
+.stock-helper { margin-top: 8px; }
+.stock-design .stock-balances-header { align-items: end; }
+.stock-balances-header p { margin-top: 4px; color: var(--stock-muted); font-size: 13px; }
+.stock-search { position: relative; }
+.stock-search:has(.stock-clear-search) input { padding-right: 80px; }
+.stock-clear-search {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  min-height: 36px;
+  padding-inline: 9px;
+  border-radius: 5px;
+  color: #8a3c18;
+  font-size: 13px;
+  font-weight: 630;
+}
+.stock-clear-search:hover { background: #fff0e7; }
+.stock-design :is(button, a, input, summary, [tabindex='0']):focus-visible {
+  outline: 2px solid #a44a1d;
+  outline-offset: 2px;
+}
+.stock-result-count { margin-top: 12px; color: var(--stock-muted); font-size: 12px; }
+.stock-empty { display: grid; justify-items: start; gap: 7px; margin-top: 12px; padding: 18px; border: 1px solid var(--stock-line); border-radius: 10px; background: #f7f9fb; color: var(--stock-ink); font-size: 14px; }
+.stock-empty p + p { color: var(--stock-muted); }
+.admin-app .stock-design .admin-inventory-balances { flex: none; overflow: visible; }
+.admin-app .stock-design .admin-inventory-balances > .admin-data-scroll { max-height: 66dvh; flex: none; margin-top: 10px; border: 1px solid var(--stock-line); border-radius: 10px; }
+.admin-app .stock-design .inventory-balances-table { width: 100%; table-layout: fixed; }
+.admin-app .stock-design .inventory-balances-table th:first-child { width: 37%; }
+.admin-app .stock-design .inventory-balances-table th:last-child:has(.sr-only) { width: 118px; }
+.admin-app .stock-design .inventory-balances-table th, .admin-app .stock-design .inventory-balances-table td { min-width: 0; overflow-wrap: anywhere; }
+.admin-app .stock-design .inventory-balances-table td { padding: 8px 12px; }
+.admin-app .stock-design .inventory-balances-table .inventory-virtual-spacer td { padding: 0; }
+.stock-design .inventory-product > .stock-product-name { display: block; overflow: hidden; color: var(--stock-ink); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.stock-design .inventory-product > .inventory-code { display: block; overflow: hidden; color: var(--stock-muted); font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.stock-archived { display: inline-block; color: var(--stock-muted); font-size: 11px; }
+.stock-design .inventory-quantity { font-variant-numeric: tabular-nums; }
+.stock-design .stock-available { color: var(--stock-available-ink); font-size: 16px; font-weight: 700; }
+.stock-design .stock-available-depleted { color: var(--stock-depleted-ink); }
+.stock-quantity-state {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--stock-missing-bg);
+  color: var(--stock-missing-ink);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.stock-quantity-out { background: var(--stock-depleted-bg); color: var(--stock-depleted-ink); }
+.stock-design .inventory-edit-link {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid #ecccb9;
+  border-radius: 7px;
+  background: #fffaf7;
+  color: #8a3c18;
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+.stock-design .inventory-edit-link:hover { background: #fff0e7; }
+.stock-design .stock-tools-heading { margin-top: 24px; color: var(--stock-ink); font-size: 17px; font-weight: 650; }
+.stock-design .stock-tools-heading + .admin-disclosure { margin-top: 10px; }
+
+@media (max-width: 639px) {
+  .stock-status-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .stock-status-actions > :only-child, .stock-status-actions > .button-primary { grid-column: 1 / -1; }
+  .stock-status-actions > * { min-height: 44px; justify-content: center; }
+  .stock-metrics { gap: 6px; }
+  .stock-metric { grid-template-areas: 'value' 'label'; grid-template-columns: minmax(0, 1fr); padding: 9px 8px; }
+  .stock-metric-icon { display: none; }
+  .stock-metric dt { font-size: 11px; line-height: 1.4; }
+  .admin-app .stock-design .admin-inventory-balances > .admin-data-scroll { border: 0; border-radius: 0; padding: 1px 2px; scrollbar-gutter: auto; }
+  .admin-app .stock-design .inventory-balances-table tbody tr[data-inventory-row] { grid-template-rows: 37px 61px minmax(0, 1fr); gap: 7px 6px; border: 1px solid var(--stock-line); border-radius: 10px; padding: 10px 9px 9px; }
+  .admin-app .stock-design .inventory-balances-table td { padding: 0 0 0 4px; }
+  .admin-app .stock-design .inventory-balances-table td.inventory-product { display: grid; grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) auto; align-content: start; column-gap: 8px; }
+  .stock-design .inventory-product > .inventory-code { grid-row: 2; grid-column: 1 / -1; }
+  .stock-design .stock-archived { white-space: nowrap; }
+  .admin-app .stock-design .inventory-balances-table td.stock-available { padding: 3px 4px; border-radius: 6px; background: var(--stock-available-bg); }
+  .admin-app .stock-design .inventory-balances-table td.stock-available-depleted { background: var(--stock-depleted-bg); }
+  .admin-app .stock-design .inventory-balances-table td.stock-available-missing { background: var(--stock-missing-bg); }
+  .admin-app .stock-design .inventory-balances-table .inventory-edit-link { min-height: 44px; }
+  .admin-app .stock-design .inventory-count input { min-height: 40px; }
+}

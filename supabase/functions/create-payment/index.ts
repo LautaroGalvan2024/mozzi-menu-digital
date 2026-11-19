@@ -1,21 +1,17 @@
-import { getRateLimitSecret, getSupabaseUrl } from "../_shared/config.ts";
-import { hmacSha256Hex, randomToken, sha256Hex } from "../_shared/crypto.ts";
+import { getSupabasePublicUrl } from "../_shared/config.ts";
+import { randomToken, sha256Hex } from "../_shared/crypto.ts";
 import { z } from "../_shared/deps.ts";
 import { ApiError } from "../_shared/errors.ts";
 import { safeLog, serve } from "../_shared/http.ts";
 import { assertCheckoutUrl } from "../_shared/mercadopago-core.ts";
 import {
   beginPaymentCheckout,
-  createAdminClient,
   paymentReturnUrl,
   providerLiveMode,
   providerRequest,
   rpc,
 } from "../_shared/mercadopago.ts";
-import { assertOrderRateLimitAllowed } from "../_shared/rate-limit.ts";
-import { clientIp } from "../_shared/request-meta.ts";
-import { createOrderSchema, parseInput } from "../_shared/schemas.ts";
-import { verifyTurnstileIfEnabled } from "../_shared/turnstile.ts";
+import { prepareOrder } from "../_shared/prepare-order.ts";
 
 const beginSchema = z.object({
   orderId: z.string().uuid(),
@@ -38,32 +34,14 @@ serve({
   name: "create-payment",
   maxBodyBytes: 192 * 1024,
   handler: async (request, context) => {
-    const input = parseInput(createOrderSchema, await context.readJson());
-    if (input.channel !== "store" || input.checkoutMode !== "online") {
-      throw new ApiError(422, "CHECKOUT_MODE_INVALID", "Elegí el pago online de la tienda.");
-    }
-    const age = Date.now() - Date.parse(input.antiSpam.formStartedAt);
-    if (
-      input.antiSpam.honeypot?.trim() || !Number.isFinite(age) || age < 1000 || age > 7_200_000
-    ) {
-      throw new ApiError(422, "STALE_FORM", "Actualizá el formulario y volvé a intentar.");
-    }
-    await verifyTurnstileIfEnabled(input.antiSpam.turnstileToken);
-    const [ipHash, phoneHash] = await Promise.all([
-      hmacSha256Hex(getRateLimitSecret(), `ip:${clientIp(request)}`),
-      hmacSha256Hex(getRateLimitSecret(), `phone:${input.customer.phone}`),
-    ]);
-    const admin = createAdminClient();
-    assertOrderRateLimitAllowed(
-      await rpc(admin, "check_order_rate_limits", {
-        p_restaurant_slug: input.restaurantSlug,
-        p_ip_hash: ipHash,
-        p_phone_hash: phoneHash,
-      }),
+    const { admin, business, ipHash, phoneHash } = await prepareOrder(
+      await context.readJson(),
+      request,
+      "online",
     );
+    const notificationUrl = `${getSupabasePublicUrl()}/functions/v1/mercadopago-webhook`;
     const recoveryToken = randomToken(32);
     const statusHash = await sha256Hex(recoveryToken);
-    const { antiSpam: _antiSpam, ...business } = input;
     const checkout = await beginPaymentCheckout(admin, {
       request: business,
       ipHash,
@@ -81,7 +59,7 @@ serve({
           "Estamos preparando este pago. Esperá unos segundos y reintentá la misma compra.",
         );
       }
-      const returnUrl = paymentReturnUrl(context.origin, input.restaurantSlug, attempt.actionId);
+      const returnUrl = paymentReturnUrl(context.origin, business.restaurantSlug, attempt.actionId);
       const preference = z.object({
         id: z.string(),
         init_point: z.string(),
@@ -99,7 +77,7 @@ serve({
           }],
           back_urls: { success: returnUrl, pending: returnUrl, failure: returnUrl },
           auto_return: "approved",
-          notification_url: `${getSupabaseUrl()}/functions/v1/mercadopago-webhook`,
+          notification_url: notificationUrl,
           expires: true,
           expiration_date_from: new Date().toISOString(),
           expiration_date_to: attempt.expiresAt,

@@ -4,6 +4,7 @@ import { NavLink, Navigate, Outlet, useLocation } from 'react-router'
 import { SUPER_ADMIN_HOME, superAdminEntryDestination } from '../features/auth/access-routing'
 import { useAuth } from '../features/auth/AuthProvider'
 import { useRestaurantScope } from '../features/restaurants/RestaurantScope'
+import { useStageOneFeatures } from '../features/restaurants/stage-one-features'
 import { MozziBrand } from './MozziBrand'
 
 const mainLinks = [
@@ -17,6 +18,7 @@ const secondaryGroups = [
   { label: 'Organizar catálogo', icon: BookOpen, links: [
     { to: '/admin/catalogo/categorias', label: 'Categorías', icon: BookOpen },
     { to: '/admin/catalogo/importar', label: 'Importar productos', icon: Upload },
+    { to: '/admin/promociones', label: 'Promociones y difusión', icon: BadgeDollarSign, feature: 'campaigns' },
   ] },
   { label: 'Configuración', icon: Settings, links: [
     { to: '/admin/configuracion', label: 'Datos del comercio', icon: Store },
@@ -25,6 +27,7 @@ const secondaryGroups = [
     { to: '/admin/zonas-de-envio', label: 'Zonas de envío', icon: MapPinned },
     { to: '/admin/marca', label: 'Logo y portada', icon: Palette },
     { to: '/admin/usuarios', label: 'Equipo y permisos', icon: Users },
+    { to: '/admin/vendedores', label: 'Vendedores', icon: Users, feature: 'sellers' },
   ] },
 ] as const
 const initials = (name: string | undefined) => (name ?? 'M').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('') || 'M'
@@ -37,7 +40,9 @@ export function AdminLayout() {
   const sidebar = useRef<HTMLElement>(null)
   const menuButton = useRef<HTMLButtonElement>(null)
   const isManager = scope.selected?.role === 'order_manager'
-  const allLinks = [...mainLinks, ...secondaryGroups.flatMap(group => group.links.map(link => ({ to: link.to, label: link.label }))), { to: '/admin/seguridad', label: 'Seguridad' }]
+  const { features } = useStageOneFeatures(isManager ? undefined : scope.selected?.id)
+  const allowedGroups = secondaryGroups.map(group => ({ ...group, links: group.links.filter(link => !('feature' in link) || features[link.feature]) }))
+  const allLinks = [...mainLinks, ...allowedGroups.flatMap(group => group.links.map(link => ({ to: link.to, label: link.label }))), { to: '/admin/seguridad', label: 'Seguridad' }]
   const currentSection = [...allLinks].sort((a, b) => b.to.length - a.to.length).find(link => location.pathname === link.to || (link.to !== '/admin' && location.pathname.startsWith(`${link.to}/`)))?.label ?? 'Administración'
 
   useEffect(() => {
@@ -76,7 +81,7 @@ export function AdminLayout() {
       </div>
       <nav className="admin-navigation" aria-label="Administración">
         <div className="admin-nav-primary">{mainLinks.filter(link => !('adminOnly' in link) || !isManager).map(({ to, label, icon: Icon, ...link }) => <NavLink key={to} to={to} end={'end' in link ? link.end : false} onClick={() => setOpen(false)} className={({ isActive }) => `admin-nav-link ${isActive ? 'is-active' : ''}`}><Icon aria-hidden />{label}</NavLink>)}</div>
-        {!isManager ? <div className="admin-nav-secondary">{secondaryGroups.map(group => {
+        {!isManager ? <div className="admin-nav-secondary">{allowedGroups.map(group => {
           const active = group.links.some(link => location.pathname === link.to)
           const Icon = group.icon
           return <details className={`admin-nav-group ${active ? 'has-active' : ''}`} key={`${group.label}:${active}`} open={active || undefined}>

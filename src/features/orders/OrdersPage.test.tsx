@@ -42,6 +42,8 @@ vi.mock('../restaurants/useRestaurant', () => ({
   }),
 }))
 
+vi.mock('../restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { sellers: false, delivery_schedule: false } }) }))
+
 function emptyOrdersRequest(data: unknown[] = []) {
   const request: Record<string, unknown> & PromiseLike<{ data: unknown[]; error: null; count: number }> = {
     then(resolve, reject) {

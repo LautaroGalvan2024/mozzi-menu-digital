@@ -1,0 +1,29 @@
+services:
+  auth:
+    depends_on:
+      auth-templates:
+        condition: service_healthy
+    environment:
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://auth-templates:8080/invite-es.html
+      GOTRUE_MAILER_SUBJECTS_INVITE: Te invitaron a Mozzi Comercio
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://auth-templates:8080/recovery-es.html
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: Restablecé tu contraseña de Mozzi Comercio
+
+  auth-templates:
+    image: caddy:2.11.9-alpine
+    command: ['caddy', 'file-server', '--root', '/templates', '--listen', ':8080']
+    restart: unless-stopped
+    read_only: true
+    user: '65534:65534'
+    volumes:
+      - type: bind
+        source: ./volumes/auth-templates
+        target: /templates
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO /dev/null http://127.0.0.1:8080/invite-es.html && wget -qO /dev/null http://127.0.0.1:8080/recovery-es.html']
+      interval: 15s
+      timeout: 3s
+      retries: 3

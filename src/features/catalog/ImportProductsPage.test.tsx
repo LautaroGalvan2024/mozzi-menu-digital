@@ -14,12 +14,15 @@ const mocks = vi.hoisted(() => ({
   uploadImage: vi.fn(),
   parseImportSheets: vi.fn(),
   readXlsxFile: vi.fn(),
+  loadCatalog: vi.fn(),
 }))
 
 vi.mock('../../lib/import-file', () => ({
   readImportFile: mocks.readXlsxFile,
   MAX_SPREADSHEET_BYTES: 10 * 1024 * 1024,
 }))
+vi.mock('../../lib/import-review', async importActual => ({ ...await importActual<typeof import('../../lib/import-review')>(), loadImportCatalog: mocks.loadCatalog }))
+vi.mock('../restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { assisted_import: true } }) }))
 
 vi.mock('../../lib/import-products', () => ({
   csvRecordsToSheet: vi.fn(),
@@ -97,6 +100,7 @@ describe('catalog import file state', () => {
     localStorage.clear()
     Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: (_name: string, callback: () => unknown) => Promise.resolve(callback()) } })
     mocks.invoke.mockReset()
+    mocks.loadCatalog.mockReset().mockResolvedValue([])
     mocks.rpc.mockReset().mockResolvedValue({ data: null, error: null })
     mocks.from.mockReset()
     mocks.storageFrom.mockReset()
@@ -135,6 +139,7 @@ describe('catalog import file state', () => {
     [422, 'IMPORT_PRODUCT_NOT_FOUND', 'update_only'],
   ])('allows an explicit mode correction after atomic HTTP %s / %s rollback', async (status, code, rejectedMode) => {
     const user = userEvent.setup()
+    if (rejectedMode === 'update_only') mocks.loadCatalog.mockResolvedValue([{ id: '10000000-0000-4000-8000-000000000002', restaurant_id: '10000000-0000-4000-8000-000000000001', code: 'P-1', deleted_at: null }])
     mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: new Response(JSON.stringify({ error: { code, message: 'El modo elegido no permite importar esta fila.' } }), { status }) } })
       .mockImplementationOnce((_name, request) => Promise.resolve({ data: {
         batchId: request.body.batchId, summary: { created: 0, updated: 1, skipped: 0 }, errors: [],

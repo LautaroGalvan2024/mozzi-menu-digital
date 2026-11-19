@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
+import { disabledStageOneFeatures } from './stage-one-fixture'
 
 const restaurantId = '71000000-0000-4000-8000-000000000001'
 const userId = '72000000-0000-4000-8000-000000000001'
@@ -23,7 +24,7 @@ interface ImportRequest {
 }
 
 interface ImageProduct { id: string; code: string; name: string; image_path: string | null }
-async function importFixture(page: Page, imageProducts: ImageProduct[] = []) {
+async function importFixture(page: Page, imageProducts: ImageProduct[] = [], catalogFailures = 0) {
   const restaurant = {
     id: restaurantId, name: 'Almacén de prueba', trade_name: 'Almacén de prueba', slug: 'almacen-prueba', description: '', status: 'active',
     whatsapp_phone_e164: '+5493492123456', address: 'San Martín 123', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', currency_code: 'ARS', locale: 'es-AR',
@@ -47,7 +48,7 @@ async function importFixture(page: Page, imageProducts: ImageProduct[] = []) {
   await page.routeWebSocket('wss://e2e.invalid/**', socket => socket.close())
   const unexpected: string[] = []
   const submissions: ImportRequest[] = []
-  const knownCodes = new Map<string, string>()
+  const knownCodes = new Map<string, string>(imageProducts.map(product => [product.code, product.id]))
   const results = new Map<string, unknown>()
   const imageUpdates: { id: string; image_path: string }[] = []
   const imageUploads: string[] = []
@@ -59,10 +60,20 @@ async function importFixture(page: Page, imageProducts: ImageProduct[] = []) {
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración de prueba', email: user.email, active: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '76000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role: 'restaurant_admin', status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role: 'restaurant_admin', status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = { ...disabledStageOneFeatures, assisted_import: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurants') body = restaurant
     else if (request.method() === 'GET' && path === '/rest/v1/products') {
-      const after = new URL(request.url()).searchParams.get('id')
-      body = after?.startsWith('gt.') ? imageProducts.filter(product => product.id > after.slice(3)) : imageProducts
+      const params = new URL(request.url()).searchParams
+      expect(params.get('restaurant_id')).toBe(`eq.${restaurantId}`)
+      const after = params.get('id')
+      const catalogReview = params.get('select')?.includes('deleted_at')
+      if (catalogReview && catalogFailures > 0) {
+        catalogFailures -= 1
+        await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ message: 'Catalog lookup failed' }) })
+        return
+      }
+      const products = catalogReview ? [...knownCodes].map(([code, id]) => ({ id, code, restaurant_id: restaurantId, deleted_at: null })).sort((a, b) => a.id.localeCompare(b.id)) : imageProducts
+      body = after?.startsWith('gt.') ? products.filter(product => product.id > after.slice(3)) : products
     }
     else if (request.method() === 'GET' && ['/rest/v1/orders', '/rest/v1/categories'].includes(path)) body = []
     else if (request.method() === 'POST' && path.startsWith('/storage/v1/object/restaurant-assets/')) { imageUploads.push(path); body = { Key: path.slice('/storage/v1/object/'.length) } }
@@ -87,10 +98,12 @@ async function importFixture(page: Page, imageProducts: ImageProduct[] = []) {
       expect(input.restaurantId).toBe(restaurantId)
       submissions.push(input)
       const products = input.products.map(product => {
-        const existingId = knownCodes.get(product.code)
+        const existingCode = [...knownCodes.keys()].find(code => code.trim().toLowerCase() === product.code.trim().toLowerCase())
+        const existingId = existingCode ? knownCodes.get(existingCode) : undefined
         const id = existingId ?? `75000000-0000-4000-8000-${String(knownCodes.size + 1).padStart(12, '0')}`
-        knownCodes.set(product.code, id)
-        return { rowRef: product.rowRef, code: product.code, id, outcome: existingId ? 'updated' : 'created' }
+        const code = existingCode ?? product.code
+        knownCodes.set(code, id)
+        return { rowRef: product.rowRef, code, id, outcome: existingId ? 'updated' : 'created' }
       })
       body = { batchId: input.batchId, products, errors: [], summary: { created: products.filter(product => product.outcome === 'created').length, updated: products.filter(product => product.outcome === 'updated').length, skipped: 0 } }
       results.set(input.batchId, body)
@@ -169,6 +182,12 @@ test.describe('flexible catalog import', () => {
       await expect(page.getByRole('heading', { name: 'Importación masiva' })).toBeVisible()
       const uploader = page.locator('input[type="file"][accept^=".xlsx"]')
       await uploader.setInputFiles(reportFile())
+      await expect(page.getByRole('heading', { name: 'Resumen del archivo' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Cambiar columnas', exact: true })).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByLabel('Resultado previsto de la importación').locator('p').filter({ hasText: 'para crear' })).toHaveText('3para crear')
+      await expect(page.getByLabel('Resultado previsto de la importación').locator('p').filter({ hasText: 'para actualizar' })).toHaveText('0para actualizar')
+      await page.screenshot({ path: `.tmp/catalog-import-${viewport.name}-summary.png`, fullPage: true })
+      await page.getByRole('button', { name: 'Cambiar columnas', exact: true }).click()
       await expect(page.getByRole('heading', { name: 'Relacioná tus columnas' })).toBeVisible()
       await expect(page.getByLabel('Fila de encabezados', { exact: true })).toHaveValue('4')
       await expect(page.getByLabel('Columna para Nombre', { exact: true })).toHaveValue('7')
@@ -203,6 +222,10 @@ test.describe('flexible catalog import', () => {
       // A new daily file reuses mapping, not the prior price values or batch.
       await uploader.setInputFiles(reportFile(true))
       await expect(page.getByRole('status').filter({ hasText: 'Reconocimos el formato guardado' })).toContainText('Sistema del almacén')
+      await expect(page.getByRole('button', { name: 'Cambiar columnas', exact: true })).toHaveAttribute('aria-expanded', 'false')
+      await expect(page.getByLabel('Resultado previsto de la importación').locator('p').filter({ hasText: 'para actualizar' })).toHaveText('3para actualizar')
+      await expect(page.getByLabel('Resultado previsto de la importación').locator('p').filter({ hasText: 'para crear' })).toHaveText('0para crear')
+      await page.getByRole('button', { name: 'Cambiar columnas', exact: true }).click()
       await expect(page.getByLabel('Dónde están las categorías')).toHaveValue('section')
       await page.getByRole('button', { name: 'Revisar importación', exact: true }).click()
       await expect(page.getByRole('row').filter({ hasText: 'Arroz 1kg' })).toContainText('1600.50')
@@ -242,6 +265,37 @@ test.describe('flexible catalog import', () => {
     await page.getByRole('button', { name: 'Importar catálogo', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Importación terminada' })).toContainText('1 creados')
     expect(requests.submissions[0]?.products).toEqual([{ rowRef: '2', code: 'A-1', name: 'Yerba 1kg', category: 'Almacén', basePriceCents: 250000 }])
+    expect(requests.unexpected).toEqual([])
+  })
+
+  test('retries a failed catalog lookup and checks normalized SKU conflicts before confirmation', async ({ page }) => {
+    const requests = await importFixture(page, [{ id: '75000000-0000-4000-8000-000000000001', code: 'abc', name: 'Arroz', image_path: null }], 1)
+    await page.goto('/admin/catalogo/importar')
+    await page.locator('input[type="file"][accept^=".xlsx"]').setInputFiles({
+      name: 'catalogo.csv', mimeType: 'text/csv', buffer: Buffer.from('codigo;nombre;categoria;precio\n ABC ;Arroz actualizado;Almacén;100\n000123;Harina;Almacén;80'),
+    })
+    await expect(page.getByRole('alert')).toContainText('No pudimos comprobar los códigos')
+    const summary = page.getByLabel('Resultado previsto de la importación')
+    await expect(summary.locator('p').filter({ hasText: 'para crear' })).toHaveText('—para crear')
+    await expect(page.getByRole('button', { name: 'Revisar importación', exact: true })).toBeDisabled()
+    await page.getByRole('button', { name: 'Reintentar comprobación', exact: true }).click()
+    await expect(summary.locator('p').filter({ hasText: 'para crear' })).toHaveText('1para crear')
+    await expect(summary.locator('p').filter({ hasText: 'para actualizar' })).toHaveText('1para actualizar')
+    await page.getByLabel('Cómo importar').selectOption('create_only')
+    await expect(page.getByText(/El producto ya existe/)).toBeVisible()
+    await expect(page.getByLabel('Filas del archivo')).toHaveValue('issues')
+    await expect(summary.locator('p').filter({ hasText: 'filas para revisar' })).toHaveText('1filas para revisar')
+    await expect(page.getByRole('button', { name: 'Revisar importación', exact: true })).toBeDisabled()
+    expect(requests.submissions).toHaveLength(0)
+    await page.getByLabel('Cómo importar').selectOption('skip_existing')
+    await expect(summary.locator('p').filter({ hasText: 'existentes que se omitirán' })).toHaveText('1existentes que se omitirán')
+    await page.getByLabel('Cómo importar').selectOption('create_or_update')
+    await page.getByRole('button', { name: 'Revisar importación', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Vista previa' })).toBeVisible()
+    expect(requests.submissions).toHaveLength(0)
+    await page.getByRole('button', { name: 'Importar catálogo', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'Importación terminada' })).toContainText('1 creados, 1 actualizados')
+    expect(requests.knownCodes.size).toBe(2)
     expect(requests.unexpected).toEqual([])
   })
 })

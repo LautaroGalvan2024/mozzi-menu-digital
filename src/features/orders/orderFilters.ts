@@ -6,6 +6,7 @@ import {
   startOfLocalWeek,
 } from '../../lib/timezone'
 import type { AdminOrderRow } from './orderSchemas'
+import { z } from 'zod'
 
 export type OrderDatePreset = 'today' | 'yesterday' | 'week' | 'last15' | 'month'
 
@@ -24,6 +25,7 @@ export type OrderListFilters = {
   from: string
   to: string
   page: number
+  seller?: string
 }
 
 const orderStatuses = new Set<AdminOrderRow['status']>([
@@ -82,14 +84,17 @@ export function parseOrderListFilters(params: URLSearchParams, today: string): {
   const from = validRange ? requestedFrom : today
   const to = validRange ? requestedTo! : today
   const search = (params.get('q') ?? '').slice(0, 120)
+  const sellerValue = params.get('seller')
+  const seller = sellerValue && (sellerValue === 'direct' || z.uuid().safeParse(sellerValue).success) ? sellerValue : ''
 
   const canonical = new URLSearchParams()
   if (search) canonical.set('q', search)
   if (status) canonical.set('status', status)
   if (fulfillment) canonical.set('fulfillment', fulfillment)
+  if (seller) canonical.set('seller', seller)
   canonical.set('from', from)
   canonical.set('to', to)
   if (page > 0) canonical.set('page', String(page + 1))
 
-  return { filters: { search, status, fulfillment, from, to, page }, canonical }
+  return { filters: { search, status, fulfillment, from, to, page, ...(seller ? { seller } : {}) }, canonical }
 }

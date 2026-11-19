@@ -86,6 +86,8 @@ async function mockCatalog(page: Page) {
         body: path.includes('/cover-') ? lightCoverImage : lightProductImage,
       })
       return
+    } else if (path === '/rest/v1/rpc/get_public_campaigns') {
+      body = { items: [], serverNow: new Date().toISOString(), validUntil: null }
     } else if (path === '/rest/v1/rpc/get_public_menu') {
       body = { ...commonMeta, categories: [{ ...category, products }] }
     } else if (path === '/rest/v1/rpc/get_public_catalog_meta') {

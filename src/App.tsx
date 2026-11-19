@@ -9,6 +9,7 @@ const AdminLayout = lazy(() => import('./components/AdminLayout').then((module) 
 const SuperAdminLayout = lazy(() => import('./components/SuperAdminLayout').then((module) => ({ default: module.SuperAdminLayout })))
 const RequireAuth = lazy(() => import('./features/auth/RequireAuth').then((module) => ({ default: module.RequireAuth })))
 const RequireRestaurantAdmin = lazy(() => import('./features/auth/RequireRestaurantAdmin').then((module) => ({ default: module.RequireRestaurantAdmin })))
+const RequireStageOneFeature = lazy(() => import('./features/restaurants/RequireStageOneFeature').then((module) => ({ default: module.RequireStageOneFeature })))
 const LandingPage = lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage').then((module) => ({ default: module.NotFoundPage })))
 const LoginPage = lazy(() => import('./features/auth/LoginPage').then((module) => ({ default: module.LoginPage })))
@@ -24,6 +25,8 @@ const RestaurantSettingsPage = lazy(() => import('./features/restaurants/Restaur
 const StoreSettingsPage = lazy(() => import('./features/restaurants/StoreSettingsPage').then((module) => ({ default: module.StoreSettingsPage })))
 const BrandPage = lazy(() => import('./features/restaurants/BrandPage').then((module) => ({ default: module.BrandPage })))
 const UsersPage = lazy(() => import('./features/restaurants/UsersPage').then((module) => ({ default: module.UsersPage })))
+const SellersPage = lazy(() => import('./features/sellers/SellersPage').then((module) => ({ default: module.SellersPage })))
+const CampaignsPage = lazy(() => import('./features/campaigns/CampaignsPage').then((module) => ({ default: module.CampaignsPage })))
 const HoursPage = lazy(() => import('./features/business-hours/HoursPage').then((module) => ({ default: module.HoursPage })))
 const CategoriesPage = lazy(() => import('./features/catalog/CategoriesPage').then((module) => ({ default: module.CategoriesPage })))
 const ProductsPage = lazy(() => import('./features/catalog/ProductsPage').then((module) => ({ default: module.ProductsPage })))
@@ -73,10 +76,12 @@ const router = createBrowserRouter([
     },
     children: [
       { path: '/r/:restaurantSlug', lazy: async () => { const module = await import('./features/public-menu/PublicMenuPage'); return { Component: module.PublicMenuPage } } },
+      { path: '/r/:restaurantSlug/revista/:campaignSlug', lazy: async () => { const module = await import('./features/campaigns/PublicCampaignPage'); return { Component: module.PublicCampaignPage } } },
       { path: '/r/:restaurantSlug/carrito', lazy: async () => { const module = await import('./features/cart/CartPage'); return { Component: module.CartPage } } },
       { path: '/r/:restaurantSlug/checkout', lazy: async () => { const module = await import('./features/checkout/CheckoutPage'); return { Component: module.CheckoutPage } } },
       { path: '/r/:restaurantSlug/pedido-generado', lazy: async () => { const module = await import('./features/checkout/OrderGeneratedPage'); return { Component: module.OrderGeneratedPage } } },
       { path: '/t/:restaurantSlug', lazy: async () => { const module = await import('./features/store/PublicStorePage'); return { Component: module.PublicStorePage } } },
+      { path: '/t/:restaurantSlug/revista/:campaignSlug', lazy: async () => { const module = await import('./features/campaigns/PublicCampaignPage'); return { Component: module.PublicCampaignPage } } },
       { path: '/t/:restaurantSlug/producto/:productId', lazy: async () => { const module = await import('./features/store/PublicStorePage'); return { Component: module.PublicStorePage } } },
       { path: '/t/:restaurantSlug/carrito', lazy: async () => { const module = await import('./features/cart/CartPage'); return { Component: module.CartPage } } },
       { path: '/t/:restaurantSlug/checkout', lazy: async () => { const module = await import('./features/checkout/CheckoutPage'); return { Component: module.CheckoutPage } } },
@@ -126,6 +131,8 @@ const router = createBrowserRouter([
                       { path: 'catalogo/productos/:productId', element: route(<ProductEditorPage />) },
                       { path: 'catalogo/importar', element: route(<ImportProductsPage />) },
                       { path: 'usuarios', element: route(<UsersPage />) },
+                      { element: route(<RequireStageOneFeature feature="sellers" />), children: [{ path: 'vendedores', element: route(<SellersPage />) }] },
+                      { element: route(<RequireStageOneFeature feature="campaigns" />), children: [{ path: 'promociones', element: route(<CampaignsPage />) }] },
                     ],
                   },
                 ],

@@ -761,8 +761,46 @@ export type Database = {
           },
         ]
       }
+      sellers: {
+        Row: {
+          id: string
+          restaurant_id: string
+          name: string
+          whatsapp_phone: string
+          image_path: string | null
+          active: boolean
+          menu_enabled: boolean
+          store_enabled: boolean
+          created_at: string
+        }
+        Insert: {
+          id: string
+          restaurant_id: string
+          name: string
+          whatsapp_phone: string
+          image_path?: string | null
+          active?: boolean
+          menu_enabled?: boolean
+          store_enabled?: boolean
+          created_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["sellers"]["Insert"]>
+        Relationships: [
+          {
+            foreignKeyName: "sellers_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       orders: {
         Row: {
+          estimated_delivery_date: string | null
+          seller_id: string | null
+          seller_name: string | null
+          seller_whatsapp_phone: string | null
           accepted_at: string | null
           accepted_by: string | null
           action_id: string
@@ -818,6 +856,10 @@ export type Database = {
           payment_status: string
         }
         Insert: {
+          estimated_delivery_date?: string | null
+          seller_id?: string | null
+          seller_name?: string | null
+          seller_whatsapp_phone?: string | null
           accepted_at?: string | null
           accepted_by?: string | null
           action_id?: string
@@ -873,6 +915,10 @@ export type Database = {
           payment_status?: string
         }
         Update: {
+          estimated_delivery_date?: string | null
+          seller_id?: string | null
+          seller_name?: string | null
+          seller_whatsapp_phone?: string | null
           accepted_at?: string | null
           accepted_by?: string | null
           action_id?: string
@@ -928,6 +974,13 @@ export type Database = {
           payment_status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "orders_seller_tenant_fkey"
+            columns: ["restaurant_id", "seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["restaurant_id", "id"]
+          },
           {
             foreignKeyName: "orders_delivery_zone_id_restaurant_id_fkey"
             columns: ["delivery_zone_id", "restaurant_id"]
@@ -1586,6 +1639,55 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_admin_campaigns: {
+        Args: { p_restaurant_id: string }
+        Returns: Json
+      }
+      save_campaign: {
+        Args: { p_restaurant_id: string; p_id: string; p_request_id: string; p_expected_version: number | null; p_document: Json }
+        Returns: Json
+      }
+      get_public_campaigns: {
+        Args: { p_restaurant_slug: string; p_channel?: string }
+        Returns: Json
+      }
+      get_public_campaign: {
+        Args: { p_restaurant_slug: string; p_campaign_slug: string; p_channel?: string }
+        Returns: Json
+      }
+      get_delivery_schedule_policies: {
+        Args: { p_restaurant_id: string }
+        Returns: Json
+      }
+      get_delivery_estimate: {
+        Args: { p_restaurant_slug: string; p_delivery_zone_id: string; p_channel?: string }
+        Returns: Json
+      }
+      save_delivery_schedule_policy: {
+        Args: { p_restaurant_id: string; p_zone_id: string; p_policy: Json; p_copy_zone_ids?: string[]; p_expected_revision?: number | null }
+        Returns: Json
+      }
+      save_delivery_zone_settings: {
+        Args: { p_restaurant_id: string; p_zone_id: string; p_zone: Json; p_policy: Json; p_copy_zone_ids?: string[]; p_expected_revision?: number | null }
+        Returns: Json
+      }
+      get_public_seller: {
+        Args: { p_restaurant_slug: string; p_channel: string; p_seller_id: string }
+        Returns: Json
+      }
+      save_seller: {
+        Args: {
+          p_restaurant_id: string
+          p_id: string
+          p_name: string
+          p_whatsapp_phone: string
+          p_image_path: string | null
+          p_active: boolean
+          p_menu_enabled: boolean
+          p_store_enabled: boolean
+        }
+        Returns: string
+      }
       find_auth_user_by_email: {
         Args: { p_email: string }
         Returns: string | null
@@ -1918,6 +2020,7 @@ export type Database = {
         Returns: Json
       }
       get_order_by_action: { Args: { p_action_id: string }; Returns: Json }
+      get_stage_one_features: { Args: { p_restaurant_id: string }; Returns: Json }
       get_order_metrics: {
         Args: { p_from: string; p_restaurant_id: string; p_to: string }
         Returns: Json

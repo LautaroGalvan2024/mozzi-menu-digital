@@ -11,8 +11,9 @@ const secondProduct = '20000000-0000-4000-8000-000000000002'
 const count = '30000000-0000-4000-8000-000000000001'
 const externalOperation = '40000000-0000-4000-8000-000000000001'
 const receiptOperation = '40000000-0000-4000-8000-000000000002'
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), mutate: vi.fn(), from: vi.fn(), references: vi.fn(), role: 'restaurant_admin', inventory: {} as Record<string, unknown> }))
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), mutate: vi.fn(), from: vi.fn(), references: vi.fn(), role: 'restaurant_admin', redesigned: false, inventory: {} as Record<string, unknown> }))
 vi.mock('../restaurants/RestaurantScope', () => ({ useRestaurantScope: () => ({ selected: { id: '10000000-0000-4000-8000-000000000001', role: mocks.role } }) }))
+vi.mock('../restaurants/stage-one-features', () => ({ useStageOneFeatures: () => ({ features: { stock_design: mocks.redesigned } }) }))
 vi.mock('../../lib/supabase/client', () => ({ supabase: { rpc: mocks.rpc, from: mocks.from } }))
 function view() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><MemoryRouter><InventoryPage /></MemoryRouter></QueryClientProvider>)
@@ -49,6 +50,7 @@ describe('inventory operation UI (backend contracts simulated)', () => {
   afterEach(cleanup)
   beforeEach(() => {
     sessionStorage.clear(); localStorage.clear(); mocks.role = 'restaurant_admin'
+    mocks.redesigned = false
     mocks.inventory = fixture(); mocks.mutate.mockReset().mockResolvedValue({ data: {}, error: null })
     mocks.rpc.mockReset().mockImplementation(async (name, args) => {
       const data = structuredClone(mocks.inventory) as { policy: unknown; operations: unknown; items: unknown; nextCursor: unknown }
@@ -68,6 +70,41 @@ describe('inventory operation UI (backend contracts simulated)', () => {
     expect(screen.queryByRole('button', { name: 'Pausar operaciones' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Registrar movimiento' })).not.toBeInTheDocument()
     expect(mocks.references).not.toHaveBeenCalled()
+  })
+  it('shows the redesigned stock summary to managers and preserves their read-only role', async () => {
+    mocks.redesigned = true; mocks.role = 'order_manager'
+    const data = externalSaleFixture()
+    data.items[0] = { ...data.items[0]!, onHand: '12000', reserved: '12000', available: '0' }
+    mocks.inventory = data
+    view()
+
+    expect(await screen.findByText('Resumen de los productos cargados')).toBeVisible()
+    const table = screen.getByRole('table', { name: 'Existencias de productos' })
+    const outOfStock = within(table).getByRole('row', { name: /Arroz/ })
+    expect(within(outOfStock).getByText('Agotado')).toBeVisible()
+    expect(within(outOfStock).getAllByText('12.000')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Nuevo movimiento' })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('link', { name: /Editar stock/ })).not.toBeInTheDocument()
+    expect(mocks.mutate).not.toHaveBeenCalled()
+  })
+  it('opens the existing movement form with keyboard focus and sends its usual payload', async () => {
+    mocks.redesigned = true
+    const user = userEvent.setup()
+    view()
+    const newMovement = await screen.findByRole('button', { name: 'Nuevo movimiento' })
+    newMovement.focus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByLabelText('Acción')).toHaveFocus()
+    await user.selectOptions(screen.getByLabelText('Producto'), product)
+    await user.type(screen.getByLabelText('Cantidad'), '3')
+    await user.type(screen.getByLabelText('Motivo del movimiento'), 'Ingreso de proveedor')
+    await user.click(screen.getByRole('button', { name: 'Registrar movimiento' }))
+
+    expect(await screen.findByText('Operación registrada.')).toBeVisible()
+    expect(mocks.mutate).toHaveBeenCalledWith('inventory_adjust', expect.objectContaining({
+      p_kind: 'receipt', p_restaurant_id: tenant, p_reason: 'Ingreso de proveedor',
+      p_rows: [{ productId: product, quantity: '3', expectedVersion: '1' }],
+    }))
   })
   it('loads item pages incrementally without downloading the overview and history again', async () => {
     const data = externalSaleFixture()

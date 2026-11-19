@@ -8,7 +8,7 @@ const blackId = '45000000-0000-4000-8000-000000000001'
 const redId = '45000000-0000-4000-8000-000000000002'
 const category = { id: categoryId, name: 'Fundas' }
 
-async function adminFixture(page: Page, stockReady = true, role: 'restaurant_admin' | 'order_manager' = 'restaurant_admin') {
+async function adminFixture(page: Page, stockReady = true, role: 'restaurant_admin' | 'order_manager' = 'restaurant_admin', redesignedStock = false) {
   const restaurant = {
     id: restaurantId, name: 'Casa Móvil', trade_name: 'Casa Móvil', slug: 'casa-movil', description: '', status: 'active',
     whatsapp_phone_e164: '+5493492123456', address: 'San Martín 123', city: 'Rafaela', timezone: 'America/Argentina/Cordoba', currency_code: 'ARS', locale: 'es-AR',
@@ -24,6 +24,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     variant_attributes: { Color: index ? 'Rojo' : 'Negro' }, categories: { name: 'Fundas' },
   }))
   const balances = products.map(product => ({ productId: product.id, initialized: true, onHand: '10', reserved: '3', available: '7', version: '7' }))
+  if (redesignedStock) Object.assign(balances[1]!, { onHand: '3', available: '0' })
   const user = { id: userId, aud: 'authenticated', role: 'authenticated', email: 'admin@example.invalid', app_metadata: {}, user_metadata: {}, factors: [], created_at: new Date().toISOString() }
   // Synthetic local session. Every API call is mocked; these tests never modify live inventory.
   const expiresAt = Math.floor(Date.now() / 1000) + 3600
@@ -41,6 +42,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
   const productSaves: Record<string, unknown>[] = []
   const familySaves: Record<string, unknown>[] = []
   const storeSaves: Record<string, unknown>[] = []
+  const stockMovements: Record<string, unknown>[] = []
   await page.route('https://e2e.invalid/**', async route => {
     const request = route.request()
     const url = new URL(request.url())
@@ -50,6 +52,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     else if (request.method() === 'GET' && path === '/rest/v1/profiles') body = { id: userId, full_name: 'Administración Casa Móvil', email: user.email, active: true }
     else if (request.method() === 'GET' && path === '/rest/v1/restaurant_members') body = [{ id: '46000000-0000-4000-8000-000000000001', restaurant_id: restaurantId, role, status: 'active', restaurants: restaurant }]
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_actor_authorization') body = { userId, isSuperAdmin: false, aal: 'aal1', memberships: [{ restaurantId, role, status: 'active' }] }
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_stage_one_features') body = { campaigns: false, sellers: false, delivery_schedule: false, assisted_import: false, stock_design: redesignedStock }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_order_metrics') body = {
       generated: 8, whatsappOpened: 4, accepted: 5, completed: 3, cancelled: 1, expired: 0,
       corrected: 1, returned: 1, acceptedAmountCents: '1250000', completedAmountCents: '1000000',
@@ -62,6 +65,23 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     else if (request.method() === 'GET' && path === '/rest/v1/products') body = url.searchParams.has('id') ? products.find(product => `eq.${product.id}` === url.searchParams.get('id')) : products
     else if (request.method() === 'GET' && ['/rest/v1/product_option_groups', '/rest/v1/product_quantity_prices'].includes(path)) body = []
     else if (request.method() === 'GET' && path === '/rest/v1/product_families') body = [{ id: familyId, code: 'FUNDAS', category_id: categoryId, name: 'Fundas de silicona', description: '', image_path: null, axes: ['Color'], active: true }]
+    else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_overview') {
+      body = { policy: { mode: restaurant.inventory_mode, version: '1', activatedAt: null, pausedAt: null, cutoverId: null, countStartedAt: null, businessConfirmed: true, businessPolicy: { otherChannels: 'none' } }, operations: [] }
+    } else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_inventory_items') {
+      const search = String(request.postDataJSON().p_search ?? '').toLowerCase()
+      const items = balances.map((item, index) => ({ ...item, name: products[index]!.name, code: products[index]!.code }))
+      body = { items: items.filter(item => `${item.name} ${item.code}`.toLowerCase().includes(search)), nextCursor: null }
+    } else if (request.method() === 'POST' && path === '/rest/v1/rpc/inventory_adjust') {
+      const input = request.postDataJSON()
+      stockMovements.push(input)
+      for (const row of input.p_rows) {
+        const item = balances.find(balance => balance.productId === row.productId)!
+        item.onHand = String(Number(item.onHand) + Number(row.quantity))
+        item.available = String(Number(item.onHand) - Number(item.reserved))
+        item.version = '8'
+      }
+      body = { result: 'ok' }
+    }
     else if (request.method() === 'POST' && path === '/rest/v1/rpc/get_catalog_stock') {
       const input = request.postDataJSON()
       expect(input.p_restaurant_id).toBe(restaurantId)
@@ -94,7 +114,7 @@ async function adminFixture(page: Page, stockReady = true, role: 'restaurant_adm
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
-  return { unexpected, productSaves, familySaves, storeSaves }
+  return { unexpected, productSaves, familySaves, storeSaves, stockMovements }
 }
 
 test.describe('catalog stock and store setup', () => {
@@ -145,6 +165,44 @@ test.describe('catalog stock and store setup', () => {
   })
 
   for (const viewport of [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1440, height: 900 }]) {
+    test(`${viewport.name} pilot stock keeps search, levels and keyboard movement together`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport)
+      const requests = await adminFixture(page, true, 'restaurant_admin', true)
+      await page.goto('/admin/stock')
+      const balances = page.getByRole('table', { name: 'Existencias de productos' })
+      const product = balances.getByRole('row', { name: /Funda negra/ })
+      const depleted = balances.getByRole('row', { name: /Funda roja/ })
+      const search = page.getByRole('textbox', { name: 'Buscar producto o código' })
+      await expect(page.getByText('Resumen de los productos cargados')).toBeVisible()
+      await expect(depleted.getByText('Agotado', { exact: true })).toBeVisible()
+      await expect(product.getByRole('link', { name: 'Editar stock de Funda negra' })).toHaveAttribute('href', `/admin/catalogo/productos/${blackId}`)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`pilot-stock-${viewport.name}.png`), fullPage: true })
+
+      await search.fill('FUN-ROJO')
+      await expect(product).toHaveCount(0)
+      await expect(depleted).toBeVisible()
+      await expect(search).toBeFocused()
+      await page.getByRole('button', { name: 'Limpiar', exact: true }).click()
+      await expect(product).toBeVisible()
+      await expect(search).toBeFocused()
+
+      const shortcut = page.getByRole('button', { name: 'Nuevo movimiento' })
+      await shortcut.focus()
+      await page.keyboard.press('Enter')
+      await expect(page.getByLabel('Acción')).toBeFocused()
+      await page.getByRole('combobox', { name: 'Producto', exact: true }).selectOption(redId)
+      await page.getByLabel('Cantidad', { exact: true }).fill('2')
+      await page.getByLabel('Motivo del movimiento').fill('Recepción de proveedor')
+      await page.getByRole('button', { name: 'Registrar movimiento', exact: true }).click()
+      await expect(page.getByText('Operación registrada.')).toBeVisible()
+      await expect(depleted.getByText('Agotado', { exact: true })).toHaveCount(0)
+      expect(requests.stockMovements).toEqual([expect.objectContaining({
+        p_restaurant_id: restaurantId, p_kind: 'receipt', p_rows: [{ productId: redId, quantity: '2', expectedVersion: '7' }],
+      })])
+      expect(requests.unexpected).toEqual([])
+    })
+
     test(`${viewport.name} keeps the overview focused while detailed reports remain accessible`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport)
       const requests = await adminFixture(page)
