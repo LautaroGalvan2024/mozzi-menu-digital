@@ -285,7 +285,10 @@ test.describe('admin WhatsApp contact', () => {
         expect(editStock!.height).toBeGreaterThanOrEqual(44)
       }
       await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).not.toBeVisible()
-      if (viewport.name === 'desktop') expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
+      if (viewport.name === 'desktop') {
+        await expect(balances).toBeInViewport({ ratio: 1 })
+        await expect(page.getByRole('button', { name: 'Nuevo movimiento' })).toBeInViewport({ ratio: 1 })
+      }
       await page.getByText('Ingresos, ajustes y ventas externas', { exact: true }).click()
       await expect(page.getByRole('combobox', { name: 'Acción', exact: true })).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
