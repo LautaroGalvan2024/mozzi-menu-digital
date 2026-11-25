@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery,useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, CircleCheck, CircleX, Eye, EyeOff, ImageIcon, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
+import { ChevronDown, CircleCheck, CircleX, Eye, EyeOff, ImageIcon, ListOrdered, MoreHorizontal, Plus, Search, Star } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import { z } from 'zod'
@@ -17,6 +17,7 @@ import { useRestaurantScope } from '../restaurants/RestaurantScope'
 import { useRestaurant } from '../restaurants/useRestaurant'
 import { ProductFamilies } from './ProductFamilies'
 import { ProductImagesExport } from './ProductImagesExport'
+import { OfferOrderDialog } from './OfferOrderDialog'
 import './catalog-admin.css'
 
 const schema=z.object({id:z.string().uuid(),name:z.string(),code:z.string(),description:z.string(),base_price_cents:z.union([z.number(),z.string()]),promotional_price_cents:z.union([z.number(),z.string()]).nullable(),image_path:z.string().nullable(),active:z.boolean(),available:z.boolean(),featured:z.boolean(),sort_order:z.number().int(),category_id:z.string().uuid(),categories:z.object({name:z.string()}).nullable()})
@@ -30,6 +31,8 @@ export function ProductsPage(){
   const savedCode = z.object({ savedCode: z.string() }).safeParse(location.state)
   const scope=useRestaurantScope();const restaurant=useRestaurant(scope.selected?.id);const client=useQueryClient();const[search,setSearch]=useState('');const[page,setPage]=useState(0);const[mutationError,setMutationError]=useState<string|null>(null);const[busyProductId,setBusyProductId]=useState<string|null>(null)
   const debouncedSearch=useDebouncedValue(search,300)
+  const [orderEditor, setOrderEditor] = useState<string | null>(null)
+  const [orderSaved, setOrderSaved] = useState<string | null>(null)
   const normalizedSearch=safeSearch(debouncedSearch)
   useEffect(()=>setPage(0),[normalizedSearch,scope.selected?.id])
   const query=useQuery({
@@ -66,6 +69,7 @@ export function ProductsPage(){
       description="Precios, disponibilidad y variantes de tu catálogo."
     />
     {savedCode.success && savedCode.data.savedCode ? <p className="form-success mb-4" role="status">Producto guardado. Código / SKU: <strong>{savedCode.data.savedCode}</strong></p> : null}
+    {orderSaved && orderSaved === scope.selected?.id ? <p className="form-success mb-4" role="status">El orden de tus ofertas se guardó correctamente.</p> : null}
     <AdminDataRegion className="catalog-data-region">
     <div className="admin-toolbar catalog-command-bar">
       <label className="catalog-command-search relative block">
@@ -77,6 +81,10 @@ export function ProductsPage(){
       <div className="catalog-command-actions">
         <Link className="button-primary" to="/admin/catalogo/productos/nuevo"><Plus className="h-4 w-4" aria-hidden/>Nuevo producto</Link>
         <ProductFamilies key={scope.selected?.id} />
+        {scope.selected && restaurant.data?.store_enabled ? <button type="button" className="button-secondary" aria-haspopup="dialog" onClick={() => {
+          setOrderSaved(null)
+          setOrderEditor(scope.selected?.id ?? null)
+        }}><ListOrdered className="h-4 w-4" aria-hidden />Ordenar ofertas</button> : null}
         <details className="catalog-command-menu" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() } }}>
           <summary className="button-secondary list-none [&::-webkit-details-marker]:hidden">Más acciones<ChevronDown className="h-4 w-4" aria-hidden /></summary>
           <div className="catalog-command-menu-popover">
@@ -127,5 +135,13 @@ export function ProductsPage(){
     </div>}
     {total>PAGE_SIZE?<nav className="admin-data-pagination" aria-label="Páginas de productos"><p className="text-sm text-stone-500">Página {page+1} de {Math.max(1,Math.ceil(total/PAGE_SIZE))}</p><div className="flex gap-2"><button className="button-secondary" type="button" disabled={page===0||query.isFetching} onClick={()=>setPage(value=>Math.max(0,value-1))}>Anterior</button><button className="button-secondary" type="button" disabled={(page+1)*PAGE_SIZE>=total||query.isFetching} onClick={()=>setPage(value=>value+1)}>Siguiente</button></div></nav>:null}
     </AdminDataRegion>
+    {orderEditor && orderEditor === scope.selected?.id && restaurant.data?.store_enabled ? <OfferOrderDialog key={orderEditor}
+      restaurantId={orderEditor} currency={restaurant.data.currency_code} locale={restaurant.data.locale}
+      onClose={() => setOrderEditor(null)}
+      onSaved={() => {
+        setOrderSaved(orderEditor)
+        setOrderEditor(null)
+        void invalidateCatalogQueries(client, orderEditor)
+      }} /> : null}
   </AdminDataWorkspace>
 }

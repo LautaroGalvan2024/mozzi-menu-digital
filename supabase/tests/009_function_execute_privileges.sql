@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(247);
+select plan(253);
 
 with expected(signature, access) as (
   values
@@ -16,6 +16,8 @@ with expected(signature, access) as (
     ('public.get_stage_one_features(uuid)', 'authenticated'),
     ('public.get_public_campaigns(text,text)', 'public'),
     ('public.get_public_campaign(text,text,text)', 'public'),
+    ('public.get_store_offer_order(uuid)', 'authenticated'),
+    ('public.save_store_offer_order(uuid,text,uuid[])', 'authenticated'),
     ('public.get_admin_campaigns(uuid)', 'authenticated'),
     ('public.save_campaign(uuid,uuid,uuid,bigint,jsonb)', 'authenticated'),
     ('public.get_public_seller(text,text,uuid)', 'public'),
@@ -115,7 +117,7 @@ select is(
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
   ),
-  81::bigint,
+  83::bigint,
   'the public function inventory contains only the reviewed allowlist'
 );
 

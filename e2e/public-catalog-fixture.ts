@@ -73,6 +73,7 @@ export async function routePublicCatalog(
   catalog: JsonRecord,
   slug: string,
   _channel: 'menu' | 'store' = 'menu',
+  getOfferOrder?: () => readonly string[],
 ) {
   await page.route('**/rest/v1/rpc/get_public_*', async (route) => {
     const name = new URL(route.request().url()).pathname.split('/').at(-1)
@@ -100,6 +101,11 @@ export async function routePublicCatalog(
       const scope = { restaurantSlug: slug.toLocaleLowerCase('es'), section, categoryId, search }
       const validUntil = null
       const all = storeSectionGroups(catalog, section, categoryId, search)
+      if (section === 'offers' && !categoryId && !search && getOfferOrder) {
+        const ranks = new Map(getOfferOrder().map((id, position) => [id, position]))
+        const fallback = ranks.size
+        all.sort((a, b) => (ranks.get(String(a.id)) ?? fallback) - (ranks.get(String(b.id)) ?? fallback))
+      }
       const categoryIcons = Object.fromEntries((catalog.categories as JsonRecord[])
         .filter(category => typeof category.id === 'string' && typeof category.iconKey === 'string')
         .map(category => [category.id as string, category.iconKey as string]))
