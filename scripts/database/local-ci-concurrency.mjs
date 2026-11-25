@@ -82,7 +82,7 @@ async function main() {
     const config = path.join(directory, 'database.env')
     writeFileSync(config, Object.entries(env).filter(([name]) => /^PG/.test(name)).map(([name, value]) => `${name}=${value}`).join('\n'), { mode: 0o600 })
     env.MOZZI_DATABASE_ENV_FILE = config
-    for (const script of ['local-test-concurrency.mjs', 'local-test-commerce-concurrency.mjs', 'local-test-catalog-stock-concurrency.mjs', 'local-test-asset-hours-concurrency.mjs', 'local-test-invitation-delivery-concurrency.mjs', 'local-test-payment-maintenance-concurrency.mjs', 'local-test-backup-consistency.mjs']) {
+    for (const script of ['local-test-concurrency.mjs', 'local-test-commerce-concurrency.mjs', 'local-test-catalog-stock-concurrency.mjs', 'local-test-asset-hours-concurrency.mjs', 'local-test-invitation-delivery-concurrency.mjs', 'local-test-payment-maintenance-concurrency.mjs', 'local-test-store-offer-order-concurrency.mjs', 'local-test-backup-consistency.mjs']) {
       stage = script
       await new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [`scripts/database/${script}`, `--database=${target}`], { env, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'] })
@@ -95,7 +95,7 @@ async function main() {
         })
       })
     }
-    console.log(JSON.stringify({ localConcurrencyPassed: true, suites: 9, backupConsistencyPassed: true, sourceUntouched: true }))
+    console.log(JSON.stringify({ localConcurrencyPassed: true, suites: 10, backupConsistencyPassed: true, sourceUntouched: true }))
   } catch {
     console.error(`Local concurrency checks failed during ${stage}; credentials and raw connection diagnostics withheld.`)
     process.exitCode = 1

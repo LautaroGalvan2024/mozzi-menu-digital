@@ -1724,6 +1724,14 @@ export type Database = {
         Args: { p_restaurant_id: string; p_product_ids: string[] }
         Returns: Json
       }
+      get_store_offer_order: {
+        Args: { p_restaurant_id: string }
+        Returns: Json
+      }
+      save_store_offer_order: {
+        Args: { p_restaurant_id: string; p_expected_revision: string; p_group_ids: string[] }
+        Returns: undefined
+      }
       save_product_catalog_with_stock: {
         Args: { p_restaurant_id: string; p_product: Json; p_groups: Json; p_removed_group_ids: string[]; p_removed_option_ids: string[]; p_operation_id: string; p_stock?: Json }
         Returns: Json
