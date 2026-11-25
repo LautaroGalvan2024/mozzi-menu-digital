@@ -12,20 +12,18 @@ insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values
 update public.profiles set active=false where id='10300000-0000-4000-8000-000000000003';
 
 -- A legacy Auth identity predating the projection trigger is repaired once.
-alter table auth.users disable trigger on_auth_user_created;
 insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values
  ('10300000-0000-4000-8000-000000000006','DELIVERY-LEGACY@example.test',null,'{"full_name":"Legacy account"}');
-alter table auth.users enable trigger on_auth_user_created;
+delete from public.profiles where id='10300000-0000-4000-8000-000000000006';
 select is(private.backfill_auth_profiles(),1,'backfill repairs only missing profiles');
 select is((select full_name from public.profiles where id='10300000-0000-4000-8000-000000000006'),'Legacy account','backfill preserves Auth name projection');
 select is((select email from public.profiles where id='10300000-0000-4000-8000-000000000006'),'delivery-legacy@example.test','backfill normalizes email');
 select is(private.backfill_auth_profiles(),0,'backfill is idempotent');
 select is((select active from public.profiles where id='10300000-0000-4000-8000-000000000003'),false,'backfill never reactivates an existing disabled profile');
 select throws_ok($$
-  update public.profiles set email='delivery-collision@example.test' where id='10300000-0000-4000-8000-000000000001';
-  alter table auth.users disable trigger on_auth_user_created;
   insert into auth.users(id,email,raw_user_meta_data) values('10300000-0000-4000-8000-000000000007','delivery-collision@example.test','{}');
-  alter table auth.users enable trigger on_auth_user_created;
+  delete from public.profiles where id='10300000-0000-4000-8000-000000000007';
+  update public.profiles set email='delivery-collision@example.test' where id='10300000-0000-4000-8000-000000000001';
   select private.backfill_auth_profiles();
 $$,'22023','AUTH_DIRECTORY_AMBIGUOUS_REVIEW_REQUIRED','ambiguous legacy ownership fails instead of choosing a user');
 
