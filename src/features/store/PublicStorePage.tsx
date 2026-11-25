@@ -12,7 +12,6 @@ import { queryKeys } from '../../lib/queryKeys'
 import { useDebouncedValue } from '../../lib/useDebouncedValue'
 import type { CartLine, PublicCatalogGroup, PublicProduct, PublicRestaurant, PublicStoreCatalogSection } from '../../types/domain'
 import { useCart } from '../cart/CartProvider'
-import { ProductDialog } from '../public-menu/ProductDialog'
 import { RestaurantHoursDialog } from '../public-menu/RestaurantHoursDialog'
 import { fetchPublicCatalogGroup } from '../public-menu/api'
 import { usePublicStoreCatalog } from '../public-menu/usePublicCatalog'
@@ -22,6 +21,7 @@ import { productBenefit, purchasablePrice, StoreProductConfigurator, StoreProduc
 import './public-store.css'
 
 const ActiveCampaignBanners = lazy(() => import('../campaigns/ActiveCampaignBanners').then(module => ({ default: module.ActiveCampaignBanners })))
+const ProductDialog = lazy(() => import('../public-menu/ProductDialog').then(module => ({ default: module.ProductDialog })))
 const INITIAL_VISIBLE_GROUPS = 12
 const SECTIONS = new Set<PublicStoreCatalogSection>(['all', 'featured', 'offers'])
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -255,7 +255,9 @@ export function PublicStorePage() {
       </> : null}
     </main>
     {itemCount > 0 ? <div className="store-cart-dock"><Link to={commercePath(restaurant.slug, 'store', '/carrito')}><span><ShoppingBag aria-hidden />Ver carrito · {itemCount}</span><span>{money(cart.subtotalCents)}<ArrowRight aria-hidden /></span></Link></div> : null}
-    {selection ? <ProductDialog product={selection.product} variants={selection.variants} restaurant={restaurant} now={storeNow} onClose={() => setSelection(null)} onAdd={line => addLine(line, line.productName)} /> : null}
+    {selection ? <Suspense fallback={<p role="status" className="fixed inset-x-0 bottom-4 z-50 mx-auto w-fit rounded-lg bg-white px-4 py-2 text-sm shadow-lg">Cargando opciones del producto…</p>}>
+      <ProductDialog product={selection.product} variants={selection.variants} restaurant={restaurant} now={storeNow} onClose={() => setSelection(null)} onAdd={line => addLine(line, line.productName)} />
+    </Suspense> : null}
     {showHours ? <RestaurantHoursDialog restaurantName={restaurant.tradeName} timeZone={restaurant.timezone} locale={restaurant.locale} businessHours={catalog.meta.data.businessHours} specialHours={catalog.meta.data.specialHours} onClose={() => setShowHours(false)} /> : null}
   </div></StoreServerTimeContext.Provider>
 }

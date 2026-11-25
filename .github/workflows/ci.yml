@@ -132,6 +132,7 @@ jobs:
         run: supabase db reset --local
 
       - name: Run pgTAP tests
+        id: database_tests
         run: supabase test db
 
       - name: Real database concurrency on a disposable local clone
@@ -140,6 +141,8 @@ jobs:
           PG_BIN: /usr/lib/postgresql/17/bin
 
       - name: Real local Auth, REST, Storage and Edge handler integration
+        # HTTP uses the rebuilt stack; concurrency exercises a separate clone.
+        if: ${{ !cancelled() && steps.database_tests.outcome == 'success' }}
         run: node scripts/database/local-http-smoke.mjs --with-edge-host
 
       - name: Stop local Supabase

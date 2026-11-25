@@ -2,9 +2,10 @@
 // into a NEW mozzi_ci_* database, then run the original real-session harnesses.
 import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 import { pgBinary, validateLocalDatabaseEnvironment } from './connection.mjs'
 import { runPrivate } from './backup-core.mjs'
@@ -45,6 +46,43 @@ export function matchesLocalContainer(sourceEnv, identity, network) {
       identity.host === endpoint.IPAddress || identity.host === endpoint.GlobalIPv6Address))
 }
 
+// Do not print restore SQL or row contents. Report only a known failure class
+// and identifiers from PostgreSQL's diagnostic, inside the disposable clone.
+export function restoreFailureSummary(stderr) {
+  const toc = /from TOC entry (\d+);/.exec(stderr)
+  const detail = /(?:relation|schema|table|type|extension|role|collation|constraint) "[a-z_][a-z_0-9.]{0,80}" (?:already exists|does not exist)/i.exec(stderr)
+    ?? /permission denied (?:for|to) (?:schema|relation|database|table|function|change default privileges)(?: [a-z_][a-z_0-9.]*)?/i.exec(stderr)
+    ?? /must be (?:owner|member|superuser)|must be able to SET ROLE/i.exec(stderr)
+    ?? /password authentication failed|peer authentication failed|no password supplied|could not connect to server/i.exec(stderr)
+  return [toc && `TOC ${toc[1]}`, detail?.[0]].filter(Boolean).join(', ') || 'restore process failed'
+}
+
+async function restoreContainerArchive(container, env, target, archive, list, setStage) {
+  const command = ['--context', 'default', 'exec', '-i', '--user', 'postgres', container]
+  const containerList = `/tmp/${target}-restore.list`
+  await runPrivate('docker', [...command, 'sh', '-c', 'umask 077; set -C; cat > "$1"', 'sh', containerList], { env, input: list })
+  try {
+    // This is the verified local container. Its Unix-socket administrator can
+    // recreate objects owned by Auth/Storage roles. Preserve their real owners.
+    const child = spawn('docker', [...command, 'pg_restore', '--host=/var/run/postgresql', '--username=supabase_admin',
+      '--no-password', '--exit-on-error', '--single-transaction', '--dbname', target, '--use-list', containerList],
+    { env, stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true, timeout: 120000 })
+    let stderr = ''
+    child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8192) })
+    const completed = new Promise((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', resolve)
+    })
+    const [status, input] = await Promise.allSettled([completed, pipeline(createReadStream(archive), child.stdin)])
+    if (status.status !== 'fulfilled' || status.value !== 0 || input.status === 'rejected') {
+      setStage(`disposable database schema restoration (${restoreFailureSummary(stderr)})`)
+      throw new Error('Disposable clone restore failed')
+    }
+  } finally {
+    await runPrivate('docker', [...command, 'rm', '-f', containerList], { env })
+  }
+}
+
 export async function cloneLocalDatabase(sourceEnv, target, directory, setStage = () => {}) {
   if (!/^mozzi_ci_[a-f0-9]+$/.test(target)) throw new Error('A new synthetic CI database name is required')
   validateLocalDatabaseEnvironment({ ...sourceEnv, PGDATABASE: target })
@@ -52,14 +90,16 @@ export async function cloneLocalDatabase(sourceEnv, target, directory, setStage 
   const query = input => runPrivate(pgBinary(sourceEnv, 'psql'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '--no-password'], { env: sourceEnv, input })
   const identity = JSON.parse((await query("select json_build_object('host',inet_server_addr(),'port',inet_server_port(),'database',current_database(),'version',current_setting('server_version_num'));" )).trim())
   if (identity.database !== sourceEnv.PGDATABASE || Number(identity.version) < 170000 || Number(identity.version) >= 180000) throw new Error('Local PostgreSQL 17 identity mismatch')
+  let container
   if (!['127.0.0.1', '::1'].includes(identity.host) || identity.port !== Number(sourceEnv.PGPORT)) {
     // Inside Docker, PostgreSQL reports its bridge address and internal port.
     // Only accept the precise mapping published by this project's local DB container.
     setStage('local Supabase container endpoint verification')
     const project = /^project_id\s*=\s*"([a-zA-Z0-9_-]+)"\s*$/m.exec(readFileSync('supabase/config.toml', 'utf8'))?.[1]
     if (!project) throw new Error('Missing local Supabase project ID')
+    container = `supabase_db_${project}`
     const details = await runPrivate('docker', ['--context', 'default', 'inspect', '--type=container',
-      '--format', '{{json .NetworkSettings}}', `supabase_db_${project}`], { env: sourceEnv })
+      '--format', '{{json .NetworkSettings}}', container], { env: sourceEnv })
     if (!matchesLocalContainer(sourceEnv, identity, JSON.parse(details))) throw new Error('Local Supabase container mismatch')
   }
   setStage('local extension inventory and schema dump')
@@ -79,9 +119,14 @@ export async function cloneLocalDatabase(sourceEnv, target, directory, setStage 
       input: `create schema extensions; ${extensions.map(extension => `create extension if not exists ${quote(extension.name)} with schema ${quote(extension.schema)};`).join('\n')}` })
     setStage('disposable database schema restoration')
     const list = await runPrivate(pgBinary(env, 'pg_restore'), ['--list', archive], { env })
-    const listFile = path.join(directory, 'local-clone.list')
-    writeFileSync(listFile, list.split(/\r?\n/).filter(line => !/\sSCHEMA - (public|extensions) /.test(line)).join('\n'), { mode: 0o600 })
-    await runPrivate(pgBinary(env, 'pg_restore'), ['--dbname', target, '--exit-on-error', '--single-transaction', '--no-owner', '--use-list', listFile, archive], { env })
+    const entries = list.split(/\r?\n/).filter(line => !/\sSCHEMA - (public|extensions) /.test(line)).join('\n')
+    if (container) {
+      await restoreContainerArchive(container, env, target, archive, entries, setStage)
+    } else {
+      const listFile = path.join(directory, 'local-clone.list')
+      writeFileSync(listFile, entries, { mode: 0o600 })
+      await runPrivate(pgBinary(env, 'pg_restore'), ['--dbname', target, '--exit-on-error', '--single-transaction', '--no-owner', '--use-list', listFile, archive], { env })
+    }
   } catch (error) {
     await query(`drop database "${target}" with (force);`)
     throw error

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { localStatusEnvironment, matchesLocalContainer } from './local-ci-concurrency.mjs'
+import { localStatusEnvironment, matchesLocalContainer, restoreFailureSummary } from './local-ci-concurrency.mjs'
 
 test('CI database discovery refuses remote hosts and connection-string overrides', () => {
   for (const url of ['postgres://u:p@remote.example:5432/postgres', 'postgres://u:p@127.0.0.1:5432/postgres?hostaddr=remote',
@@ -28,4 +28,12 @@ test('Docker identity requires this container address and its exact locally publ
   assert.equal(matchesLocalContainer(local, { ...postgres, port: 7432 }, network), false)
   const remoteBinding = { ...network, Ports: { '5432/tcp': [{ HostIp: '192.0.2.5', HostPort: '54322' }] } }
   assert.equal(matchesLocalContainer(local, postgres, remoteBinding), false)
+})
+
+test('restore diagnostics retain the failed object class without printing SQL or rows', () => {
+  const failure = 'pg_restore: from TOC entry 4; 13 45 TABLE auth sample postgres\n'
+    + 'pg_restore: error: could not execute query: ERROR: schema "missing" does not exist\n'
+    + "Command was: INSERT INTO missing.table VALUES ('sensitive example');"
+  assert.equal(restoreFailureSummary(failure), 'TOC 4, schema "missing" does not exist')
+  assert.equal(restoreFailureSummary('arbitrary fixture contents'), 'restore process failed')
 })

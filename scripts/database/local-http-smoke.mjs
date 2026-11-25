@@ -210,7 +210,7 @@ async function main() {
   stage = 'synthetic tenant fixture'
   await seed('restaurants', [a, b].map((id, index) => ({ id, name: 'Synthetic HTTP smoke', trade_name: 'Synthetic HTTP smoke',
     slug: index === 0 ? slug : `${slug}-other`, status: 'active', whatsapp_phone_e164: '+5491111111111',
-    address: 'Synthetic', city: 'Synthetic', timezone: 'UTC', order_prefix: 'HSM', public_menu_enabled: true,
+    address: 'Synthetic', city: 'Synthetic', timezone: 'UTC', order_prefix: 'HSM', public_menu_enabled: true, store_enabled: index === 1,
     created_by: index === 0 ? admin.id : other.id })))
   await seed('restaurant_members', [
     { restaurant_id: a, user_id: admin.id, role: 'restaurant_admin', status: 'active', invited_by: admin.id },
@@ -241,6 +241,26 @@ async function main() {
   denied(await rpc('save_product_catalog', save, other.token), 'foreign catalogue write')
   denied(await http(`/rest/v1/products?id=eq.${product}`, { method: 'PATCH', token: admin.token, body: { code: 'BYPASS' } }), 'direct SKU write')
   pass('catalogue RPC allocates stable SKU and rejects role/tenant/direct-write bypasses')
+
+  stage = 'store offer order conflict'
+  const offerCategory = randomUUID()
+  const offerIds = [randomUUID(), randomUUID()]
+  await seed('categories', { id: offerCategory, restaurant_id: b, name: 'Offers', slug: 'offers' })
+  await seed('products', offerIds.map((id, index) => ({
+    id, restaurant_id: b, category_id: offerCategory, code: `OFFER-${index}`, name: `Offer ${index}`,
+    base_price_cents: 1000, promotional_price_cents: 800, sort_order: index,
+  })))
+  const editor = accepted(await rpc('get_store_offer_order', { p_restaurant_id: b }, other.token), 'read merchant offer order')
+  check(editor.items?.length === 2 && editor.items.every((item, index) => item.id === offerIds[index]), 'Unexpected initial offer order')
+  const snapshot = { p_restaurant_id: b, p_expected_revision: editor.revision }
+  const winner = [...offerIds].reverse()
+  accepted(await rpc('save_store_offer_order', { ...snapshot, p_group_ids: winner }, other.token), 'save reordered offers')
+  const staleOrder = await rpc('save_store_offer_order', { ...snapshot, p_group_ids: offerIds }, other.token)
+  check(staleOrder.status === 409 && staleOrder.data?.code === 'PT409' && staleOrder.data?.message === 'STORE_OFFER_ORDER_STALE',
+    `Stale offer editor must receive an HTTP 409 conflict; received HTTP ${staleOrder.status}`)
+  const publicOffers = accepted(await rpc('get_public_store_catalog_page', { p_restaurant_slug: `${slug}-other`, p_section: 'offers' }), 'read public offers')
+  check(publicOffers.items?.length === 2 && publicOffers.items.every((item, index) => item.id === winner[index]), 'Stale editor changed the winning public order')
+  pass('offer reorder persists publicly and a stale editor receives the expected HTTP conflict')
 
   stage = 'import batch replay'
   const batch = randomUUID()
