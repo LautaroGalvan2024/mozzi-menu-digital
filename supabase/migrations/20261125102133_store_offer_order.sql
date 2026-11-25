@@ -20,6 +20,8 @@ revoke all on private.store_offer_positions from public, anon, authenticated, se
 -- Share eligibility and the legacy sort keys between the merchant and public queries.
 -- The editor uses the same cheapest eligible variant, tie-breaks and photo fallback
 -- as a public offer card. Public pagination does not need those extra projections.
+-- This private invoker function is inlined so the planner can discard those fields;
+-- its only callers use an empty search_path and all relation names are qualified.
 create function private.store_catalog_candidates(
   p_restaurant_id uuid, p_section text, p_category_id uuid, p_search text,
   p_now timestamptz, p_details boolean
@@ -29,7 +31,7 @@ returns table (
   category_id uuid, featured_rank integer, group_sort_order integer, group_name text,
   display_name text, image_path text, price bigint
 )
-language sql stable security invoker set search_path = ''
+language sql stable security invoker
 as $$
   with scoped_products as (
     select
@@ -205,7 +207,7 @@ begin
   -- A retry after a lost successful reply is safe.
   if p_group_ids = v_current then return; end if;
   if p_expected_revision is distinct from md5(v_current::text) then
-    raise exception using errcode = '40001', message = 'STORE_OFFER_ORDER_STALE';
+    raise exception using errcode = 'PT409', message = 'STORE_OFFER_ORDER_STALE';
   end if;
   if p_group_ids is null or array_ndims(p_group_ids) > 1
     or cardinality(p_group_ids) <> cardinality(v_current)
@@ -356,7 +358,9 @@ begin
   end if;
 
   with candidates as (
-    select * from private.store_catalog_candidates(
+    select group_id, offer_position, category_sort_order, category_name, category_id,
+      featured_rank, group_sort_order, group_name
+    from private.store_catalog_candidates(
       v_restaurant_id, v_section, p_category_id, v_search, v_now, false
     )
   ),

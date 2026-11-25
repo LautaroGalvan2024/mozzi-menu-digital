@@ -78,7 +78,7 @@ export async function offerOrderFixture(page: Page, state = offerOrderState(), s
         const input = req.postDataJSON()
         expect(input.p_restaurant_id).toBe(restaurantId)
         if (input.p_expected_revision !== String(state.revision)) {
-          return route.fulfill({ status: 409, json: { code: '40001', message: 'STORE_OFFER_ORDER_STALE' } })
+          return route.fulfill({ status: 409, json: { code: 'PT409', message: 'STORE_OFFER_ORDER_STALE' } })
         }
         expect([...input.p_group_ids].sort()).toEqual([...state.ids].sort())
         state.ids = input.p_group_ids

@@ -88,7 +88,7 @@ select is(get_store_offer_order(pg_temp.oid_for(10)),editor,'rejected writes do 
 select save_store_offer_order(pg_temp.oid_for(10),editor->>'revision',pg_temp.keys(130,110,109,108,107,106,105,104,103,102,101)) from offer_baseline;
 select is(pg_temp.ids(get_store_offer_order(pg_temp.oid_for(10))),pg_temp.keys(130,110,109,108,107,106,105,104,103,102,101),'a fresh merchant read sees the saved order');
 select throws_ok($$select save_store_offer_order(pg_temp.oid_for(10),(select editor->>'revision' from offer_baseline),
-  pg_temp.keys(102,101,103,104,105,106,107,108,109,110,130))$$,'40001','STORE_OFFER_ORDER_STALE','a second editor cannot overwrite the saved order using a stale version');
+  pg_temp.keys(102,101,103,104,105,106,107,108,109,110,130))$$,'PT409','STORE_OFFER_ORDER_STALE','a second editor cannot overwrite the saved order using a stale version');
 select lives_ok($$select save_store_offer_order(pg_temp.oid_for(10),(select editor->>'revision' from offer_baseline),
   pg_temp.keys(130,110,109,108,107,106,105,104,103,102,101))$$,'lost successful reply can retry the exact same order');
 select throws_ok($$select get_public_store_catalog_page('offer-order-a','offers',null,null,(select first_page->'nextCursor' from offer_baseline),8)$$,

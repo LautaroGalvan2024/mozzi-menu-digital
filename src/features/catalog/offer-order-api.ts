@@ -49,7 +49,7 @@ export async function saveStoreOfferOrder(restaurantId: string, expectedRevision
     p_group_ids: groupIds,
   })
   if (!error) return
-  if (error.code === '40001') throw new OfferOrderConflictError()
+  if (error.code === 'PT409' && error.message === 'STORE_OFFER_ORDER_STALE') throw new OfferOrderConflictError()
   if (error.code === '42501') throw new OfferOrderPermissionError()
   throw new Error('No pudimos guardar el orden. Volvé a intentar.')
 }

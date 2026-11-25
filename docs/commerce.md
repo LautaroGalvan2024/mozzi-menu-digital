@@ -1,5 +1,7 @@
 # Menú y tienda con catálogo compartido
 
+Desde **Catálogo → Productos → Ordenar ofertas**, cada comercio puede elegir las primeras tarjetas de su tienda. [Guía de uso y capturas](ofertas-tienda/README.md).
+
 El menú conserva `/r/:slug`; la tienda usa `/t/:slug`. **Tienda online** en el panel permite marcar **Publicar mi tienda online**, elegir WhatsApp, Mercado Pago o ambos y guardar. Debajo aparecen el link y el QR. Se puede publicar con WhatsApp sin conectar Mercado Pago y recibir pedidos las 24 horas o respetar los horarios. Configuración conserva los controles anteriores de publicación. Productos, precios, inventario, marca y entrega local se comparten. Carritos, intentos y recuperación se separan por canal; las claves anteriores del menú conservan compatibilidad.
 
 ## Fichas y variantes

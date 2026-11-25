@@ -2,7 +2,7 @@
 // into a NEW mozzi_ci_* database, then run the original real-session harnesses.
 import { spawn, spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -31,26 +31,53 @@ export function localStatusEnvironment(status, inherited = process.env) {
   return env
 }
 
-export async function cloneLocalDatabase(sourceEnv, target, directory) {
+export function matchesLocalContainer(sourceEnv, identity, network) {
+  const bindings = network?.Ports?.[`${identity.port}/tcp`] ?? []
+  const loopbackBindings = {
+    '127.0.0.1': ['127.0.0.1', '0.0.0.0'],
+    '::1': ['::1', '::'],
+    localhost: ['127.0.0.1', '0.0.0.0', '::1', '::'],
+  }
+  const hosts = loopbackBindings[sourceEnv.PGHOST] ?? []
+  return Boolean(identity.host && bindings.some(binding =>
+    binding.HostPort === sourceEnv.PGPORT && hosts.includes(binding.HostIp))
+    && Object.values(network.Networks ?? {}).some(endpoint =>
+      identity.host === endpoint.IPAddress || identity.host === endpoint.GlobalIPv6Address))
+}
+
+export async function cloneLocalDatabase(sourceEnv, target, directory, setStage = () => {}) {
   if (!/^mozzi_ci_[a-f0-9]+$/.test(target)) throw new Error('A new synthetic CI database name is required')
   validateLocalDatabaseEnvironment({ ...sourceEnv, PGDATABASE: target })
   if (!/^(postgres|mozzi_[a-z0-9_]+)$/.test(sourceEnv.PGDATABASE)) throw new Error('Invalid local source database')
   const query = input => runPrivate(pgBinary(sourceEnv, 'psql'), ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '--no-password'], { env: sourceEnv, input })
   const identity = JSON.parse((await query("select json_build_object('host',inet_server_addr(),'port',inet_server_port(),'database',current_database(),'version',current_setting('server_version_num'));" )).trim())
-  if (!['127.0.0.1', '::1'].includes(identity.host) || identity.port !== Number(sourceEnv.PGPORT)
-    || identity.database !== sourceEnv.PGDATABASE || Number(identity.version) < 170000 || Number(identity.version) >= 180000) throw new Error('Local PostgreSQL 17 identity mismatch')
+  if (identity.database !== sourceEnv.PGDATABASE || Number(identity.version) < 170000 || Number(identity.version) >= 180000) throw new Error('Local PostgreSQL 17 identity mismatch')
+  if (!['127.0.0.1', '::1'].includes(identity.host) || identity.port !== Number(sourceEnv.PGPORT)) {
+    // Inside Docker, PostgreSQL reports its bridge address and internal port.
+    // Only accept the precise mapping published by this project's local DB container.
+    setStage('local Supabase container endpoint verification')
+    const project = /^project_id\s*=\s*"([a-zA-Z0-9_-]+)"\s*$/m.exec(readFileSync('supabase/config.toml', 'utf8'))?.[1]
+    if (!project) throw new Error('Missing local Supabase project ID')
+    const details = await runPrivate('docker', ['--context', 'default', 'inspect', '--type=container',
+      '--format', '{{json .NetworkSettings}}', `supabase_db_${project}`], { env: sourceEnv })
+    if (!matchesLocalContainer(sourceEnv, identity, JSON.parse(details))) throw new Error('Local Supabase container mismatch')
+  }
+  setStage('local extension inventory and schema dump')
   const extensions = JSON.parse((await query("select coalesce(json_agg(json_build_object('name',e.extname,'schema',n.nspname)),'[]') from pg_extension e join pg_namespace n on n.oid=e.extnamespace where n.nspname in ('public','extensions');")).trim())
   const archive = path.join(directory, 'local-clone.dump')
   await runPrivate(pgBinary(sourceEnv, 'pg_dump'), ['--format=custom', '--no-owner', '--schema=public', '--schema=private',
     '--schema=auth', '--schema=storage', '--schema=extensions', '--schema=supabase_migrations', '--file', archive, '--no-password'], { env: sourceEnv })
+  setStage('disposable database creation')
   await query(`create database "${target}";`)
   const env = validateLocalDatabaseEnvironment({ ...sourceEnv, PGDATABASE: target })
   try {
     // Schema-scoped pg_dump does not include CREATE EXTENSION. Recreate the
     // same locally installed extensions first, then preserve schema ACL entries.
+    setStage('disposable database extensions')
     const quote = value => `"${String(value).replaceAll('"', '""')}"`
     await runPrivate(pgBinary(env, 'psql'), ['-X', '-q', '-v', 'ON_ERROR_STOP=1', '--no-password'], { env,
       input: `create schema extensions; ${extensions.map(extension => `create extension if not exists ${quote(extension.name)} with schema ${quote(extension.schema)};`).join('\n')}` })
+    setStage('disposable database schema restoration')
     const list = await runPrivate(pgBinary(env, 'pg_restore'), ['--list', archive], { env })
     const listFile = path.join(directory, 'local-clone.list')
     writeFileSync(listFile, list.split(/\r?\n/).filter(line => !/\sSCHEMA - (public|extensions) /.test(line)).join('\n'), { mode: 0o600 })
@@ -77,7 +104,7 @@ async function main() {
     directory = mkdtempSync(path.join(tmpdir(), 'mozzi-ci-concurrency-'))
     target = `mozzi_ci_${randomBytes(8).toString('hex')}`
     stage = 'isolated schema clone'
-    const env = await cloneLocalDatabase(source, target, directory)
+    const env = await cloneLocalDatabase(source, target, directory, step => { stage = step })
     created = true
     const config = path.join(directory, 'database.env')
     writeFileSync(config, Object.entries(env).filter(([name]) => /^PG/.test(name)).map(([name, value]) => `${name}=${value}`).join('\n'), { mode: 0o600 })

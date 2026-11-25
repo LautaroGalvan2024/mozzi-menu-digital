@@ -77,7 +77,7 @@ try {
   holder.child.stdin.end('commit;\n')
   assert.equal(await holder.done, 0, holder.stderr)
   assert.equal(await waiter.done, 3, waiter.stderr)
-  assert.match(waiter.stderr, /40001: +STORE_OFFER_ORDER_STALE/)
+  assert.match(waiter.stderr, /PT409: +STORE_OFFER_ORDER_STALE/)
 
   const visible = JSON.parse(query(`select public.get_public_store_catalog_page('${slug}','offers')->'items';`))
   assert.deepEqual(visible.map(item => item.id), winner)
